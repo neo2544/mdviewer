@@ -221,7 +221,14 @@ cat > "$LAUNCH_AGENT_PLIST" <<PLIST
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>ProcessType</key>
     <string>Interactive</string>
     <key>StandardOutPath</key>
@@ -237,11 +244,33 @@ PLIST
 UID_NUM=$(id -u)
 GUI_DOMAIN="gui/${UID_NUM}"
 
-echo ">> reloading launchd agent…"
+echo ">> stopping any running mdviewer instances…"
+# bootout asks launchd nicely; some old "zombie" instances are not under
+# launchd's control anymore (because a previous install raced) and need
+# pkill to actually die. We must do this before bootstrap, otherwise the
+# new instance will crash-loop trying to bind a port the zombie still
+# holds.
 launchctl bootout "${GUI_DOMAIN}" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
+pkill -TERM -f "Applications/MdViewer.app/Contents/MacOS/MdViewer" 2>/dev/null || true
+sleep 1
+pkill -KILL -f "Applications/MdViewer.app/Contents/MacOS/MdViewer" 2>/dev/null || true
+
+echo ">> waiting for port ${PORT} to be free…"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if ! lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "   WARNING: port ${PORT} still held by:"
+    lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN
+fi
+
+echo ">> bootstrapping launchd agent…"
 launchctl bootstrap "${GUI_DOMAIN}" "$LAUNCH_AGENT_PLIST"
 launchctl enable "${GUI_DOMAIN}/${APP_BUNDLE_ID}" >/dev/null 2>&1 || true
-launchctl kickstart -k "${GUI_DOMAIN}/${APP_BUNDLE_ID}" >/dev/null 2>&1 || true
+launchctl kickstart "${GUI_DOMAIN}/${APP_BUNDLE_ID}" >/dev/null 2>&1 || true
 
 echo
 echo "✅ MdViewer installed."

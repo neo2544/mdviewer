@@ -4,12 +4,15 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"fyne.io/systray"
@@ -39,19 +42,34 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 		startDir: startDir,
 		appRoot:  appRoot,
 	}
-	httpSrv := &http.Server{
-		Addr:    addr,
-		Handler: server.routes(),
-	}
 
-	// Run the HTTP server in the background. If it fails to bind (port
-	// already in use, for example) log and exit so launchd can react.
+	// Pre-bind the listener synchronously so we fail FAST on port
+	// conflicts (typically "another mdviewer is already running").
+	// Falling through with a deferred error would leave the menu-bar
+	// icon flashing on screen and produce a crash loop under launchd's
+	// KeepAlive — exit immediately instead.
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("cannot bind %s: %w (another mdviewer instance is probably running)", addr, err)
+	}
+	httpSrv := &http.Server{Handler: server.routes()}
+
+	// Run the HTTP server in the background once we own the port.
 	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpSrv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "mdviewer web server error:", err)
-			// Give the user-visible icon time to remove itself before bailing.
-			time.AfterFunc(500*time.Millisecond, func() { systray.Quit() })
+			systray.Quit()
 		}
+	}()
+
+	// Translate POSIX signals (launchd's bootout, Ctrl+C, etc.) into a
+	// clean systray shutdown so the menu-bar icon disappears and the
+	// HTTP server is gracefully drained before the process exits.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	go func() {
+		<-sigCh
+		systray.Quit()
 	}()
 
 	// Register the Apple-Event handler that turns "Open Document" events
