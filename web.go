@@ -2011,33 +2011,137 @@ const webAppHTML = `<!doctype html>
       return null;
     }
 
+    // Returns the union of every painted leaf element's bbox, transformed
+    // into SVG user space via getCTM(). Reliable without layout — but
+    // does NOT include markers (arrowheads) or stroke width, since those
+    // are excluded from getBBox().
+    function leafUnionBBox(svg) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let found = false;
+      const selector = "path, rect, circle, ellipse, line, polyline, polygon, text, foreignObject, image, use";
+      const nodes = svg.querySelectorAll(selector);
+      for (const el of nodes) {
+        if (el.closest("defs, marker, clipPath, mask, pattern, symbol")) continue;
+        let cs;
+        try { cs = window.getComputedStyle(el); } catch (e) { continue; }
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        if (parseFloat(cs.opacity || "1") <= 0) continue;
+        if (typeof el.getBBox !== "function") continue;
+        let bb;
+        try { bb = el.getBBox(); } catch (e) { continue; }
+        if (!bb || (bb.width <= 0 && bb.height <= 0)) continue;
+        // Inflate by half the stroke width so the bbox includes the
+        // stroke ring rather than just the geometric path.
+        const sw = parseFloat(cs.strokeWidth || "0") || 0;
+        const half = sw / 2;
+        const bx = bb.x - half, by = bb.y - half;
+        const bw = bb.width + sw, bh = bb.height + sw;
+        let ctm = null;
+        try { ctm = el.getCTM(); } catch (e) {}
+        const corners = [
+          [bx,       by],
+          [bx + bw,  by],
+          [bx,       by + bh],
+          [bx + bw,  by + bh],
+        ];
+        for (let i = 0; i < 4; i++) {
+          let px = corners[i][0];
+          let py = corners[i][1];
+          if (ctm) {
+            const x = ctm.a * px + ctm.c * py + ctm.e;
+            const y = ctm.b * px + ctm.d * py + ctm.f;
+            px = x; py = y;
+          }
+          if (px < minX) minX = px;
+          if (py < minY) minY = py;
+          if (px > maxX) maxX = px;
+          if (py > maxY) maxY = py;
+        }
+        found = true;
+      }
+      if (!found) return null;
+      return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+    }
+
+    // Picks the best crop rectangle for the SVG. The leaf-union bbox is
+    // tight and ignores invisible scaffolding (good for Mermaid) but
+    // excludes arrowhead markers, which can cause the right (or any)
+    // edge of the diagram to be cut off. The root getBBox includes
+    // markers but can include hidden scaffolding too. We blend:
+    //   • If both exist and root is only mildly larger than leaf (≤2.5×
+    //     area), prefer root — markers are included, scaffolding is
+    //     negligible.
+    //   • If root is dramatically larger, scaffolding is inflating it →
+    //     fall back to the leaf union.
+    function computeVisualSvgBBox(svg) {
+      const leaf = leafUnionBBox(svg);
+      let root = null;
+      if (typeof svg.getBBox === "function") {
+        try {
+          const r = svg.getBBox();
+          if (r && r.width > 0 && r.height > 0) root = r;
+        } catch (e) {}
+      }
+      if (!leaf && !root) return null;
+      if (!leaf) return root;
+      if (!root) return leaf;
+      const leafArea = Math.max(1, leaf.width * leaf.height);
+      const rootArea = root.width * root.height;
+      return rootArea > leafArea * 2.5 ? leaf : root;
+    }
+
     function captureLightboxNatural() {
       const child = lightboxStageEl.firstElementChild;
       const target = findScalableTarget(child);
       if (!target) return;
       if (target.kind === "svg") {
         const svg = target.el;
-        let w = parseFloat(svg.getAttribute("width"));
-        let h = parseFloat(svg.getAttribute("height"));
-        if (!w || !h) {
+        let bb = null;
+        // Strategy 1: union of visible leaf-element pixel bboxes
+        //   (most reliable — ignores invisible Mermaid scaffolding).
+        bb = computeVisualSvgBBox(svg);
+        // Strategy 2: fall back to root getBBox().
+        if (!bb && typeof svg.getBBox === "function") {
+          try {
+            const b = svg.getBBox();
+            if (b.width > 0 && b.height > 0) bb = b;
+          } catch (e) {}
+        }
+        // Strategy 3: declared viewBox.
+        if (!bb) {
           const vb = svg.getAttribute("viewBox");
           if (vb) {
             const parts = vb.trim().split(/[\s,]+/);
             if (parts.length === 4) {
-              w = w || parseFloat(parts[2]);
-              h = h || parseFloat(parts[3]);
+              bb = {
+                x: parseFloat(parts[0]) || 0,
+                y: parseFloat(parts[1]) || 0,
+                width: parseFloat(parts[2]),
+                height: parseFloat(parts[3]),
+              };
             }
           }
         }
-        if ((!w || !h) && typeof svg.getBBox === "function") {
-          try {
-            const bb = svg.getBBox();
-            w = w || bb.width;
-            h = h || bb.height;
-          } catch (e) {}
+        // Strategy 4: declared width/height attributes.
+        if (!bb) {
+          const w = parseFloat(svg.getAttribute("width"));
+          const h = parseFloat(svg.getAttribute("height"));
+          if (w > 0 && h > 0) bb = { x: 0, y: 0, width: w, height: h };
         }
-        if (w > 0) svg.dataset.lbNaturalW = w;
-        if (h > 0) svg.dataset.lbNaturalH = h;
+        if (bb && bb.width > 0 && bb.height > 0) {
+          // Use the larger dimension for the padding so wide diagrams get
+          // enough breathing room on the long axis (where arrowheads /
+          // labels are most likely to overflow).
+          const pad = Math.max(16, Math.max(bb.width, bb.height) * 0.03);
+          const vbX = bb.x - pad;
+          const vbY = bb.y - pad;
+          const vbW = bb.width + pad * 2;
+          const vbH = bb.height + pad * 2;
+          svg.setAttribute("viewBox", vbX + " " + vbY + " " + vbW + " " + vbH);
+          svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+          svg.dataset.lbNaturalW = vbW;
+          svg.dataset.lbNaturalH = vbH;
+        }
       } else if (target.kind === "img") {
         const img = target.el;
         if (img.naturalWidth) img.dataset.lbNaturalW = img.naturalWidth;
@@ -2087,7 +2191,10 @@ const webAppHTML = `<!doctype html>
       }
       const finish = () => {
         const vw = window.innerWidth, vh = window.innerHeight;
-        const fit = Math.min(1.5, Math.min(vw * 0.92 / natW, vh * 0.86 / natH));
+        // SVG is vector — let it scale up freely to fill the viewport.
+        // Raster images cap at 2x to avoid obvious pixelation.
+        const cap = target && target.kind === "svg" ? 12 : 2;
+        const fit = Math.min(cap, Math.min(vw * 0.92 / natW, vh * 0.86 / natH));
         lbState.scale = fit > 0 ? fit : 1;
         lbState.x = (vw - natW * lbState.scale) / 2;
         lbState.y = (vh - natH * lbState.scale) / 2;
@@ -2115,7 +2222,7 @@ const webAppHTML = `<!doctype html>
           finish();
         } else {
           const vw = window.innerWidth, vh = window.innerHeight;
-          const fitVal = Math.min(1.5, Math.min(vw * 0.92 / w, vh * 0.86 / h));
+          const fitVal = Math.min(2, Math.min(vw * 0.92 / w, vh * 0.86 / h));
           lbState.scale = fitVal > 0 ? fitVal : 1;
           lbState.x = (vw - w * lbState.scale) / 2;
           lbState.y = (vh - h * lbState.scale) / 2;
@@ -2131,15 +2238,23 @@ const webAppHTML = `<!doctype html>
       lightboxStageEl.appendChild(node);
       lightboxEl.hidden = false;
       document.body.classList.add("lightbox-open");
-      // Strip Mermaid's max-width / inline style caps so the SVG can grow.
+      // Strip Mermaid's max-width / inline sizing so the SVG can lay out
+      // at its intrinsic size; we'll set our own dimensions in
+      // captureLightboxNatural / applyLightboxScale.
       const target = findScalableTarget(node);
       if (target && target.kind === "svg") {
-        target.el.style.maxWidth = "none";
-        target.el.style.maxHeight = "none";
+        const svg = target.el;
+        svg.style.maxWidth = "none";
+        svg.style.maxHeight = "none";
+        svg.style.width = "";
+        svg.style.height = "";
       }
-      // Capture natural sizes before computing the fit.
-      captureLightboxNatural();
-      fitLightboxContent();
+      // Defer measurement one frame so getBoundingClientRect on inner
+      // shapes returns real values (the SVG was just inserted).
+      requestAnimationFrame(() => {
+        captureLightboxNatural();
+        fitLightboxContent();
+      });
     }
 
     function closeLightbox() {
@@ -2187,14 +2302,12 @@ const webAppHTML = `<!doctype html>
     });
 
     lightboxEl.addEventListener("pointerup", (event) => {
-      const wasDragging = lbState.dragging;
       lbState.dragging = false;
       lightboxEl.classList.remove("dragging");
       try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
-      // If a click landed on the backdrop without a drag, close the lightbox.
-      if (wasDragging && !lbState.didDrag && event.target === lightboxEl) {
-        closeLightbox();
-      }
+      // Only close via the ✕ button or the Esc key — clicking the
+      // backdrop is reserved for pan/zoom interactions so the user
+      // doesn't accidentally close the view mid-inspection.
     });
 
     lightboxStageEl.addEventListener("dblclick", (event) => {
