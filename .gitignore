@@ -1,0 +1,49 @@
+# --- Go build artifacts ---
+# Binaries built in repo root
+/mdviewer
+mdviewer.exe
+
+# Generic Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries / coverage
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+
+# Dependency / build dirs
+/bin/
+/build/
+/dist/
+vendor/
+
+# --- mdviewer runtime data ---
+.mdviewer_favorites.json
+.mdviewer_history.json
+.mdviewer_state.json
+
+# --- OS junk ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# --- Logs / temp ---
+*.log
+*.tmp
+*.bak
