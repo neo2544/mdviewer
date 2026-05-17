@@ -8,6 +8,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -560,6 +561,61 @@ func renderMermaidWithTools(source string, width int) (string, bool) {
 	}
 
 	return renderImageWithTools(outputPath, width)
+}
+
+// resolveAppRoot returns a writable directory for storing app data
+// (currently just the favorites file). It prefers the OS user-config
+// directory (e.g. ~/Library/Application Support/mdviewer on macOS),
+// falls back to the home directory, and finally to the cwd. If a
+// legacy favorites file exists next to the binary (the old default
+// location), it is migrated into the new location on first run.
+func resolveAppRoot() string {
+	dir := preferredAppRoot()
+	migrateLegacyFavorites(dir)
+	return dir
+}
+
+func preferredAppRoot() string {
+	if base, err := os.UserConfigDir(); err == nil && base != "" {
+		dir := filepath.Join(base, "mdviewer")
+		if err := os.MkdirAll(dir, 0o755); err == nil {
+			return dir
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		return wd
+	}
+	return "."
+}
+
+// migrateLegacyFavorites moves a favorites file from the old default
+// location (the process cwd at startup) into the new app-root, but only
+// if the new location doesn't already have one. Safe to call multiple
+// times; missing files are ignored.
+func migrateLegacyFavorites(newRoot string) {
+	wd, err := os.Getwd()
+	if err != nil || wd == "" || wd == newRoot {
+		return
+	}
+	legacy := filepath.Join(wd, favoritesFileName)
+	target := filepath.Join(newRoot, favoritesFileName)
+	if _, err := os.Stat(legacy); err != nil {
+		return
+	}
+	if _, err := os.Stat(target); err == nil {
+		return // don't clobber an existing file in the new location
+	}
+	data, err := os.ReadFile(legacy)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		return
+	}
+	_ = os.Remove(legacy)
 }
 
 func (m model) favoritesPath() string {
@@ -1325,12 +1381,36 @@ func min(a, b int) int {
 // main
 // ────────────────────────────────────────────────────────────────
 
-func main() {
-	appRoot, err := os.Getwd()
+// launchedFromAppBundle returns true when the running binary lives
+// inside a macOS .app bundle (i.e. .../<App>.app/Contents/MacOS/…). It
+// is used to switch the default run-mode to menubar when Finder/Launch
+// Services launches us with no flags.
+func launchedFromAppBundle() bool {
+	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return false
 	}
+	return strings.Contains(exe, ".app/Contents/MacOS/")
+}
+
+// existingServerReachable does a 200 ms TCP probe to addr and returns
+// true if something is already listening there.
+func existingServerReachable(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func main() {
+	// appRoot is where we persist app data (favorites). We need a writable
+	// location that survives launch context — when mdviewer is started as a
+	// menu-bar .app bundle, os.Getwd() can be "/" which is read-only on
+	// macOS (SIP). Prefer the OS user-config directory and migrate any
+	// legacy favorites file that may exist next to the binary.
+	appRoot := resolveAppRoot()
 
 	// Three run modes:
 	//   default      → TUI
@@ -1390,6 +1470,28 @@ func main() {
 	addr := ""
 	if port != "" {
 		addr = "127.0.0.1:" + port
+	}
+
+	// If launched without any explicit mode flag AND we were started
+	// from inside a .app bundle (so there is no TTY), default to menubar
+	// mode. This is what happens when Finder/Launch Services launches us
+	// for "Open With → MD Viewer": without this fallback the binary would
+	// try to start the TUI, fail to open /dev/tty, and macOS would show
+	// "MD Viewer cannot open files in the 'Markdown Document' format".
+	if !webMode && !menubarMode && launchedFromAppBundle() {
+		menubarMode = true
+		// If another instance (typically the launchd-managed one) already
+		// owns the menu-bar port, don't try to take it over; just open the
+		// browser at its URL and exit cleanly. The Apple-Event handler on
+		// the running instance will navigate the page to the right file.
+		probeAddr := addr
+		if probeAddr == "" {
+			probeAddr = "127.0.0.1:8421"
+		}
+		if existingServerReachable(probeAddr) {
+			_ = openInBrowser("http://" + probeAddr + "/")
+			return
+		}
 	}
 
 	if menubarMode {

@@ -94,9 +94,9 @@ cat > "$TMP_APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>0.2.0</string>
+    <string>0.3.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>0.3.0</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
@@ -117,14 +117,36 @@ cat > "$TMP_APP/Contents/Info.plist" <<PLIST
             <key>LSItemContentTypes</key>
             <array>
                 <string>net.daringfireball.markdown</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.daringfireball.markdown</string>
+            <key>UTTypeDescription</key>
+            <string>Markdown Document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
                 <string>public.plain-text</string>
             </array>
-            <key>CFBundleTypeExtensions</key>
-            <array>
-                <string>md</string>
-                <string>markdown</string>
-                <string>mdx</string>
-            </array>
+            <key>UTTypeIconFile</key>
+            <string>AppIcon</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>md</string>
+                    <string>markdown</string>
+                    <string>mdx</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>text/markdown</string>
+                    <string>text/x-markdown</string>
+                </array>
+            </dict>
         </dict>
     </array>
 </dict>
@@ -137,10 +159,44 @@ if [[ -d "$APP_PATH" ]]; then
 fi
 mv "$TMP_APP" "$APP_PATH"
 
-# Tell Launch Services about the new bundle so the .md association picks
-# up immediately (otherwise it'd wait for the next login).
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-    -f "$APP_PATH" >/dev/null 2>&1 || true
+# Strip any quarantine xattrs (otherwise macOS marks the bundle as
+# "launch-disabled" in Launch Services and it disappears from Open With).
+xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+
+# Ad-hoc codesign the bundle (the linker only produces a partial signature
+# for the binary). Without a full bundle signature, Launch Services still
+# refuses to surface the app in "Open With".
+echo ">> ad-hoc codesigning…"
+codesign --force --deep --sign - "$APP_PATH" >/dev/null 2>&1 || \
+    echo "   (codesign failed — Open With visibility may be limited)"
+
+# Tell Launch Services about the new bundle. -f forces re-registration
+# (so a version bump in Info.plist is picked up) and -R walks the bundle.
+# We do NOT nuke the LS database (no -kill / -domain user) so other apps'
+# associations stay intact.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSREGISTER" -f -R "$APP_PATH" >/dev/null 2>&1 || true
+
+# Verify Launch Services now sees our UTI mapping for .md files. We use
+# the repo README as a probe (it should exist for anyone running this).
+README_PATH="$REPO_ROOT/README.md"
+if [[ -f "$README_PATH" ]]; then
+    # Force Spotlight to re-read so it picks up the new UTI declaration.
+    mdimport "$README_PATH" >/dev/null 2>&1 || true
+    sleep 1
+    md_uti="$(mdls -name kMDItemContentType -raw "$README_PATH" 2>/dev/null || echo '')"
+    if [[ "$md_uti" == "net.daringfireball.markdown" ]]; then
+        echo ">> .md UTI registered: $md_uti  ✓"
+    else
+        echo ">> .md UTI is still '$md_uti' — Launch Services DB may be cached."
+        echo "   If 'Open With → MD Viewer' is missing, run this once, then re-install:"
+        echo "     $LSREGISTER -kill -r -domain local -domain user"
+    fi
+fi
+
+# Finder caches the Open-With submenu per session; restart it so the new
+# binding shows up without a logout. Cheap and reversible.
+killall Finder >/dev/null 2>&1 || true
 
 # ---- write LaunchAgent --------------------------------------------------
 
