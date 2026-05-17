@@ -72,12 +72,15 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 		systray.Quit()
 	}()
 
-	// Register the Apple-Event handler that turns "Open Document" events
-	// (double-click in Finder, drag-onto-icon, `open -a MdViewer foo.md`)
-	// into messages on openFileChan. No-op on non-darwin builds.
-	registerOpenHandler()
-
 	onReady := func() {
+		// Register the Apple-Event handler INSIDE onReady, after systray
+		// has spun up NSApplication. Doing it earlier loses the
+		// registration because AppKit's default kAEOpenDocuments handler
+		// is installed during [NSApplication finishLaunching] and would
+		// overwrite ours, sending Open With events to NSDocument's
+		// "document opening session" machinery — which our app doesn't
+		// implement, producing the silent "session already exists" log.
+		registerOpenHandler()
 		// Template icons render correctly in both light and dark menu bars
 		// (macOS inverts the alpha for us).
 		systray.SetTemplateIcon(menubarIconPNG, menubarIconPNG)
@@ -145,6 +148,9 @@ func openFileInViewer(serverURL, path string) {
 		abs = path
 	}
 	target := serverURL + "/?path=" + url.QueryEscape(abs)
+	// Log so the launchd .out log shows whether Apple Events actually
+	// reached us — useful when debugging "Open With" pipeline issues.
+	fmt.Fprintln(os.Stdout, "mdviewer: opening", abs, "→", target)
 	_ = openInBrowser(target)
 }
 
