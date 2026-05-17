@@ -61,6 +61,7 @@ func runWebServer(startDir, appRoot string) error {
 	mux.HandleFunc("/api/file/save", server.handleSaveFile)
 	mux.HandleFunc("/api/raw", server.handleRaw)
 	mux.HandleFunc("/api/favorites/toggle", server.handleToggleFavorite)
+	mux.HandleFunc("/api/resolve", server.handleResolve)
 
 	addr := "127.0.0.1:8421"
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
@@ -330,6 +331,40 @@ func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 		Size:    updatedInfo.Size(),
 		ModTime: updatedInfo.ModTime().Format(time.RFC3339),
 	})
+}
+
+// handleResolve takes a raw user-supplied path (possibly with ~, quotes,
+// or relative segments) and returns the absolute resolved path along with
+// metadata describing whether it exists and whether it's a directory.
+// The browser uses this to decide whether to call loadDir or selectFile.
+func (s *webServer) handleResolve(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("path")
+	base := r.URL.Query().Get("base")
+	if raw == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	if base == "" {
+		base = s.startDir
+	}
+
+	resolved, err := resolveUserPath(raw, base)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp := map[string]any{
+		"path":   resolved,
+		"parent": filepath.Dir(resolved),
+		"exists": false,
+		"is_dir": false,
+	}
+	if info, err := os.Stat(resolved); err == nil {
+		resp["exists"] = true
+		resp["is_dir"] = info.IsDir()
+	}
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *webServer) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
@@ -817,6 +852,9 @@ const webAppHTML = `<!doctype html>
           <div class="searchbox">
             <input class="search-input" id="searchInput" type="search" placeholder="Search files" spellcheck="false" />
           </div>
+          <div class="searchbox path-jump">
+            <input class="search-input" id="pathInput" type="text" placeholder="Jump to path (Enter)…  e.g. ~/notes/foo.md" spellcheck="false" autocomplete="off" />
+          </div>
         </div>
         <button class="action collapse-toggle" id="collapseSidebar" title="Collapse sidebar">‹</button>
       </div>
@@ -898,6 +936,7 @@ const webAppHTML = `<!doctype html>
     const filesEl = document.getElementById("files");
     const favoritesEl = document.getElementById("favorites");
     const searchInputEl = document.getElementById("searchInput");
+    const pathInputEl = document.getElementById("pathInput");
     const sortNameEl = document.getElementById("sortName");
     const sortSizeEl = document.getElementById("sortSize");
     const cwdEl = document.getElementById("cwd");
@@ -1460,6 +1499,35 @@ const webAppHTML = `<!doctype html>
       await loadDir(state.cwd, { keepSelection: true });
     }
 
+    async function jumpToPath(rawPath) {
+      const value = (rawPath || "").trim();
+      if (!value) return;
+      try {
+        const data = await fetchJSON(
+          "/api/resolve?path=" + encodeURIComponent(value) +
+          "&base=" + encodeURIComponent(state.cwd || "")
+        );
+        if (!data || !data.path) {
+          statusTextEl.textContent = "Could not resolve path: " + value;
+          return;
+        }
+        if (!data.exists) {
+          statusTextEl.textContent = "Path not found: " + data.path;
+          return;
+        }
+        if (data.is_dir) {
+          await loadDir(data.path, { historyMode: "push" });
+          statusTextEl.textContent = "Jumped to " + data.path;
+        } else {
+          await selectFile(data.path, { historyMode: "push" });
+        }
+        pathInputEl.value = "";
+        pathInputEl.blur();
+      } catch (err) {
+        statusTextEl.textContent = "Jump failed: " + (err && err.message ? err.message : err);
+      }
+    }
+
     async function toggleFavorite() {
       await fetchJSON("/api/favorites/toggle", {
         method: "POST",
@@ -1636,8 +1704,26 @@ const webAppHTML = `<!doctype html>
       ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })
       : loadDir(state.cwd, { historyMode: "replace" });
     document.getElementById("toggleFavorite").onclick = toggleFavorite;
+    pathInputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        jumpToPath(pathInputEl.value);
+      } else if (event.key === "Escape") {
+        pathInputEl.value = "";
+        pathInputEl.blur();
+      }
+    });
+
     document.addEventListener("keydown", (event) => {
-      const isSaveKey = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
+      const lowerKey = event.key.toLowerCase();
+      // Cmd/Ctrl+L → focus the "Jump to path" input (URL-bar style).
+      if ((event.metaKey || event.ctrlKey) && lowerKey === "l") {
+        event.preventDefault();
+        pathInputEl.focus();
+        pathInputEl.select();
+        return;
+      }
+      const isSaveKey = (event.metaKey || event.ctrlKey) && lowerKey === "s";
       if (!isSaveKey) return;
       if (!state.selectedPath || !canEditKind(state.selectedKind)) return;
       event.preventDefault();

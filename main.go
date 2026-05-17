@@ -151,6 +151,17 @@ type model struct {
 	previewLoading    bool
 	externalUpdate    bool
 	pendingReload     bool
+
+	// path-jump input mode (triggered by `g`): user types an absolute or
+	// relative path; on Enter we navigate to its parent directory and
+	// preview the file (or just open the directory).
+	pathInputActive bool
+	pathInput       string
+
+	// pendingHighlight, if non-empty, tells the next loadDir call to
+	// include that one hidden filename in the listing (so jumpToPath can
+	// reveal dotfiles by absolute path).
+	pendingHighlight string
 }
 
 func newModel(startDir, appRoot string) model {
@@ -182,8 +193,9 @@ func (m *model) loadDir(dir string) {
 
 	var dirs, files []entry
 	for _, e := range entries {
-		// Skip hidden files
-		if strings.HasPrefix(e.Name(), ".") {
+		// Skip hidden files (but allow a single explicitly-requested
+		// dotfile through, so path-jump can reveal it).
+		if strings.HasPrefix(e.Name(), ".") && e.Name() != m.pendingHighlight {
 			continue
 		}
 		fullPath := filepath.Join(dir, e.Name())
@@ -206,6 +218,55 @@ func (m *model) loadDir(dir string) {
 	m.cwd = dir
 	m.cursor = 0
 	m.listOffset = 0
+	// Consume the one-shot highlight hint after the directory has loaded.
+	m.pendingHighlight = ""
+}
+
+// jumpToPath resolves a user-typed path and either opens its directory
+// or opens its parent directory with the cursor placed on the file.
+func (m *model) jumpToPath(target string) tea.Cmd {
+	resolved, err := resolveUserPath(target, m.cwd)
+	if err != nil {
+		m.status = "Path error: " + err.Error()
+		return nil
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil {
+		m.status = "Not found: " + resolved
+		return nil
+	}
+
+	if info.IsDir() {
+		m.loadDir(resolved)
+		m.status = "Jumped to " + resolved
+		return m.requestPreview()
+	}
+
+	parent := filepath.Dir(resolved)
+	name := filepath.Base(resolved)
+	// Ensure hidden target files are visible in the listing.
+	if strings.HasPrefix(name, ".") {
+		m.pendingHighlight = name
+	}
+	m.loadDir(parent)
+
+	// Place the cursor on the target file (directories are suffixed with "/").
+	matched := false
+	for i, e := range m.entries {
+		if e.path == resolved || e.name == name || e.name == name+"/" {
+			m.cursor = i
+			matched = true
+			break
+		}
+	}
+	m.keepCursorVisible()
+	if matched {
+		m.status = "Opened " + resolved
+	} else {
+		m.status = "Loaded folder, file not found in listing: " + resolved
+	}
+	return m.requestPreview()
 }
 
 func renderMarkdown(path string, wrapWidth int) string {
@@ -236,6 +297,52 @@ func renderPlainText(path string) string {
 		return "Error reading file: " + err.Error()
 	}
 	return string(data)
+}
+
+// resolveUserPath turns a user-supplied path (possibly with ~ expansion,
+// quoted, or relative) into an absolute, cleaned filesystem path.
+// baseDir is used to resolve relative paths.
+func resolveUserPath(input, baseDir string) (string, error) {
+	p := strings.TrimSpace(input)
+	if p == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	// Strip wrapping quotes, e.g. when a user pastes "/foo/bar.md"
+	if len(p) >= 2 {
+		if (strings.HasPrefix(p, "\"") && strings.HasSuffix(p, "\"")) ||
+			(strings.HasPrefix(p, "'") && strings.HasSuffix(p, "'")) {
+			p = p[1 : len(p)-1]
+			p = strings.TrimSpace(p)
+		}
+	}
+	// Drop a file:// prefix if present
+	if strings.HasPrefix(p, "file://") {
+		p = strings.TrimPrefix(p, "file://")
+	}
+	// Expand ~ / ~/...
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		if p == "~" {
+			p = home
+		} else {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+	// Resolve relative paths against baseDir
+	if !filepath.IsAbs(p) {
+		if baseDir == "" {
+			baseDir, _ = os.Getwd()
+		}
+		p = filepath.Join(baseDir, p)
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
 }
 
 func humanSize(size int64) string {
@@ -956,9 +1063,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fileWatchCmd()
 
 	case tea.KeyMsg:
+		// While the path-jump input is active, intercept all keys
+		// before the normal navigation handler so typed characters
+		// don't trigger other shortcuts (e.g. q quits, j scrolls).
+		if m.pathInputActive {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				m.pathInputActive = false
+				m.pathInput = ""
+				m.status = "Path input cancelled"
+				return m, nil
+			case "enter":
+				target := strings.TrimSpace(m.pathInput)
+				m.pathInputActive = false
+				m.pathInput = ""
+				if target == "" {
+					m.status = "Empty path"
+					return m, nil
+				}
+				return m, m.jumpToPath(target)
+			case "backspace":
+				if r := []rune(m.pathInput); len(r) > 0 {
+					m.pathInput = string(r[:len(r)-1])
+				}
+				return m, nil
+			case "ctrl+u":
+				m.pathInput = ""
+				return m, nil
+			case "space":
+				m.pathInput += " "
+				return m, nil
+			case "tab":
+				// ignore tab while typing a path
+				return m, nil
+			}
+			// Otherwise treat as text input — append the typed runes.
+			if len(msg.Runes) > 0 {
+				m.pathInput += string(msg.Runes)
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		case "g", ":":
+			m.pathInputActive = true
+			m.pathInput = ""
+			m.status = "Type a path and press Enter (Esc to cancel)"
+			return m, nil
 
 		case "tab":
 			m.focus = m.nextFocus()
@@ -1139,8 +1295,16 @@ func (m model) View() string {
 	// ── Layout ───────────────────────────────────────────────────
 	title := m.topBarView()
 	panes := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, preview)
-	help := m.singleLineBar(helpStyle, "  q quit • ↑↓/jk navigate • Enter open dir • Tab switch pane • f toggle favorite • r refresh • y/n external reload")
-	status := m.singleLineBar(statusStyle, fmt.Sprintf("  %s  |  Preview %d%%", m.status, m.previewScrollPercent()))
+	help := m.singleLineBar(helpStyle, "  q quit • ↑↓/jk navigate • Enter open dir • Tab switch pane • g go to path • f toggle favorite • r refresh • y/n external reload")
+
+	var statusLine string
+	if m.pathInputActive {
+		statusLine = fmt.Sprintf("  Go to: %s_", m.pathInput)
+		statusLine += "    (Enter=go, Esc=cancel, Ctrl+U=clear)"
+	} else {
+		statusLine = fmt.Sprintf("  %s  |  Preview %d%%", m.status, m.previewScrollPercent())
+	}
+	status := m.singleLineBar(statusStyle, statusLine)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		title,
