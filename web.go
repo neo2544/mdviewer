@@ -712,6 +712,51 @@ const webAppHTML = `<!doctype html>
       font-size: 13px;
       color: var(--muted);
     }
+    .path-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: min(60%, 720px);
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 60%, transparent);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+      min-width: 0;
+    }
+    .path-copy:hover {
+      background: color-mix(in oklab, var(--accent) 18%, var(--panel-2));
+      border-color: color-mix(in oklab, var(--accent) 45%, var(--line));
+    }
+    .path-copy:active {
+      transform: scale(0.98);
+    }
+    .path-copy:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .path-copy.copied {
+      background: color-mix(in oklab, var(--accent) 38%, var(--panel-2));
+      border-color: color-mix(in oklab, var(--accent) 70%, var(--line));
+    }
+    .path-copy-icon {
+      font-size: 13px;
+      color: color-mix(in oklab, var(--accent) 60%, var(--text));
+      flex-shrink: 0;
+    }
+    .path-copy-label {
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      direction: rtl;
+      text-align: left;
+    }
     .actions { display: flex; gap: 10px; }
     .actions { flex: 0 0 auto; }
     .chip, .action {
@@ -871,7 +916,8 @@ const webAppHTML = `<!doctype html>
       border-radius: 8px;
       background: white;
     }
-    .lightbox-stage img {
+    .lightbox-stage img,
+    .lightbox-stage svg {
       max-width: none !important;
       max-height: none !important;
       border: 0;
@@ -880,6 +926,9 @@ const webAppHTML = `<!doctype html>
       overflow: visible !important;
       padding: 24px;
       margin: 0;
+    }
+    .lightbox-stage .mermaid > svg {
+      display: block;
     }
     .lightbox-toolbar {
       position: fixed;
@@ -998,6 +1047,10 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="preview-foot">
         <span id="statusText">Ready</span>
+        <button type="button" id="copyPathBtn" class="path-copy" data-path="" disabled>
+          <span class="path-copy-icon" aria-hidden="true">⧉</span>
+          <span class="path-copy-label">No file selected</span>
+        </button>
         <span id="scrollText">Preview 0%</span>
       </div>
     </main>
@@ -1060,6 +1113,9 @@ const webAppHTML = `<!doctype html>
     const kindChipEl = document.getElementById("kindChip");
     const statusTextEl = document.getElementById("statusText");
     const scrollTextEl = document.getElementById("scrollText");
+    const copyPathBtnEl = document.getElementById("copyPathBtn");
+    const copyPathLabelEl = copyPathBtnEl.querySelector(".path-copy-label");
+    const copyPathIconEl = copyPathBtnEl.querySelector(".path-copy-icon");
     const previewModeButtonEl = document.getElementById("previewModeButton");
     const editModeButtonEl = document.getElementById("editModeButton");
     const saveButtonEl = document.getElementById("saveButton");
@@ -1394,19 +1450,35 @@ const webAppHTML = `<!doctype html>
       state.cwd = data.cwd;
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
-      state.favorites = data.favorites;
+      state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
       if (options.clearSelection !== false && !options.keepSelection) {
         state.selectedPath = "";
         state.selectedHash = "";
+        updateCopyPathButton("");
       }
       cwdEl.textContent = shortenDisplayPath(state.cwd);
       cwdEl.dataset.path = state.cwd;
       renderFiles(data.entries);
       renderFavorites();
-      statusTextEl.textContent = "Loaded " + data.cwd;
+      updateToggleFavoriteLabel();
+      if (!options.silent) {
+        statusTextEl.textContent = "Loaded " + data.cwd;
+      }
       if (options.historyMode) {
         syncHistory(options.historyMode);
       }
+    }
+
+    function updateToggleFavoriteLabel() {
+      const el = document.getElementById("toggleFavorite");
+      if (!el) return;
+      const list = Array.isArray(state.favorites) ? state.favorites : [];
+      const isFav = !!state.cwd && list.indexOf(state.cwd) !== -1;
+      el.textContent = isFav ? "★ Remove favorite" : "Add to favorites";
+      el.classList.toggle("active", isFav);
+      el.title = isFav
+        ? "Remove " + state.cwd + " from favorites"
+        : "Add " + (state.cwd || "current folder") + " to favorites";
     }
 
     function renderFiles(entries) {
@@ -1487,6 +1559,7 @@ const webAppHTML = `<!doctype html>
         previewBodyEl.scrollTop = 0;
       }
       statusTextEl.textContent = "Showing " + data.name;
+      updateCopyPathButton(data.path || path);
       updateEditorButtons();
       if (options.historyMode) {
         syncHistory(options.historyMode);
@@ -1610,7 +1683,64 @@ const webAppHTML = `<!doctype html>
 
     async function refreshCurrentDir() {
       if (!state.cwd) return;
-      await loadDir(state.cwd, { keepSelection: true });
+      await loadDir(state.cwd, { keepSelection: true, silent: true });
+    }
+
+    function updateCopyPathButton(path) {
+      if (path) {
+        copyPathBtnEl.disabled = false;
+        copyPathBtnEl.dataset.path = path;
+        copyPathBtnEl.title = "Click to copy full path:\n" + path;
+        copyPathLabelEl.textContent = path;
+      } else {
+        copyPathBtnEl.disabled = true;
+        copyPathBtnEl.dataset.path = "";
+        copyPathBtnEl.title = "No file selected";
+        copyPathLabelEl.textContent = "No file selected";
+      }
+      copyPathBtnEl.classList.remove("copied");
+      copyPathIconEl.textContent = "⧉";
+    }
+
+    async function copyTextToClipboard(text) {
+      if (!text) return false;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (e) {
+        // fall through to legacy path
+      }
+      // Legacy fallback for older browsers / non-secure contexts
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      ta.style.pointerEvents = "none";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    }
+
+    async function copyCurrentPath() {
+      const path = copyPathBtnEl.dataset.path;
+      if (!path) return;
+      const ok = await copyTextToClipboard(path);
+      if (ok) {
+        copyPathBtnEl.classList.add("copied");
+        copyPathIconEl.textContent = "✓";
+        statusTextEl.textContent = "Copied path to clipboard";
+        setTimeout(() => {
+          copyPathBtnEl.classList.remove("copied");
+          copyPathIconEl.textContent = "⧉";
+        }, 1200);
+      } else {
+        statusTextEl.textContent = "Could not copy path (clipboard blocked)";
+      }
     }
 
     async function jumpToPath(rawPath) {
@@ -1643,12 +1773,28 @@ const webAppHTML = `<!doctype html>
     }
 
     async function toggleFavorite() {
-      await fetchJSON("/api/favorites/toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dir: state.cwd }),
-      });
-      await loadDir(state.cwd);
+      if (!state.cwd) {
+        statusTextEl.textContent = "No folder loaded";
+        return;
+      }
+      try {
+        const result = await fetchJSON("/api/favorites/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dir: state.cwd }),
+        });
+        // Apply the toggle locally without a full directory reload —
+        // keeps the current selection, scroll position, and editor state.
+        state.favorites = Array.isArray(result && result.favorites) ? result.favorites : [];
+        renderFavorites();
+        updateToggleFavoriteLabel();
+        const wasFavorited = !!(result && result.favorited);
+        statusTextEl.textContent = wasFavorited
+          ? "Added " + state.cwd + " to favorites"
+          : "Removed " + state.cwd + " from favorites";
+      } catch (err) {
+        statusTextEl.textContent = "Favorite toggle failed: " + (err && err.message ? err.message : err);
+      }
     }
 
     async function restoreRoute(route, historyMode = "") {
@@ -1818,6 +1964,7 @@ const webAppHTML = `<!doctype html>
       ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })
       : loadDir(state.cwd, { historyMode: "replace" });
     document.getElementById("toggleFavorite").onclick = toggleFavorite;
+    copyPathBtnEl.addEventListener("click", () => { copyCurrentPath(); });
     pathInputEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1855,31 +2002,127 @@ const webAppHTML = `<!doctype html>
 
     function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+    function findScalableTarget(child) {
+      if (!child) return null;
+      if (child.tagName === "svg") return { el: child, kind: "svg" };
+      const svg = child.querySelector("svg");
+      if (svg) return { el: svg, kind: "svg" };
+      if (child.tagName === "IMG") return { el: child, kind: "img" };
+      return null;
+    }
+
+    function captureLightboxNatural() {
+      const child = lightboxStageEl.firstElementChild;
+      const target = findScalableTarget(child);
+      if (!target) return;
+      if (target.kind === "svg") {
+        const svg = target.el;
+        let w = parseFloat(svg.getAttribute("width"));
+        let h = parseFloat(svg.getAttribute("height"));
+        if (!w || !h) {
+          const vb = svg.getAttribute("viewBox");
+          if (vb) {
+            const parts = vb.trim().split(/[\s,]+/);
+            if (parts.length === 4) {
+              w = w || parseFloat(parts[2]);
+              h = h || parseFloat(parts[3]);
+            }
+          }
+        }
+        if ((!w || !h) && typeof svg.getBBox === "function") {
+          try {
+            const bb = svg.getBBox();
+            w = w || bb.width;
+            h = h || bb.height;
+          } catch (e) {}
+        }
+        if (w > 0) svg.dataset.lbNaturalW = w;
+        if (h > 0) svg.dataset.lbNaturalH = h;
+      } else if (target.kind === "img") {
+        const img = target.el;
+        if (img.naturalWidth) img.dataset.lbNaturalW = img.naturalWidth;
+        if (img.naturalHeight) img.dataset.lbNaturalH = img.naturalHeight;
+      }
+    }
+
+    function applyLightboxScale() {
+      const child = lightboxStageEl.firstElementChild;
+      const target = findScalableTarget(child);
+      if (!target) return;
+      const el = target.el;
+      const natW = parseFloat(el.dataset.lbNaturalW) || 0;
+      const natH = parseFloat(el.dataset.lbNaturalH) || 0;
+      if (natW <= 0 || natH <= 0) return;
+      const w = natW * lbState.scale;
+      const h = natH * lbState.scale;
+      if (target.kind === "svg") {
+        // Resize the SVG itself so it re-rasterizes at the new size (crisp at any zoom).
+        el.setAttribute("width", w);
+        el.setAttribute("height", h);
+        el.style.width = w + "px";
+        el.style.height = h + "px";
+      } else {
+        el.style.width = w + "px";
+        el.style.height = h + "px";
+      }
+    }
+
     function applyLightboxTransform() {
-      lightboxStageEl.style.transform = "translate(" + lbState.x + "px, " + lbState.y + "px) scale(" + lbState.scale + ")";
+      // Pan via CSS translate, scale via element resize (so SVG re-renders crisply).
+      lightboxStageEl.style.transform = "translate(" + lbState.x + "px, " + lbState.y + "px)";
+      applyLightboxScale();
       lightboxScaleEl.textContent = Math.round(lbState.scale * 100) + "%";
     }
 
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
-      // Reset to scale 1 first so we can measure natural size.
+      // Make sure we know the natural dimensions before sizing.
+      captureLightboxNatural();
+      const target = findScalableTarget(child);
+      let natW = 0, natH = 0;
+      if (target) {
+        natW = parseFloat(target.el.dataset.lbNaturalW) || 0;
+        natH = parseFloat(target.el.dataset.lbNaturalH) || 0;
+      }
+      const finish = () => {
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const fit = Math.min(1.5, Math.min(vw * 0.92 / natW, vh * 0.86 / natH));
+        lbState.scale = fit > 0 ? fit : 1;
+        lbState.x = (vw - natW * lbState.scale) / 2;
+        lbState.y = (vh - natH * lbState.scale) / 2;
+        applyLightboxTransform();
+      };
+      if (natW > 0 && natH > 0) {
+        finish();
+        return;
+      }
+      // Fall back to bounding-rect measurement when natural size isn't reported yet.
       lbState.scale = 1; lbState.x = 0; lbState.y = 0;
       applyLightboxTransform();
       requestAnimationFrame(() => {
         const w = child.offsetWidth || child.getBoundingClientRect().width;
         const h = child.offsetHeight || child.getBoundingClientRect().height;
         if (!w || !h) {
-          // Retry once images/SVG settle.
           requestAnimationFrame(fitLightboxContent);
           return;
         }
-        const vw = window.innerWidth, vh = window.innerHeight;
-        const fit = Math.min(1.5, Math.min(vw * 0.92 / w, vh * 0.86 / h));
-        lbState.scale = fit > 0 ? fit : 1;
-        lbState.x = (vw - w * lbState.scale) / 2;
-        lbState.y = (vh - h * lbState.scale) / 2;
-        applyLightboxTransform();
+        // Treat the measured size as natural so subsequent zooms scale from here.
+        if (target && target.el) {
+          target.el.dataset.lbNaturalW = w;
+          target.el.dataset.lbNaturalH = h;
+          natW = w; natH = h;
+          finish();
+        } else {
+          const vw = window.innerWidth, vh = window.innerHeight;
+          const fitVal = Math.min(1.5, Math.min(vw * 0.92 / w, vh * 0.86 / h));
+          lbState.scale = fitVal > 0 ? fitVal : 1;
+          lbState.x = (vw - w * lbState.scale) / 2;
+          lbState.y = (vh - h * lbState.scale) / 2;
+          // No scalable target → fall back to CSS transform scale on the stage.
+          lightboxStageEl.style.transform = "translate(" + lbState.x + "px, " + lbState.y + "px) scale(" + lbState.scale + ")";
+          lightboxScaleEl.textContent = Math.round(lbState.scale * 100) + "%";
+        }
       });
     }
 
@@ -1888,6 +2131,14 @@ const webAppHTML = `<!doctype html>
       lightboxStageEl.appendChild(node);
       lightboxEl.hidden = false;
       document.body.classList.add("lightbox-open");
+      // Strip Mermaid's max-width / inline style caps so the SVG can grow.
+      const target = findScalableTarget(node);
+      if (target && target.kind === "svg") {
+        target.el.style.maxWidth = "none";
+        target.el.style.maxHeight = "none";
+      }
+      // Capture natural sizes before computing the fit.
+      captureLightboxNatural();
       fitLightboxContent();
     }
 
