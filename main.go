@@ -1332,24 +1332,76 @@ func main() {
 		os.Exit(1)
 	}
 
-	webMode := false
-	startDir := "."
+	// Three run modes:
+	//   default      → TUI
+	//   --web        → HTTP server only (foreground)
+	//   --menubar    → macOS menu bar app (also runs the web server)
+	// --port and --root configure the web/menubar modes; the first
+	// positional arg is also accepted as the root dir for back-compat.
+	var (
+		webMode     bool
+		menubarMode bool
+		port        string
+		rootDir     string
+	)
+
 	args := os.Args[1:]
-	if len(args) > 0 && args[0] == "--web" {
-		webMode = true
-		args = args[1:]
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--web" || a == "-web":
+			webMode = true
+		case a == "--menubar" || a == "-menubar":
+			menubarMode = true
+		case a == "--port" || a == "-port":
+			if i+1 < len(args) {
+				port = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--port="):
+			port = strings.TrimPrefix(a, "--port=")
+		case a == "--root" || a == "-root":
+			if i+1 < len(args) {
+				rootDir = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--root="):
+			rootDir = strings.TrimPrefix(a, "--root=")
+		default:
+			positional = append(positional, a)
+		}
 	}
-	if len(args) > 0 {
-		startDir = args[0]
+
+	startDir := "."
+	switch {
+	case rootDir != "":
+		startDir = rootDir
+	case len(positional) > 0:
+		startDir = positional[0]
 	}
+
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
+	addr := ""
+	if port != "" {
+		addr = "127.0.0.1:" + port
+	}
+
+	if menubarMode {
+		if err := runMenuBarApp(abs, appRoot, addr); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if webMode {
-		if err := runWebServer(abs, appRoot); err != nil {
+		if err := runWebServer(abs, appRoot, addr); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

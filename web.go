@@ -48,24 +48,31 @@ type saveFileRequest struct {
 	Force       bool   `json:"force"`
 }
 
-func runWebServer(startDir, appRoot string) error {
+// routes wires up every HTTP endpoint the web viewer exposes. Both the
+// standalone web server and the menu-bar app reuse this so the route set
+// stays in one place.
+func (s *webServer) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/api/list", s.handleList)
+	mux.HandleFunc("/api/file", s.handleFile)
+	mux.HandleFunc("/api/file/save", s.handleSaveFile)
+	mux.HandleFunc("/api/raw", s.handleRaw)
+	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
+	mux.HandleFunc("/api/resolve", s.handleResolve)
+	return mux
+}
+
+func runWebServer(startDir, appRoot, addr string) error {
+	if addr == "" {
+		addr = "127.0.0.1:8421"
+	}
 	server := &webServer{
 		startDir: startDir,
 		appRoot:  appRoot,
 	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", server.handleIndex)
-	mux.HandleFunc("/api/list", server.handleList)
-	mux.HandleFunc("/api/file", server.handleFile)
-	mux.HandleFunc("/api/file/save", server.handleSaveFile)
-	mux.HandleFunc("/api/raw", server.handleRaw)
-	mux.HandleFunc("/api/favorites/toggle", server.handleToggleFavorite)
-	mux.HandleFunc("/api/resolve", server.handleResolve)
-
-	addr := "127.0.0.1:8421"
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, server.routes())
 }
 
 func (s *webServer) favoritesPath() string {
@@ -832,6 +839,102 @@ const webAppHTML = `<!doctype html>
       max-width: min(80vw, 960px);
       white-space: nowrap;
     }
+    .preview-body img,
+    .preview-body .mermaid {
+      cursor: zoom-in;
+    }
+    body.lightbox-open { overflow: hidden; }
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: color-mix(in oklab, black 78%, transparent);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 2000;
+      overflow: hidden;
+      user-select: none;
+      touch-action: none;
+    }
+    .lightbox[hidden] { display: none; }
+    .lightbox-stage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      cursor: grab;
+      will-change: transform;
+    }
+    .lightbox.dragging .lightbox-stage { cursor: grabbing; }
+    .lightbox-stage > * {
+      display: block;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+      border-radius: 8px;
+      background: white;
+    }
+    .lightbox-stage img {
+      max-width: none !important;
+      max-height: none !important;
+      border: 0;
+    }
+    .lightbox-stage .mermaid {
+      overflow: visible !important;
+      padding: 24px;
+      margin: 0;
+    }
+    .lightbox-toolbar {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      display: flex;
+      gap: 8px;
+      z-index: 2001;
+    }
+    .lightbox-toolbar button {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      background: color-mix(in oklab, var(--panel) 92%, black);
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .lightbox-toolbar button:hover {
+      background: color-mix(in oklab, var(--accent) 35%, var(--panel));
+    }
+    .lightbox-scale {
+      position: fixed;
+      top: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2001;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      color: color-mix(in oklab, white 85%, transparent);
+      background: color-mix(in oklab, black 55%, transparent);
+      padding: 6px 12px;
+      border-radius: 999px;
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .lightbox-hint {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2001;
+      font-size: 12px;
+      color: color-mix(in oklab, white 80%, transparent);
+      background: color-mix(in oklab, black 60%, transparent);
+      padding: 8px 14px;
+      border-radius: 999px;
+      pointer-events: none;
+    }
     @media (max-width: 960px) {
       .app { grid-template-columns: 1fr; grid-template-rows: 42vh 1fr; gap: 18px; }
       .splitter { display: none; }
@@ -901,6 +1004,17 @@ const webAppHTML = `<!doctype html>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
+  <div class="lightbox" id="lightbox" hidden>
+    <div class="lightbox-stage" id="lightboxStage"></div>
+    <div class="lightbox-scale" id="lightboxScale">100%</div>
+    <div class="lightbox-toolbar">
+      <button type="button" data-action="zoom-out" title="Zoom out">−</button>
+      <button type="button" data-action="reset" title="Reset (Double-click)">⤢</button>
+      <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+      <button type="button" data-action="close" title="Close (Esc)">✕</button>
+    </div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · Double-click: reset · Esc: close</div>
+  </div>
 
   <script type="module">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -1729,6 +1843,270 @@ const webAppHTML = `<!doctype html>
       event.preventDefault();
       saveCurrentFile();
     });
+
+    // ---------- Inline zoom + Lightbox for images and mermaid diagrams ----------
+    const lightboxEl = document.getElementById("lightbox");
+    const lightboxStageEl = document.getElementById("lightboxStage");
+    const lightboxScaleEl = document.getElementById("lightboxScale");
+    const lightboxToolbarEl = lightboxEl.querySelector(".lightbox-toolbar");
+    const ZOOM_MIN = 0.2;
+    const ZOOM_MAX = 12;
+    const lbState = { scale: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0, dx: 0, dy: 0, didDrag: false };
+
+    function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+    function applyLightboxTransform() {
+      lightboxStageEl.style.transform = "translate(" + lbState.x + "px, " + lbState.y + "px) scale(" + lbState.scale + ")";
+      lightboxScaleEl.textContent = Math.round(lbState.scale * 100) + "%";
+    }
+
+    function fitLightboxContent() {
+      const child = lightboxStageEl.firstElementChild;
+      if (!child) return;
+      // Reset to scale 1 first so we can measure natural size.
+      lbState.scale = 1; lbState.x = 0; lbState.y = 0;
+      applyLightboxTransform();
+      requestAnimationFrame(() => {
+        const w = child.offsetWidth || child.getBoundingClientRect().width;
+        const h = child.offsetHeight || child.getBoundingClientRect().height;
+        if (!w || !h) {
+          // Retry once images/SVG settle.
+          requestAnimationFrame(fitLightboxContent);
+          return;
+        }
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const fit = Math.min(1.5, Math.min(vw * 0.92 / w, vh * 0.86 / h));
+        lbState.scale = fit > 0 ? fit : 1;
+        lbState.x = (vw - w * lbState.scale) / 2;
+        lbState.y = (vh - h * lbState.scale) / 2;
+        applyLightboxTransform();
+      });
+    }
+
+    function openLightbox(node) {
+      lightboxStageEl.innerHTML = "";
+      lightboxStageEl.appendChild(node);
+      lightboxEl.hidden = false;
+      document.body.classList.add("lightbox-open");
+      fitLightboxContent();
+    }
+
+    function closeLightbox() {
+      lightboxEl.hidden = true;
+      lightboxStageEl.innerHTML = "";
+      document.body.classList.remove("lightbox-open");
+    }
+
+    function lightboxZoomAt(clientX, clientY, factor) {
+      const newScale = clamp(lbState.scale * factor, ZOOM_MIN, ZOOM_MAX);
+      const ratio = newScale / lbState.scale;
+      lbState.x = clientX - (clientX - lbState.x) * ratio;
+      lbState.y = clientY - (clientY - lbState.y) * ratio;
+      lbState.scale = newScale;
+      applyLightboxTransform();
+    }
+
+    lightboxEl.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.18 : 1 / 1.18;
+      lightboxZoomAt(event.clientX, event.clientY, factor);
+    }, { passive: false });
+
+    lightboxEl.addEventListener("pointerdown", (event) => {
+      if (event.target.closest(".lightbox-toolbar")) return;
+      // Click on backdrop (outside the stage) closes; tracked via target match in pointerup.
+      lbState.dragging = true;
+      lbState.didDrag = false;
+      lbState.sx = event.clientX;
+      lbState.sy = event.clientY;
+      lbState.dx = lbState.x;
+      lbState.dy = lbState.y;
+      lightboxEl.classList.add("dragging");
+      try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
+    });
+
+    lightboxEl.addEventListener("pointermove", (event) => {
+      if (!lbState.dragging) return;
+      const dx = event.clientX - lbState.sx;
+      const dy = event.clientY - lbState.sy;
+      if (!lbState.didDrag && Math.hypot(dx, dy) > 3) lbState.didDrag = true;
+      lbState.x = lbState.dx + dx;
+      lbState.y = lbState.dy + dy;
+      applyLightboxTransform();
+    });
+
+    lightboxEl.addEventListener("pointerup", (event) => {
+      const wasDragging = lbState.dragging;
+      lbState.dragging = false;
+      lightboxEl.classList.remove("dragging");
+      try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+      // If a click landed on the backdrop without a drag, close the lightbox.
+      if (wasDragging && !lbState.didDrag && event.target === lightboxEl) {
+        closeLightbox();
+      }
+    });
+
+    lightboxStageEl.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      fitLightboxContent();
+    });
+
+    lightboxToolbarEl.addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      if (action === "close") closeLightbox();
+      else if (action === "zoom-in") lightboxZoomAt(cx, cy, 1.25);
+      else if (action === "zoom-out") lightboxZoomAt(cx, cy, 1 / 1.25);
+      else if (action === "reset") fitLightboxContent();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (lightboxEl.hidden) return;
+      if (event.key === "Escape") { event.preventDefault(); closeLightbox(); }
+      else if (event.key === "+" || event.key === "=") { event.preventDefault(); lightboxZoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.25); }
+      else if (event.key === "-" || event.key === "_") { event.preventDefault(); lightboxZoomAt(window.innerWidth / 2, window.innerHeight / 2, 1 / 1.25); }
+      else if (event.key === "0") { event.preventDefault(); fitLightboxContent(); }
+    });
+
+    function buildLightboxClone(source) {
+      if (source.tagName === "IMG") {
+        const clone = source.cloneNode(true);
+        clone.removeAttribute("style");
+        return clone;
+      }
+      if (source.classList.contains("mermaid")) {
+        const wrap = document.createElement("div");
+        wrap.className = "mermaid";
+        wrap.innerHTML = source.innerHTML;
+        return wrap;
+      }
+      return source.cloneNode(true);
+    }
+
+    // ----- Inline zoom on the in-page image / mermaid element -----
+    const inlineState = new WeakMap();
+
+    function getInline(el) {
+      let s = inlineState.get(el);
+      if (!s) {
+        s = { scale: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0, dx: 0, dy: 0, didDrag: false };
+        inlineState.set(el, s);
+      }
+      return s;
+    }
+
+    function applyInlineTransform(el) {
+      const s = getInline(el);
+      el.style.transformOrigin = "0 0";
+      el.style.transform = "translate(" + s.x + "px, " + s.y + "px) scale(" + s.scale + ")";
+      el.classList.toggle("inline-zoomed", s.scale !== 1 || s.x !== 0 || s.y !== 0);
+      el.style.cursor = s.scale > 1 ? "grab" : "zoom-in";
+      el.style.position = s.scale !== 1 || s.x !== 0 || s.y !== 0 ? "relative" : "";
+      el.style.zIndex = s.scale > 1 ? "5" : "";
+    }
+
+    function resetInline(el) {
+      const s = getInline(el);
+      s.scale = 1; s.x = 0; s.y = 0;
+      applyInlineTransform(el);
+    }
+
+    function inlineZoomAt(el, clientX, clientY, factor) {
+      const s = getInline(el);
+      const rect = el.getBoundingClientRect();
+      // Use element parent's coordinate space; transform-origin is the element's top-left (pre-transform).
+      // Compute mouse offset within the element's current visual bounding rect.
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      // The point in untransformed local space:
+      const lx = mx / s.scale;
+      const ly = my / s.scale;
+      const newScale = clamp(s.scale * factor, ZOOM_MIN, ZOOM_MAX);
+      // Keep the point under the cursor stationary while zooming.
+      // After zoom: new_x = old_x - lx * (new_scale - old_scale)
+      s.x = s.x - lx * (newScale - s.scale);
+      s.y = s.y - ly * (newScale - s.scale);
+      s.scale = newScale;
+      applyInlineTransform(el);
+    }
+
+    function attachInlineZoom(el) {
+      if (el.dataset.zoomAttached === "1") return;
+      el.dataset.zoomAttached = "1";
+
+      el.addEventListener("wheel", (event) => {
+        const s = getInline(el);
+        const modifier = event.ctrlKey || event.metaKey;
+        // Allow page scroll when not zoomed and no modifier held.
+        if (!modifier && s.scale === 1) return;
+        event.preventDefault();
+        const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+        inlineZoomAt(el, event.clientX, event.clientY, factor);
+      }, { passive: false });
+
+      el.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        const s = getInline(el);
+        s.dragging = true;
+        s.didDrag = false;
+        s.sx = event.clientX; s.sy = event.clientY;
+        s.dx = s.x; s.dy = s.y;
+        if (s.scale > 1) {
+          try { el.setPointerCapture(event.pointerId); } catch (e) {}
+          el.style.cursor = "grabbing";
+        }
+      });
+
+      el.addEventListener("pointermove", (event) => {
+        const s = getInline(el);
+        if (!s.dragging) return;
+        const dx = event.clientX - s.sx;
+        const dy = event.clientY - s.sy;
+        if (!s.didDrag && Math.hypot(dx, dy) > 3) s.didDrag = true;
+        if (s.scale > 1) {
+          s.x = s.dx + dx;
+          s.y = s.dy + dy;
+          applyInlineTransform(el);
+        }
+      });
+
+      el.addEventListener("pointerup", (event) => {
+        const s = getInline(el);
+        const wasDrag = s.didDrag && s.scale > 1;
+        s.dragging = false;
+        try { el.releasePointerCapture(event.pointerId); } catch (e) {}
+        applyInlineTransform(el);
+        if (!wasDrag) {
+          // Treat as a click → open lightbox modal.
+          openLightbox(buildLightboxClone(el));
+        }
+      });
+
+      el.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        resetInline(el);
+      });
+
+      // Suppress default click behavior so it doesn't conflict with our pointerup logic.
+      el.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+    }
+
+    function attachZoomToPreview() {
+      const targets = previewBodyEl.querySelectorAll("img, .mermaid");
+      targets.forEach(attachInlineZoom);
+    }
+
+    // Re-attach zoom handlers any time the preview body content changes.
+    const previewObserver = new MutationObserver(() => attachZoomToPreview());
+    previewObserver.observe(previewBodyEl, { childList: true, subtree: true });
+    attachZoomToPreview();
 
     applySidebarLayout();
     updateSortButtons();

@@ -71,4 +71,38 @@ github.com/charmbracelet/bubbletea  — TUI 프레임워크 (Elm architecture)
 github.com/charmbracelet/bubbles    — viewport 컴포넌트
 github.com/charmbracelet/lipgloss   — 스타일링
 github.com/charmbracelet/glamour    — Markdown 렌더링
+fyne.io/systray                     — macOS 메뉴바 아이콘 (menubar 모드)
 ```
+
+## 실행 모드
+
+| 모드 | 명령 | 설명 |
+|---|---|---|
+| TUI | `mdviewer [path]` | 터미널 안에서 직접 탐색 |
+| Web | `mdviewer --web [--port 8421] [--root <dir>]` | 로컬 웹 서버, 브라우저에서 사용 |
+| Menubar | `mdviewer --menubar [--port 8421] [--root <dir>]` | macOS 메뉴바 아이콘 + 웹 서버 |
+
+`g` 또는 `:` 키 → 경로 점프 모드 (TUI). 절대/상대/`~` 경로 입력 후 Enter → 해당 디렉토리로 이동하고 파일이면 선택까지. 웹 모드에서는 사이드바의 "Jump to path" 입력 또는 `Cmd/Ctrl+L`.
+
+## macOS 백그라운드 설치 (메뉴바 + 자동 시작 + .md 연동)
+
+```bash
+scripts/install.sh                                     # 기본: 이 폴더를 루트로
+scripts/install.sh --root ~/Documents --port 8421      # 다른 폴더/포트로
+scripts/uninstall.sh                                   # 제거
+```
+
+`install.sh`가 하는 일:
+
+1. `mdviewer` 바이너리 빌드 (CGO 필요 — Xcode CLT가 있으면 OK)
+2. `~/Applications/MdViewer.app` 번들 생성 — `LSUIElement=true` 라 Dock에는 안 뜸, 메뉴바에만 표시
+3. `CFBundleDocumentTypes`로 `.md / .markdown / .mdx` 파일 핸들러 등록 (`lsregister`로 즉시 반영)
+4. `~/Library/LaunchAgents/com.jk.mdviewer.plist` LaunchAgent 작성 — 로그인 시 자동 시작 + 죽으면 재시작
+5. `launchctl bootstrap` 으로 즉시 로드
+
+설치 후:
+
+- **메뉴바 아이콘** 클릭 → Open in Browser / Reveal Root Folder / Copy URL / Quit
+- **`.md` 파일 우클릭 → 다음으로 열기 → MD Viewer** → 브라우저에서 해당 파일이 바로 열림 (Apple Event `kAEOpenDocuments` 핸들러로 처리)
+- **`http://127.0.0.1:8421/`** 가 항상 활성 — 즐겨찾기로 두면 편함
+- 로그: `~/Library/Logs/MdViewer/mdviewer.{out,err}.log`
