@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -24,6 +25,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
+
+// Usage guides embedded into the binary so they are always available
+// regardless of where mdviewer is run from.
+//
+//go:embed USAGE_WEB.md
+var usageWebMD string
+
+//go:embed USAGE_CMD.md
+var usageCmdMD string
 
 // ────────────────────────────────────────────────────────────────
 // Styles
@@ -285,6 +295,24 @@ func renderMarkdown(path string, wrapWidth int) string {
 		return content
 	}
 
+	out, err := r.Render(content)
+	if err != nil {
+		return content
+	}
+	return out
+}
+
+// renderMarkdownString renders an in-memory markdown string with glamour
+// (used for the embedded USAGE_CMD.md welcome screen).
+func renderMarkdownString(md string, wrapWidth int) string {
+	content := preprocessMarkdown(md, wrapWidth)
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(wrapWidth),
+	)
+	if err != nil {
+		return content
+	}
 	out, err := r.Render(content)
 	if err != nil {
 		return content
@@ -882,7 +910,10 @@ func (m *model) requestPreview() tea.Cmd {
 		m.currentFileMeta = fileMeta{}
 		m.externalUpdate = false
 		m.pendingReload = false
-		m.setPreview("  No files in this directory.", "Empty directory")
+		// No file selected — show the embedded usage guide as a welcome
+		// screen so first-time users (and anyone landing in an empty dir)
+		// get a quick reminder of the keybindings.
+		m.setPreview(renderMarkdownString(usageCmdMD, m.previewWidth()), "Help — press q to quit")
 		return nil
 	}
 
@@ -1165,6 +1196,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		case "?":
+			// Show the embedded usage guide on demand. Pressing any
+			// navigation key (j/k/Enter) restores the normal preview.
+			m.setPreview(renderMarkdownString(usageCmdMD, m.previewWidth()), "Help — press j/k/Enter to resume")
+			return m, nil
 
 		case "g", ":":
 			m.pathInputActive = true

@@ -60,7 +60,16 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/raw", s.handleRaw)
 	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
 	mux.HandleFunc("/api/resolve", s.handleResolve)
+	mux.HandleFunc("/api/usage", s.handleUsage)
 	return mux
+}
+
+// handleUsage returns the embedded USAGE_WEB.md content. The web client
+// renders it in the preview area whenever no file is selected.
+func (s *webServer) handleUsage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(usageWebMD))
 }
 
 func runWebServer(startDir, appRoot, addr string) error {
@@ -595,7 +604,63 @@ const webAppHTML = `<!doctype html>
     .header-button.active[data-direction="desc"]::after {
       content: "↓";
     }
-    .file, .favorite {
+    /* Favorite row: container around the main button + edit button */
+    .favorite-row {
+      position: relative;
+      display: flex;
+      align-items: stretch;
+      width: 100%;
+      border-radius: 12px;
+    }
+    .favorite-row:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); }
+    .favorite-row.active { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); }
+    .favorite-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 8px 12px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      border-radius: 12px;
+    }
+    .favorite-alias {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      font-weight: 500;
+    }
+    .favorite-sub {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .favorite-edit {
+      flex: 0 0 auto;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0 10px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+      font-size: 13px;
+      border-radius: 8px;
+    }
+    .favorite-row:hover .favorite-edit { opacity: 1; }
+    .favorite-edit:hover {
+      background: color-mix(in oklab, var(--panel-2) 80%, transparent);
+      color: var(--text);
+    }
+    .file, .favorite, .recent {
       display: flex;
       align-items: center;
       gap: 12px;
@@ -609,11 +674,38 @@ const webAppHTML = `<!doctype html>
       border-radius: 12px;
       cursor: pointer;
     }
-    .file:hover, .favorite:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); }
-    .file.active, .favorite.active { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); }
-    .file.updated {
-      box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-2) 65%, transparent);
-      background: color-mix(in oklab, var(--accent-2) 12%, var(--panel-2));
+    .file:hover, .favorite:hover, .recent:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); }
+    .file.active, .favorite.active, .recent.active { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); }
+    .recent {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 12px;
+      padding: 8px 12px;
+    }
+    .recent-name {
+      grid-column: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .recent-time {
+      grid-column: 2;
+      grid-row: 1;
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .recent-path {
+      grid-column: 1 / span 2;
+      grid-row: 2;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
     .file-name, .favorite-name {
       flex: 1 1 auto;
@@ -672,6 +764,15 @@ const webAppHTML = `<!doctype html>
       background: oklch(0.74 0.18 330);
       box-shadow: 0 0 0 1px color-mix(in oklab, oklch(0.74 0.18 330) 35%, transparent);
     }
+    /* Aggregate flag on a directory row — child contains a change.
+       Render as a hollow ring so it reads as "something inside" rather than
+       "this thing changed". */
+    .file.flag-aggregate .update-badge {
+      background: transparent;
+      box-shadow: inset 0 0 0 1.5px currentColor;
+      color: color-mix(in oklab, var(--accent) 70%, transparent);
+      opacity: 0.85;
+    }
     .file-match {
       color: oklch(0.72 0.21 22);
       font-weight: 800;
@@ -688,6 +789,11 @@ const webAppHTML = `<!doctype html>
       padding: 0 8px;
     }
     .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-actions {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
     .preview {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr) auto;
@@ -849,6 +955,72 @@ const webAppHTML = `<!doctype html>
       padding: 12px;
       border-radius: 16px;
       background: white;
+      position: relative;
+    }
+    /* Alt/Option held: enter text-selection mode. Pan/drag is suspended in
+       JS, and we make SVG text actually selectable here. */
+    .mermaid.alt-select {
+      cursor: text !important;
+      outline: 2px dashed color-mix(in oklab, var(--accent) 60%, transparent);
+      outline-offset: 4px;
+    }
+    .mermaid.alt-select,
+    .mermaid.alt-select svg,
+    .mermaid.alt-select svg text,
+    .mermaid.alt-select foreignObject,
+    .mermaid.alt-select foreignObject * {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    /* Body-level override — covers the lightbox (which sets user-select:none)
+       and beats most third-party extension stylesheets via !important. */
+    body.alt-select-mode .mermaid,
+    body.alt-select-mode .mermaid *,
+    body.alt-select-mode .lightbox-stage .mermaid,
+    body.alt-select-mode .lightbox-stage .mermaid * {
+      user-select: text !important;
+      -webkit-user-select: text !important;
+      cursor: text !important;
+    }
+    /* Hover toolbar on top of mermaid diagrams. Renders only on hover so it
+       doesn't compete with the diagram visually. */
+    .mermaid-toolbar {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+      pointer-events: none;
+      z-index: 4;
+    }
+    .mermaid-wrap { position: relative; }
+    .mermaid-wrap:hover .mermaid-toolbar,
+    .mermaid-wrap:focus-within .mermaid-toolbar,
+    .mermaid:hover .mermaid-toolbar,
+    .mermaid:focus-within .mermaid-toolbar,
+    .mermaid-toolbar.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .mermaid-tool-btn {
+      border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 92%, transparent);
+      color: var(--text);
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      backdrop-filter: blur(4px);
+    }
+    .mermaid-tool-btn:hover {
+      background: color-mix(in oklab, var(--accent) 18%, var(--panel-2));
+    }
+    .mermaid-tool-btn.copied {
+      background: color-mix(in oklab, oklch(0.7 0.18 150) 30%, var(--panel-2));
+      border-color: color-mix(in oklab, oklch(0.7 0.18 150) 60%, transparent);
     }
     .empty {
       color: var(--muted);
@@ -888,6 +1060,241 @@ const webAppHTML = `<!doctype html>
     .preview-body .mermaid {
       cursor: zoom-in;
     }
+    /* ---- "Show all" popup modal ---- */
+    .popup-modal {
+      position: fixed;
+      inset: 0;
+      background: color-mix(in oklab, black 55%, transparent);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 2400;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 10vh;
+    }
+    .popup-modal[hidden] { display: none; }
+    .popup-card {
+      width: min(720px, 92vw);
+      max-height: 80vh;
+      background: var(--panel-2);
+      border: 1px solid color-mix(in oklab, var(--line) 80%, transparent);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .popup-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 8px;
+    }
+    .popup-title {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 14px;
+      letter-spacing: 0.04em;
+    }
+    .popup-close {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 4px 8px;
+      border-radius: 8px;
+    }
+    .popup-close:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); color: var(--text); }
+    #popupSearch {
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: inherit;
+      font-size: 13px;
+      padding: 8px 16px 12px;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+    }
+    .popup-results {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .popup-foot {
+      font-size: 11px;
+      padding: 8px 16px;
+      border-top: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+    }
+    .popup-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 4px 12px;
+      padding: 10px 16px;
+      cursor: pointer;
+      align-items: center;
+    }
+    .popup-item:hover, .popup-item.active {
+      background: color-mix(in oklab, var(--accent) 14%, var(--panel-2));
+    }
+    .popup-icon { grid-column: 1; font-size: 13px; color: var(--muted); width: 1.5em; text-align: center; }
+    .popup-name {
+      grid-column: 2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      font-weight: 500;
+    }
+    .popup-time {
+      grid-column: 3;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .popup-status {
+      grid-column: 4;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .popup-status.state-updated {
+      background: color-mix(in oklab, oklch(0.74 0.18 330) 25%, transparent);
+      color: oklch(0.78 0.18 330);
+    }
+    .popup-status.state-unchanged {
+      background: color-mix(in oklab, var(--muted) 18%, transparent);
+      color: var(--muted);
+    }
+    .popup-status.state-unknown {
+      background: transparent;
+      color: var(--muted);
+      opacity: 0.6;
+    }
+    .popup-path {
+      grid-column: 2 / span 3;
+      grid-row: 2;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .popup-empty { padding: 24px 16px; text-align: center; color: var(--muted); }
+    .popup-edit {
+      grid-column: 5;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 2px 8px;
+      font-size: 13px;
+      border-radius: 6px;
+    }
+    .popup-edit:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); color: var(--text); }
+
+    /* ---- Command palette (Cmd/Ctrl+K) ---- */
+    .palette {
+      position: fixed;
+      inset: 0;
+      background: color-mix(in oklab, black 55%, transparent);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 2500;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 12vh;
+    }
+    .palette[hidden] { display: none; }
+    .palette-card {
+      width: min(640px, 90vw);
+      background: var(--panel-2);
+      border: 1px solid color-mix(in oklab, var(--line) 80%, transparent);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #paletteInput {
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: inherit;
+      font-size: 15px;
+      padding: 14px 16px;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+    }
+    .palette-hint {
+      font-size: 11px;
+      color: var(--muted);
+      padding: 6px 16px;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+    }
+    .palette-results {
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+    .palette-section {
+      padding: 6px 16px 2px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .palette-empty {
+      padding: 20px 16px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .palette-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 4px 12px;
+      padding: 8px 16px;
+      cursor: pointer;
+      align-items: center;
+    }
+    .palette-item:hover, .palette-item.active {
+      background: color-mix(in oklab, var(--accent) 16%, var(--panel-2));
+    }
+    .palette-kind {
+      grid-column: 1;
+      font-size: 11px;
+      color: var(--muted);
+      width: 1.5em;
+      text-align: center;
+    }
+    .palette-name {
+      grid-column: 2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .palette-time {
+      grid-column: 3;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .palette-path {
+      grid-column: 2 / span 2;
+      grid-row: 2;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .palette-match { color: oklch(0.78 0.16 200); font-weight: 700; }
+
     body.lightbox-open { overflow: hidden; }
     .lightbox {
       position: fixed;
@@ -1019,8 +1426,31 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="section">
         <div class="section-head">
+          <div class="section-title">Recent files</div>
+          <div class="section-actions">
+            <button class="action" id="showAllRecentFiles" title="Show all recent files" hidden>Show all</button>
+            <button class="action" id="clearRecentFiles" title="Clear recent files">Clear</button>
+          </div>
+        </div>
+        <div id="recentFiles"></div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <div class="section-title">Recent folders</div>
+          <div class="section-actions">
+            <button class="action" id="showAllRecentDirs" title="Show all recent folders" hidden>Show all</button>
+            <button class="action" id="clearRecentDirs" title="Clear recent folders">Clear</button>
+          </div>
+        </div>
+        <div id="recentDirs"></div>
+      </div>
+      <div class="section">
+        <div class="section-head">
           <div class="section-title">Favorites</div>
-          <button class="action" id="toggleFavorite">Toggle current</button>
+          <div class="section-actions">
+            <button class="action" id="showAllFavorites" title="Show all favorites" hidden>Show all</button>
+            <button class="action" id="toggleFavorite">Toggle current</button>
+          </div>
         </div>
         <div id="favorites"></div>
       </div>
@@ -1057,6 +1487,24 @@ const webAppHTML = `<!doctype html>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
+  <div class="popup-modal" id="listPopup" hidden>
+    <div class="popup-card">
+      <div class="popup-head">
+        <div class="popup-title" id="popupTitle">Items</div>
+        <button type="button" class="popup-close" id="popupClose" title="Close">✕</button>
+      </div>
+      <input type="text" id="popupSearch" placeholder="Filter…" autocomplete="off" spellcheck="false" />
+      <div id="popupResults" class="popup-results"></div>
+      <div class="popup-foot subtle">Click to open · Esc to close</div>
+    </div>
+  </div>
+  <div class="palette" id="palette" hidden>
+    <div class="palette-card">
+      <input type="text" id="paletteInput" placeholder="Search recent files & folders… (Cmd/Ctrl+K)" autocomplete="off" spellcheck="false" />
+      <div class="palette-hint">↑↓ navigate · Enter open · Esc close</div>
+      <div id="paletteResults" class="palette-results"></div>
+    </div>
+  </div>
   <div class="lightbox" id="lightbox" hidden>
     <div class="lightbox-stage" id="lightboxStage"></div>
     <div class="lightbox-scale" id="lightboxScale">100%</div>
@@ -1070,16 +1518,102 @@ const webAppHTML = `<!doctype html>
   </div>
 
   <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    // Pinned to 11.13.0 — the "polished" 11.x release with backward-compat
+    // fixes and new diagram types (Venn, Ishikawa). 11.14/11.15 may bring
+    // regressions, so bump explicitly after verifying.
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.esm.min.mjs";
     mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose" });
+
+    // --- Change-tracking persistence (P2) ---
+    const TRACKING_STORAGE_KEY = "mdviewer.changeTracking.v1";
+    const TRACKING_DISMISS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const TRACKING_DISMISS_MAX = 5000;
+    const RECENT_FILES_MAX = 50;
+    const RECENT_DIRS_MAX = 20;
+
+    function loadTracking() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(TRACKING_STORAGE_KEY) || "{}");
+        return {
+          dirSnapshots: (raw && typeof raw.dirSnapshots === "object" && raw.dirSnapshots) ? raw.dirSnapshots : {},
+          dismissedEntryMap: (raw && typeof raw.dismissedEntryMap === "object" && raw.dismissedEntryMap) ? raw.dismissedEntryMap : {},
+          dismissedAt: (raw && typeof raw.dismissedAt === "object" && raw.dismissedAt) ? raw.dismissedAt : {},
+          lastSeenAt: typeof raw.lastSeenAt === "number" ? raw.lastSeenAt : Date.now(),
+          recentFiles: Array.isArray(raw.recentFiles) ? raw.recentFiles : [],
+          recentDirs: Array.isArray(raw.recentDirs) ? raw.recentDirs : [],
+          aliases: (raw && typeof raw.aliases === "object" && raw.aliases) ? raw.aliases : {},
+        };
+      } catch {
+        return { dirSnapshots: {}, dismissedEntryMap: {}, dismissedAt: {}, lastSeenAt: Date.now(), recentFiles: [], recentDirs: [], aliases: {} };
+      }
+    }
+
+    function gcDismissed() {
+      const now = Date.now();
+      const entries = Object.entries(state.dismissedAt);
+      // Drop expired
+      for (const [p, ts] of entries) {
+        if (typeof ts !== "number" || now - ts > TRACKING_DISMISS_TTL_MS) {
+          delete state.dismissedEntryMap[p];
+          delete state.dismissedAt[p];
+        }
+      }
+      // Cap size: keep newest by timestamp
+      const keys = Object.keys(state.dismissedAt);
+      if (keys.length > TRACKING_DISMISS_MAX) {
+        const sorted = keys.sort((a, b) => state.dismissedAt[a] - state.dismissedAt[b]);
+        const drop = sorted.slice(0, keys.length - TRACKING_DISMISS_MAX);
+        for (const p of drop) {
+          delete state.dismissedEntryMap[p];
+          delete state.dismissedAt[p];
+        }
+      }
+    }
+
+    function saveTracking() {
+      try {
+        gcDismissed();
+        localStorage.setItem(TRACKING_STORAGE_KEY, JSON.stringify({
+          dirSnapshots: state.dirSnapshots,
+          dismissedEntryMap: state.dismissedEntryMap,
+          dismissedAt: state.dismissedAt,
+          lastSeenAt: Date.now(),
+          recentFiles: state.recentFiles,
+          recentDirs: state.recentDirs,
+          aliases: state.aliases,
+        }));
+      } catch {
+        // Storage may be unavailable / quota exceeded — degrade silently.
+      }
+    }
+
+    const __tracking = loadTracking();
 
     const state = {
       cwd: "",
       entries: [],
       sessionStartedAt: Date.now(),
-      prevEntryMap: {},
+      // Per-directory snapshots: { [dir]: { [path]: modTime } } (P1)
+      dirSnapshots: __tracking.dirSnapshots,
+      // Active visual flags for the current sidebar: { [path]: "new"|"updated"|"recent" }
       fileFlags: {},
-      dismissedEntryMap: {},
+      // Dismissed map: which modTime the user has already acknowledged for a path.
+      dismissedEntryMap: __tracking.dismissedEntryMap,
+      // When each dismissal happened (for GC).
+      dismissedAt: __tracking.dismissedAt,
+      // Timestamp of the previous session's end — used as the "recent" cutoff (P3).
+      lastSeenAt: __tracking.lastSeenAt,
+      // Recent files/dirs — MRU queues. Most-recent first.
+      // Items: { path, name, kind?, openedAt, lastSeenModTime }
+      recentFiles: __tracking.recentFiles,
+      recentDirs: __tracking.recentDirs,
+      // path -> alias (user-friendly label). Currently shown for favorites.
+      aliases: __tracking.aliases,
+      paletteOpen: false,
+      paletteQuery: "",
+      paletteIndex: 0,
+      popupKind: "",
+      popupQuery: "",
       searchQuery: "",
       sortKey: "name",
       sortDirection: "asc",
@@ -1094,14 +1628,18 @@ const webAppHTML = `<!doctype html>
       editBaseModTime: "",
       editDirty: false,
       restoringHistory: false,
-      seenDirectories: {},
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
     };
 
+    // Persist lastSeenAt on unload so the next session can use it for "recent" detection.
+    window.addEventListener("beforeunload", () => { try { saveTracking(); } catch {} });
+
     const appShellEl = document.getElementById("appShell");
     const filesEl = document.getElementById("files");
     const favoritesEl = document.getElementById("favorites");
+    const recentFilesEl = document.getElementById("recentFiles");
+    const recentDirsEl = document.getElementById("recentDirs");
     const searchInputEl = document.getElementById("searchInput");
     const pathInputEl = document.getElementById("pathInput");
     const sortNameEl = document.getElementById("sortName");
@@ -1340,15 +1878,13 @@ const webAppHTML = `<!doctype html>
 
     function updateChangedPaths(dir, entries, options = {}) {
       const nextMap = {};
-      const nextFlags = {};
+      // Preserve any existing flags from other directories (P1: per-dir snapshots
+      // mean flags lit elsewhere shouldn't be wiped when switching directories).
+      const nextFlags = { ...state.fileFlags };
 
-      for (const entry of entries) {
-        if (state.fileFlags[entry.path]) {
-          nextFlags[entry.path] = state.fileFlags[entry.path];
-        }
-      }
+      const prevForDir = state.dirSnapshots[dir];
+      const firstVisitToDir = !prevForDir;
 
-      const firstVisitToDir = !state.seenDirectories[dir];
       for (const entry of entries) {
         const modTime = entry.mod_time || entry.modTime || "";
         nextMap[entry.path] = modTime;
@@ -1356,49 +1892,189 @@ const webAppHTML = `<!doctype html>
           continue;
         }
 
-        const dismissedAt = state.dismissedEntryMap[entry.path];
-        const previous = state.prevEntryMap[entry.path];
+        const dismissed = state.dismissedEntryMap[entry.path];
 
         if (firstVisitToDir) {
-          const isRecent = modTime && (Date.parse(modTime) >= state.sessionStartedAt - 5 * 60 * 1000);
-          if (!options.silent && isRecent && dismissedAt !== modTime) {
+          // P3: use the previous-session boundary (lastSeenAt) instead of a
+          // 5-minute window around session start. "Recent" now means
+          // "changed since you last had this app open".
+          const isRecent = modTime && Date.parse(modTime) >= state.lastSeenAt;
+          if (isRecent && dismissed !== modTime) {
             nextFlags[entry.path] = "recent";
           }
           continue;
         }
 
+        const previous = prevForDir[entry.path];
         if (typeof previous === "undefined") {
-          if (!options.silent && dismissedAt !== modTime) {
+          if (dismissed !== modTime) {
             nextFlags[entry.path] = "new";
           }
           continue;
         }
 
-        if (!options.silent && previous !== modTime && dismissedAt !== modTime) {
+        if (previous !== modTime && dismissed !== modTime) {
           nextFlags[entry.path] = "updated";
         }
       }
 
-      for (const path of Object.keys(nextFlags)) {
-        if (!(path in nextMap)) {
-          delete nextFlags[path];
+      // Drop flags for paths that used to be in this directory but no longer are.
+      // (Flags on paths belonging to OTHER directories — still tracked in
+      // state.dirSnapshots — must be preserved.)
+      if (prevForDir) {
+        for (const p of Object.keys(nextFlags)) {
+          if ((p in prevForDir) && !(p in nextMap)) {
+            delete nextFlags[p];
+          }
         }
       }
 
-      state.prevEntryMap = nextMap;
-      state.seenDirectories[dir] = true;
-      if (!options.silent) {
-        state.fileFlags = nextFlags;
+      // The 'silent' option only suppresses the status-bar message in loadDir;
+      // change detection itself must still run, otherwise the periodic
+      // background refresh (refreshCurrentDir, every 2.5s) — which is the only
+      // path that ever sees external edits while the user sits on the
+      // directory — will never light a dot.
+      state.dirSnapshots[dir] = nextMap;
+      state.fileFlags = nextFlags;
+      saveTracking();
+    }
+
+    // --- Recent files / folders ---
+    function pushRecent(list, item, max) {
+      if (!item || !item.path) return list;
+      // Remove any existing entry with the same path, then unshift.
+      const next = list.filter((x) => x.path !== item.path);
+      next.unshift(item);
+      if (next.length > max) next.length = max;
+      return next;
+    }
+
+    function addRecentFile(path, name, kind, modTime) {
+      if (!path) return;
+      state.recentFiles = pushRecent(state.recentFiles, {
+        path,
+        name: name || basename(path),
+        kind: kind || "",
+        openedAt: Date.now(),
+        // modTime captured when the user last opened this file — used by the
+        // "all recents" popup to flag items that have changed on disk since.
+        lastSeenModTime: modTime || "",
+      }, RECENT_FILES_MAX);
+      saveTracking();
+      renderRecents();
+    }
+
+    function addRecentDir(path) {
+      if (!path) return;
+      state.recentDirs = pushRecent(state.recentDirs, {
+        path,
+        name: basename(path) || path,
+        openedAt: Date.now(),
+      }, RECENT_DIRS_MAX);
+      saveTracking();
+      renderRecents();
+    }
+
+    // For a recent file item, decide whether it has been modified on disk
+    // since the user last opened it. We look up the file's current modTime
+    // from whichever dirSnapshot tracks it; if unknown (directory not yet
+    // visited this session), report "unknown" instead of guessing.
+    function recentFileStatus(item) {
+      if (!item || !item.path) return { state: "unknown" };
+      const parentDir = item.path.replace(/\/[^/]*$/, "");
+      const snapshot = state.dirSnapshots[parentDir];
+      if (!snapshot || !(item.path in snapshot)) return { state: "unknown" };
+      const currentMod = snapshot[item.path];
+      if (!item.lastSeenModTime) return { state: "unknown", currentMod };
+      if (currentMod && currentMod !== item.lastSeenModTime) {
+        return { state: "updated", currentMod };
       }
+      return { state: "unchanged", currentMod };
+    }
+
+    function recentDirStatus(item) {
+      // For directories: report "updated" if any flagged child currently
+      // lives under this dir. Otherwise "unknown" / "unchanged".
+      if (!item || !item.path) return { state: "unknown" };
+      const prefix = item.path + "/";
+      const flagged = Object.keys(state.fileFlags).some((p) => p.startsWith(prefix));
+      if (flagged) return { state: "updated" };
+      if (state.dirSnapshots[item.path]) return { state: "unchanged" };
+      return { state: "unknown" };
+    }
+
+    function clearRecents(which) {
+      if (which === "files" || which === "all") state.recentFiles = [];
+      if (which === "dirs" || which === "all") state.recentDirs = [];
+      saveTracking();
+      renderRecents();
+    }
+
+    function getAlias(path) {
+      return (state.aliases && state.aliases[path]) || "";
+    }
+
+    function setAlias(path, alias) {
+      if (!path) return;
+      const trimmed = (alias || "").trim();
+      if (trimmed) {
+        state.aliases[path] = trimmed;
+      } else {
+        delete state.aliases[path];
+      }
+      saveTracking();
+      renderFavorites();
+      // If a popup is open showing favorites, refresh it too.
+      if (state.popupKind === "favorites") renderPopup();
+    }
+
+    function promptAlias(path) {
+      const current = getAlias(path);
+      const next = window.prompt("Alias for this favorite (leave blank to remove):", current);
+      if (next === null) return; // cancelled
+      setAlias(path, next);
+    }
+
+    function basename(p) {
+      if (!p) return "";
+      const trimmed = p.replace(/\/+$/, "");
+      const idx = trimmed.lastIndexOf("/");
+      return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+    }
+
+    function relativeTime(ts) {
+      if (!ts) return "";
+      const diff = Date.now() - ts;
+      const s = Math.floor(diff / 1000);
+      if (s < 10) return "just now";
+      if (s < 60) return s + "s ago";
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + "m ago";
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + "h ago";
+      const d = Math.floor(h / 24);
+      if (d < 7) return d + "d ago";
+      const date = new Date(ts);
+      return date.toLocaleDateString();
     }
 
     function clearFileFlag(path, modTime = "") {
       if (!path) return;
-      const currentMod = modTime || state.prevEntryMap[path] || state.selectedModTime || "";
+      const snapshotMod = (() => {
+        // Find this path's modTime from whichever directory snapshot has it.
+        for (const dir of Object.keys(state.dirSnapshots)) {
+          const m = state.dirSnapshots[dir];
+          if (m && (path in m)) return m[path];
+        }
+        return "";
+      })();
+      const currentMod = modTime || snapshotMod || state.selectedModTime || "";
       if (currentMod) {
         state.dismissedEntryMap[path] = currentMod;
+        state.dismissedAt[path] = Date.now();
       }
       delete state.fileFlags[path];
+      saveTracking();
     }
 
     async function fetchJSON(url, options) {
@@ -1444,9 +2120,30 @@ const webAppHTML = `<!doctype html>
       };
     }
 
+    function describeLoadError(err, dir) {
+      const msg = (err && err.message) ? err.message : String(err);
+      const lower = msg.toLowerCase();
+      const target = dir || "this folder";
+      if (lower.includes("permission denied") || lower.includes("operation not permitted") || lower.includes("eacces") || lower.includes("eperm")) {
+        return "Permission denied for " + target + ". On macOS, grant access in System Settings → Privacy & Security → Files and Folders (or Full Disk Access) to the mdviewer binary, or to your Terminal if you launched it from there. Then restart mdviewer.";
+      }
+      if (lower.includes("no such file") || lower.includes("enoent")) {
+        return "Folder not found: " + target;
+      }
+      return "Failed to load " + target + ": " + msg;
+    }
+
     async function loadDir(dir = "", options = {}) {
       const query = dir ? "?dir=" + encodeURIComponent(dir) : "";
-      const data = await fetchJSON("/api/list" + query);
+      let data;
+      try {
+        data = await fetchJSON("/api/list" + query);
+      } catch (err) {
+        const friendly = describeLoadError(err, dir);
+        statusTextEl.textContent = friendly;
+        console.error("loadDir failed:", err);
+        return;
+      }
       state.cwd = data.cwd;
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
@@ -1454,13 +2151,24 @@ const webAppHTML = `<!doctype html>
       if (options.clearSelection !== false && !options.keepSelection) {
         state.selectedPath = "";
         state.selectedHash = "";
+        state.selectedKind = "";
+        state.selectedContent = "";
         updateCopyPathButton("");
+        // Show the welcome / usage guide whenever no file is selected.
+        showUsageGuide();
       }
       cwdEl.textContent = shortenDisplayPath(state.cwd);
       cwdEl.dataset.path = state.cwd;
       renderFiles(data.entries);
       renderFavorites();
       updateToggleFavoriteLabel();
+      // Record visited directory in MRU (skip silent background loads to
+      // avoid polluting recents with auto-refresh activity).
+      if (!options.silent && !options.keepSelection) {
+        addRecentDir(state.cwd);
+      } else {
+        renderRecents();
+      }
       if (!options.silent) {
         statusTextEl.textContent = "Loaded " + data.cwd;
       }
@@ -1493,12 +2201,34 @@ const webAppHTML = `<!doctype html>
         filesEl.innerHTML = '<div class="subtle" style="padding: 4px 12px;">No matching files</div>';
         return;
       }
+      // Precompute which directories contain any flagged child path.
+      // P4: surfaces "something inside here changed" without forcing the user
+      // to descend into every subfolder. Only works for dirs we've already
+      // visited in some session (since unvisited dirs have no children tracked).
+      const flagDirPriority = { recent: 1, updated: 2, new: 3 };
+      const dirAggregateFlag = {};
+      for (const [p, f] of Object.entries(state.fileFlags)) {
+        if (!f) continue;
+        for (const entry of filteredEntries) {
+          if (!entry.is_dir) continue;
+          if (p.startsWith(entry.path + "/")) {
+            const existing = dirAggregateFlag[entry.path];
+            if (!existing || (flagDirPriority[f] || 0) > (flagDirPriority[existing] || 0)) {
+              dirAggregateFlag[entry.path] = f;
+            }
+          }
+        }
+      }
+
       for (const entry of filteredEntries) {
         const button = document.createElement("button");
-        const flag = state.fileFlags[entry.path] || "";
+        const directFlag = state.fileFlags[entry.path] || "";
+        const aggFlag = entry.is_dir ? (dirAggregateFlag[entry.path] || "") : "";
+        const flag = directFlag || aggFlag;
         button.className = "file"
           + (entry.path === state.selectedPath ? " active" : "")
-          + (flag ? " updated has-flag flag-" + flag : "");
+          + (flag ? " has-flag flag-" + flag : "")
+          + (aggFlag && !directFlag ? " flag-aggregate" : "");
         button.dataset.meta = describeEntryMeta(entry);
         if (flag) {
           button.dataset.flag = flag;
@@ -1517,16 +2247,133 @@ const webAppHTML = `<!doctype html>
       favoritesEl.innerHTML = "";
       if (!state.favorites.length) {
         favoritesEl.innerHTML = '<div class="subtle" style="padding: 0 8px;">No favorites</div>';
+        toggleShowAll("showAllFavorites", 0);
         return;
       }
-      for (const favorite of state.favorites) {
+      const shown = state.favorites.slice(0, SIDEBAR_RECENT_LIMIT);
+      for (const favorite of shown) {
+        favoritesEl.appendChild(buildFavoriteRow(favorite));
+      }
+      toggleShowAll("showAllFavorites", state.favorites.length);
+    }
+
+    function buildFavoriteRow(favorite) {
+      const alias = getAlias(favorite);
+      const row = document.createElement("div");
+      row.className = "favorite-row" + (favorite === state.cwd ? " active" : "");
+      row.dataset.path = favorite;
+
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "favorite-main";
+      main.onclick = () => loadDir(favorite, { historyMode: "push" });
+      if (alias) {
+        const nameEl = document.createElement("span");
+        nameEl.className = "favorite-alias";
+        nameEl.textContent = alias;
+        const pathEl = document.createElement("span");
+        pathEl.className = "favorite-sub";
+        pathEl.textContent = shortenFavoritePath(favorite);
+        pathEl.title = favorite;
+        main.appendChild(nameEl);
+        main.appendChild(pathEl);
+      } else {
+        const nameEl = document.createElement("span");
+        nameEl.className = "favorite-alias";
+        nameEl.textContent = shortenFavoritePath(favorite);
+        nameEl.title = favorite;
+        main.appendChild(nameEl);
+      }
+      row.appendChild(main);
+
+      // Edit alias (✎) button — visible on hover.
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "favorite-edit";
+      editBtn.title = alias ? "Edit alias" : "Set alias";
+      editBtn.textContent = "✎";
+      editBtn.onclick = (event) => {
+        event.stopPropagation();
+        promptAlias(favorite);
+      };
+      row.appendChild(editBtn);
+
+      // Double-click on the row also opens the alias prompt — easy to discover.
+      main.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        promptAlias(favorite);
+      });
+
+      return row;
+    }
+
+    function renderRecentList(containerEl, items, onClick, opts = {}) {
+      containerEl.innerHTML = "";
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "subtle";
+        empty.style.padding = "0 8px";
+        empty.textContent = opts.emptyText || "Nothing here yet";
+        containerEl.appendChild(empty);
+        return;
+      }
+      for (const item of items) {
         const button = document.createElement("button");
-        button.className = "favorite" + (favorite === state.cwd ? " active" : "");
-        button.dataset.path = favorite;
-        button.innerHTML = '<span class="favorite-name"></span>';
-        button.querySelector(".favorite-name").textContent = shortenFavoritePath(favorite);
-        button.onclick = () => loadDir(favorite, { historyMode: "push" });
-        favoritesEl.appendChild(button);
+        button.className = "recent" + (opts.activeWhen && opts.activeWhen(item) ? " active" : "");
+        button.dataset.path = item.path;
+        const nameEl = document.createElement("span");
+        nameEl.className = "recent-name";
+        nameEl.textContent = item.name || basename(item.path) || item.path;
+        const timeEl = document.createElement("span");
+        timeEl.className = "recent-time";
+        timeEl.textContent = relativeTime(item.openedAt);
+        timeEl.title = item.openedAt ? new Date(item.openedAt).toLocaleString() : "";
+        const pathEl = document.createElement("span");
+        pathEl.className = "recent-path";
+        pathEl.textContent = shortenDisplayPath(item.path);
+        pathEl.title = item.path;
+        button.appendChild(nameEl);
+        button.appendChild(timeEl);
+        button.appendChild(pathEl);
+        button.onclick = () => onClick(item);
+        containerEl.appendChild(button);
+      }
+    }
+
+    const SIDEBAR_RECENT_LIMIT = 3;
+
+    function renderRecents() {
+      if (recentFilesEl) {
+        const shown = state.recentFiles.slice(0, SIDEBAR_RECENT_LIMIT);
+        renderRecentList(recentFilesEl, shown, (item) => {
+          selectFile(item.path, { historyMode: "push" });
+        }, {
+          activeWhen: (item) => item.path === state.selectedPath,
+          emptyText: "No recent files",
+        });
+        toggleShowAll("showAllRecentFiles", state.recentFiles.length);
+      }
+      if (recentDirsEl) {
+        const shown = state.recentDirs.slice(0, SIDEBAR_RECENT_LIMIT);
+        renderRecentList(recentDirsEl, shown, (item) => {
+          loadDir(item.path, { historyMode: "push" });
+        }, {
+          activeWhen: (item) => item.path === state.cwd,
+          emptyText: "No recent folders",
+        });
+        toggleShowAll("showAllRecentDirs", state.recentDirs.length);
+      }
+    }
+
+    function toggleShowAll(buttonId, totalCount) {
+      const btn = document.getElementById(buttonId);
+      if (!btn) return;
+      if (totalCount > SIDEBAR_RECENT_LIMIT) {
+        btn.hidden = false;
+        btn.textContent = "Show all (" + totalCount + ")";
+      } else {
+        btn.hidden = true;
       }
     }
 
@@ -1537,7 +2384,15 @@ const webAppHTML = `<!doctype html>
         await loadDir(path.replace(/\/[^/]*$/, ""), { keepSelection: true });
       }
       renderFiles(state.entries);
-      const data = await fetchJSON("/api/file?path=" + encodeURIComponent(path));
+      let data;
+      try {
+        data = await fetchJSON("/api/file?path=" + encodeURIComponent(path));
+      } catch (err) {
+        const friendly = describeLoadError(err, path);
+        statusTextEl.textContent = friendly;
+        console.error("selectFile failed:", err);
+        return;
+      }
       state.selectedKind = data.kind;
       state.selectedModTime = data.mod_time;
       state.selectedContent = data.content || "";
@@ -1548,6 +2403,7 @@ const webAppHTML = `<!doctype html>
         state.editorMode = "preview";
       }
       clearFileFlag(path, data.mod_time);
+      addRecentFile(path, data.name, data.kind, data.mod_time);
       renderFiles(state.entries);
       previewTitleEl.textContent = data.name;
       previewMetaEl.textContent = new Date(data.mod_time).toLocaleString() + " · " + humanSize(data.size);
@@ -1563,6 +2419,29 @@ const webAppHTML = `<!doctype html>
       updateEditorButtons();
       if (options.historyMode) {
         syncHistory(options.historyMode);
+      }
+    }
+
+    let usageGuideCache = null;
+    async function showUsageGuide() {
+      // Render the embedded USAGE_WEB.md as a friendly welcome / help screen
+      // whenever the user has no file selected.
+      try {
+        if (!usageGuideCache) {
+          const res = await fetch("/api/usage");
+          if (!res.ok) throw new Error(await res.text());
+          usageGuideCache = await res.text();
+        }
+        previewBodyEl.innerHTML = marked.parse(usageGuideCache);
+        // Run mermaid (in case the guide ever uses it) and decorate links.
+        try { await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") }); } catch (e) {}
+        decorateRenderedMarkdown();
+        previewTitleEl.textContent = "Markdown Browser";
+        previewMetaEl.textContent = "Usage guide";
+        kindChipEl.textContent = "Help";
+      } catch (err) {
+        console.error("usage load failed:", err);
+        previewBodyEl.innerHTML = '<div class="empty">Choose a Markdown, text, Mermaid, or image file from the left.</div>';
       }
     }
 
@@ -1596,13 +2475,27 @@ const webAppHTML = `<!doctype html>
         previewBodyEl.innerHTML = marked.parse(data.content);
         const blocks = previewBodyEl.querySelectorAll("pre code.language-mermaid");
         for (const code of blocks) {
+          // Wrap each mermaid host in a .mermaid-wrap container. mermaid 11.x
+          // rewrites the .mermaid node's children when rendering, which
+          // would erase any toolbar appended inside. Putting the toolbar on
+          // the wrapper keeps it safe.
+          const wrap = document.createElement("div");
+          wrap.className = "mermaid-wrap";
           const host = document.createElement("div");
           host.className = "mermaid";
           host.textContent = code.textContent;
-          code.parentElement.replaceWith(host);
+          wrap.appendChild(host);
+          code.parentElement.replaceWith(wrap);
         }
         await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") });
         decorateRenderedMarkdown();
+        // Explicitly attach zoom/toolbar after mermaid finishes — the
+        // MutationObserver path is unreliable for the toolbar because it
+        // can fire before the <svg> is in place.
+        attachZoomToPreview();
+        // A second pass on the next frame catches any diagrams that mermaid
+        // wired up asynchronously (some diagram types do this).
+        requestAnimationFrame(() => attachZoomToPreview());
         return;
       }
       if (data.kind === "image") {
@@ -1856,13 +2749,13 @@ const webAppHTML = `<!doctype html>
     });
 
     favoritesEl.addEventListener("pointerover", (event) => {
-      const row = event.target.closest(".favorite[data-path]");
+      const row = event.target.closest(".favorite-row[data-path]");
       if (!row) return;
       showTooltip(row.dataset.path, event.clientX, event.clientY, { singleLine: true });
     });
 
     favoritesEl.addEventListener("pointermove", (event) => {
-      const row = event.target.closest(".favorite[data-path]");
+      const row = event.target.closest(".favorite-row[data-path]");
       if (!row || !floatingTooltipEl.classList.contains("visible")) return;
       showTooltip(row.dataset.path, event.clientX, event.clientY, { singleLine: true });
     });
@@ -1964,6 +2857,12 @@ const webAppHTML = `<!doctype html>
       ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })
       : loadDir(state.cwd, { historyMode: "replace" });
     document.getElementById("toggleFavorite").onclick = toggleFavorite;
+    document.getElementById("clearRecentFiles").onclick = () => {
+      if (state.recentFiles.length && confirm("Clear recent files list?")) clearRecents("files");
+    };
+    document.getElementById("clearRecentDirs").onclick = () => {
+      if (state.recentDirs.length && confirm("Clear recent folders list?")) clearRecents("dirs");
+    };
     copyPathBtnEl.addEventListener("click", () => { copyCurrentPath(); });
     pathInputEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -1975,8 +2874,351 @@ const webAppHTML = `<!doctype html>
       }
     });
 
+    // ---------- Command palette (Cmd/Ctrl+P) ----------
+    // ---------- "Show all" list popup ----------
+    const popupEl = document.getElementById("listPopup");
+    const popupTitleEl = document.getElementById("popupTitle");
+    const popupSearchEl = document.getElementById("popupSearch");
+    const popupResultsEl = document.getElementById("popupResults");
+
+    function openListPopup(kind) {
+      state.popupKind = kind;
+      state.popupQuery = "";
+      popupSearchEl.value = "";
+      const titles = {
+        recentFiles: "All recent files",
+        recentDirs: "All recent folders",
+        favorites: "All favorites",
+      };
+      popupTitleEl.textContent = titles[kind] || "Items";
+      popupEl.hidden = false;
+      renderPopup();
+      setTimeout(() => popupSearchEl.focus(), 0);
+    }
+
+    function closeListPopup() {
+      state.popupKind = "";
+      popupEl.hidden = true;
+    }
+
+    function popupItems() {
+      if (state.popupKind === "recentFiles") {
+        return state.recentFiles.map((it) => ({
+          ...it,
+          _kind: "file",
+          _status: recentFileStatus(it),
+        }));
+      }
+      if (state.popupKind === "recentDirs") {
+        return state.recentDirs.map((it) => ({
+          ...it,
+          _kind: "dir",
+          _status: recentDirStatus(it),
+        }));
+      }
+      if (state.popupKind === "favorites") {
+        return state.favorites.map((p) => ({
+          path: p,
+          name: getAlias(p) || basename(p) || p,
+          alias: getAlias(p),
+          openedAt: 0,
+          _kind: "favorite",
+          _status: recentDirStatus({ path: p }),
+        }));
+      }
+      return [];
+    }
+
+    function renderPopup() {
+      if (popupEl.hidden) return;
+      const q = (state.popupQuery || "").trim().toLowerCase();
+      const all = popupItems();
+      const items = q
+        ? all.filter((it) => {
+            const name = (it.name || "").toLowerCase();
+            const path = (it.path || "").toLowerCase();
+            return name.includes(q) || path.includes(q);
+          })
+        : all;
+
+      popupResultsEl.innerHTML = "";
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "popup-empty";
+        empty.textContent = q ? "No matches" : "Nothing here yet";
+        popupResultsEl.appendChild(empty);
+        return;
+      }
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.className = "popup-item";
+        row.dataset.path = it.path;
+
+        const icon = document.createElement("span");
+        icon.className = "popup-icon";
+        icon.textContent = it._kind === "file" ? "📄" : (it._kind === "dir" ? "📁" : "★");
+        row.appendChild(icon);
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "popup-name";
+        nameEl.textContent = it.name || basename(it.path);
+        row.appendChild(nameEl);
+
+        const timeEl = document.createElement("span");
+        timeEl.className = "popup-time";
+        if (it.openedAt) {
+          timeEl.textContent = relativeTime(it.openedAt);
+          timeEl.title = "Last opened: " + new Date(it.openedAt).toLocaleString();
+        } else {
+          timeEl.textContent = "";
+        }
+        row.appendChild(timeEl);
+
+        const statusEl = document.createElement("span");
+        const s = it._status || { state: "unknown" };
+        statusEl.className = "popup-status state-" + s.state;
+        statusEl.textContent = s.state === "updated" ? "Updated" : s.state === "unchanged" ? "Up to date" : "—";
+        if (s.state === "unknown") statusEl.title = "Folder not visited this session — can't tell";
+        row.appendChild(statusEl);
+
+        // For favorites, expose an inline edit-alias button.
+        if (it._kind === "favorite") {
+          const editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.className = "popup-edit";
+          editBtn.textContent = "✎";
+          editBtn.title = it.alias ? "Edit alias" : "Set alias";
+          editBtn.onclick = (event) => {
+            event.stopPropagation();
+            promptAlias(it.path);
+          };
+          row.appendChild(editBtn);
+        }
+
+        const pathEl = document.createElement("span");
+        pathEl.className = "popup-path";
+        pathEl.textContent = shortenDisplayPath(it.path);
+        pathEl.title = it.path;
+        row.appendChild(pathEl);
+
+        row.onclick = () => {
+          closeListPopup();
+          if (it._kind === "file") {
+            selectFile(it.path, { historyMode: "push" });
+          } else {
+            loadDir(it.path, { historyMode: "push" });
+          }
+        };
+        popupResultsEl.appendChild(row);
+      }
+    }
+
+    popupSearchEl.addEventListener("input", () => {
+      state.popupQuery = popupSearchEl.value;
+      renderPopup();
+    });
+    popupSearchEl.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); closeListPopup(); }
+    });
+    document.getElementById("popupClose").onclick = closeListPopup;
+    popupEl.addEventListener("click", (event) => {
+      if (event.target === popupEl) closeListPopup();
+    });
+
+    document.getElementById("showAllRecentFiles").onclick = () => openListPopup("recentFiles");
+    document.getElementById("showAllRecentDirs").onclick = () => openListPopup("recentDirs");
+    document.getElementById("showAllFavorites").onclick = () => openListPopup("favorites");
+
+    const paletteEl = document.getElementById("palette");
+    const paletteInputEl = document.getElementById("paletteInput");
+    const paletteResultsEl = document.getElementById("paletteResults");
+
+    function paletteCandidates() {
+      // Combine files + dirs, tag with kind, dedupe by path (file wins).
+      const seen = new Set();
+      const out = [];
+      for (const f of state.recentFiles) {
+        if (seen.has(f.path)) continue;
+        seen.add(f.path);
+        out.push({ ...f, _kind: "file" });
+      }
+      for (const d of state.recentDirs) {
+        if (seen.has(d.path)) continue;
+        seen.add(d.path);
+        out.push({ ...d, _kind: "dir" });
+      }
+      // Sort by openedAt desc to put most-recent at top regardless of source.
+      out.sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
+      return out;
+    }
+
+    function fuzzyMatchScore(query, target) {
+      // Very small subsequence-fuzzy: every query char must appear in order.
+      // Score rewards contiguous matches and earlier positions. Returns
+      // { score, ranges } where ranges are [start, end) pairs to highlight.
+      if (!query) return { score: 0, ranges: [] };
+      const q = query.toLowerCase();
+      const t = target.toLowerCase();
+      let ti = 0, qi = 0;
+      let score = 0;
+      let lastMatch = -2;
+      const ranges = [];
+      while (ti < t.length && qi < q.length) {
+        if (t[ti] === q[qi]) {
+          if (ti === lastMatch + 1) {
+            score += 5; // contiguous bonus
+            // extend last range
+            ranges[ranges.length - 1][1] = ti + 1;
+          } else {
+            score += 1;
+            ranges.push([ti, ti + 1]);
+          }
+          if (ti === 0 || /[\s/_\-.]/.test(t[ti - 1])) score += 3; // word-start bonus
+          lastMatch = ti;
+          qi++;
+        }
+        ti++;
+      }
+      if (qi < q.length) return null; // not all chars matched
+      // Earlier match cluster boosts score.
+      score -= ranges[0][0] * 0.05;
+      return { score, ranges };
+    }
+
+    function highlightRanges(text, ranges) {
+      if (!ranges || !ranges.length) return escapeHtml(text);
+      let html = "";
+      let cursor = 0;
+      for (const [s, e] of ranges) {
+        if (cursor < s) html += escapeHtml(text.slice(cursor, s));
+        html += '<span class="palette-match">' + escapeHtml(text.slice(s, e)) + "</span>";
+        cursor = e;
+      }
+      if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+      return html;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+
+    function paletteFilter(query) {
+      const all = paletteCandidates();
+      const q = (query || "").trim();
+      if (!q) return all.map((item) => ({ item, ranges: [], score: 0 }));
+      const scored = [];
+      for (const item of all) {
+        // Match against name + path; pick the higher-scoring field for highlight.
+        const name = item.name || basename(item.path);
+        const nameM = fuzzyMatchScore(q, name);
+        const pathM = fuzzyMatchScore(q, item.path);
+        let best = null;
+        if (nameM && (!best || nameM.score + 5 > best.score)) best = { ranges: nameM.ranges, score: nameM.score + 5, field: "name" };
+        if (pathM && (!best || pathM.score > best.score)) best = { ranges: pathM.ranges, score: pathM.score, field: "path" };
+        if (!best) continue;
+        scored.push({ item, ranges: best.ranges, score: best.score, field: best.field });
+      }
+      scored.sort((a, b) => b.score - a.score || (b.item.openedAt || 0) - (a.item.openedAt || 0));
+      return scored.slice(0, 50);
+    }
+
+    function renderPalette() {
+      const results = paletteFilter(state.paletteQuery);
+      paletteResultsEl.innerHTML = "";
+      if (!results.length) {
+        const empty = document.createElement("div");
+        empty.className = "palette-empty";
+        empty.textContent = state.paletteQuery ? "No matches" : "No recent items yet";
+        paletteResultsEl.appendChild(empty);
+        return;
+      }
+      if (state.paletteIndex >= results.length) state.paletteIndex = 0;
+      if (state.paletteIndex < 0) state.paletteIndex = results.length - 1;
+      state.paletteResults = results;
+      results.forEach((r, idx) => {
+        const row = document.createElement("div");
+        row.className = "palette-item" + (idx === state.paletteIndex ? " active" : "");
+        row.dataset.idx = String(idx);
+        const name = r.item.name || basename(r.item.path);
+        const kindLabel = r.item._kind === "dir" ? "📁" : "📄";
+        row.innerHTML =
+          '<span class="palette-kind">' + kindLabel + '</span>' +
+          '<span class="palette-name">' + (r.field === "name" ? highlightRanges(name, r.ranges) : escapeHtml(name)) + '</span>' +
+          '<span class="palette-time">' + escapeHtml(relativeTime(r.item.openedAt)) + '</span>' +
+          '<span class="palette-path">' + (r.field === "path" ? highlightRanges(r.item.path, r.ranges) : escapeHtml(shortenDisplayPath(r.item.path))) + '</span>';
+        row.onmouseenter = () => {
+          state.paletteIndex = idx;
+          // Re-render active highlight without rebuilding everything:
+          paletteResultsEl.querySelectorAll(".palette-item.active").forEach((n) => n.classList.remove("active"));
+          row.classList.add("active");
+        };
+        row.onclick = () => { state.paletteIndex = idx; paletteAcceptSelected(); };
+        paletteResultsEl.appendChild(row);
+      });
+      // Keep the active row visible when navigating by keyboard.
+      const active = paletteResultsEl.querySelector(".palette-item.active");
+      if (active) active.scrollIntoView({ block: "nearest" });
+    }
+
+    function openPalette() {
+      state.paletteOpen = true;
+      state.paletteQuery = "";
+      state.paletteIndex = 0;
+      paletteInputEl.value = "";
+      paletteEl.hidden = false;
+      renderPalette();
+      // Focus on next tick so the keydown that opened us doesn't bleed in.
+      setTimeout(() => paletteInputEl.focus(), 0);
+    }
+
+    function closePalette() {
+      state.paletteOpen = false;
+      paletteEl.hidden = true;
+    }
+
+    function paletteAcceptSelected() {
+      const results = state.paletteResults || [];
+      const chosen = results[state.paletteIndex];
+      if (!chosen) return;
+      closePalette();
+      if (chosen.item._kind === "dir") {
+        loadDir(chosen.item.path, { historyMode: "push" });
+      } else {
+        selectFile(chosen.item.path, { historyMode: "push" });
+      }
+    }
+
+    paletteInputEl.addEventListener("input", () => {
+      state.paletteQuery = paletteInputEl.value;
+      state.paletteIndex = 0;
+      renderPalette();
+    });
+    paletteInputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); closePalette(); return; }
+      if (event.key === "Enter") { event.preventDefault(); paletteAcceptSelected(); return; }
+      if (event.key === "ArrowDown") { event.preventDefault(); state.paletteIndex++; renderPalette(); return; }
+      if (event.key === "ArrowUp") { event.preventDefault(); state.paletteIndex--; renderPalette(); return; }
+    });
+    paletteEl.addEventListener("click", (event) => {
+      // Click outside the card closes.
+      if (event.target === paletteEl) closePalette();
+    });
+
     document.addEventListener("keydown", (event) => {
       const lowerKey = event.key.toLowerCase();
+      // Cmd/Ctrl+K → open Recent palette. (Cmd+P would collide with the
+      // browser's print shortcut on macOS, so we use the Slack/Notion/Linear
+      // convention instead.)
+      if ((event.metaKey || event.ctrlKey) && lowerKey === "k" && !event.shiftKey) {
+        event.preventDefault();
+        if (state.paletteOpen) closePalette(); else openPalette();
+        return;
+      }
+      // Esc closes the "Show all" popup when focus is anywhere outside its input.
+      if (event.key === "Escape" && !popupEl.hidden) {
+        closeListPopup();
+        return;
+      }
       // Cmd/Ctrl+L → focus the "Jump to path" input (URL-bar style).
       if ((event.metaKey || event.ctrlKey) && lowerKey === "l") {
         event.preventDefault();
@@ -2280,6 +3522,9 @@ const webAppHTML = `<!doctype html>
 
     lightboxEl.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".lightbox-toolbar")) return;
+      // Alt/Option held → user wants to select text inside the diagram,
+      // not pan the lightbox. Let the browser handle the selection.
+      if (event.altKey || state.altKey) return;
       // Click on backdrop (outside the stage) closes; tracked via target match in pointerup.
       lbState.dragging = true;
       lbState.didDrag = false;
@@ -2293,6 +3538,13 @@ const webAppHTML = `<!doctype html>
 
     lightboxEl.addEventListener("pointermove", (event) => {
       if (!lbState.dragging) return;
+      // Same guard as the inline pan handler — abort if Alt comes down mid-drag.
+      if (event.altKey || state.altKey) {
+        lbState.dragging = false;
+        lightboxEl.classList.remove("dragging");
+        try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+        return;
+      }
       const dx = event.clientX - lbState.sx;
       const dy = event.clientY - lbState.sy;
       if (!lbState.didDrag && Math.hypot(dx, dy) > 3) lbState.didDrag = true;
@@ -2352,6 +3604,135 @@ const webAppHTML = `<!doctype html>
 
     // ----- Inline zoom on the in-page image / mermaid element -----
     const inlineState = new WeakMap();
+
+    // Track Alt/Option key globally so .mermaid hosts can switch into
+    // text-selection mode. The CSS toggles on the .alt-select class.
+    // We also expose a boolean (state.altKey) because the per-pointer
+    // event.altKey property is not always reliable across browsers /
+    // pointer-event sources (touch, pen, some Linux WMs). The keydown/keyup
+    // path here is the authoritative source.
+    state.altKey = false;
+    function setMermaidAltSelect(on) {
+      state.altKey = !!on;
+      const nodes = document.querySelectorAll(".mermaid");
+      nodes.forEach((n) => n.classList.toggle("alt-select", !!on));
+      // Also flip a body-level flag so we can override .lightbox's
+      // user-select: none (and any third-party extension styles) with high
+      // specificity + !important. Without this, alt-drag inside the
+      // lightbox can't select SVG text.
+      document.body.classList.toggle("alt-select-mode", !!on);
+    }
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Alt" || event.altKey) setMermaidAltSelect(true);
+    });
+    window.addEventListener("keyup", (event) => {
+      if (event.key === "Alt") setMermaidAltSelect(false);
+    });
+    // Browsers sometimes miss keyup if focus leaves — clear on blur to be safe.
+    window.addEventListener("blur", () => setMermaidAltSelect(false));
+    // Some platforms only deliver altKey via mouse events; sync from those too.
+    window.addEventListener("mousemove", (event) => {
+      if (event.altKey && !state.altKey) setMermaidAltSelect(true);
+      else if (!event.altKey && state.altKey) setMermaidAltSelect(false);
+    }, { passive: true });
+
+    // ----- Copy diagram text to clipboard -----
+    function extractMermaidText(svg) {
+      // Collect every <text> and <foreignObject>, group by y (line),
+      // sort each line by x, then join. This gives a roughly readable
+      // textual dump of the diagram contents.
+      const nodes = svg.querySelectorAll("text, foreignObject");
+      const items = [];
+      for (const node of nodes) {
+        // Skip foreignObject children that are themselves inside another
+        // foreignObject we already captured (we'd double-count).
+        if (node.tagName === "text" && node.closest("foreignObject")) continue;
+        let rect;
+        try { rect = node.getBoundingClientRect(); } catch (e) { continue; }
+        const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+        if (!text) continue;
+        items.push({ y: rect.top, x: rect.left, text });
+      }
+      if (!items.length) return "";
+      items.sort((a, b) => a.y - b.y || a.x - b.x);
+      const lines = [];
+      let current = [];
+      let lastY = -Infinity;
+      const lineTolerance = 6; // px
+      for (const it of items) {
+        if (Math.abs(it.y - lastY) > lineTolerance && current.length) {
+          lines.push(current);
+          current = [];
+        }
+        current.push(it);
+        lastY = it.y;
+      }
+      if (current.length) lines.push(current);
+      return lines
+        .map((line) => line.sort((a, b) => a.x - b.x).map((it) => it.text).join("  "))
+        .join("\n");
+    }
+
+    async function copyMermaidText(el, btn) {
+      const svg = el.querySelector("svg");
+      if (!svg) return;
+      const text = extractMermaidText(svg);
+      if (!text) {
+        if (btn) flashButton(btn, "Empty", false);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        if (btn) flashButton(btn, "Copied ✓", true);
+      } catch (err) {
+        console.error("copy failed:", err);
+        if (btn) flashButton(btn, "Copy failed", false);
+      }
+    }
+
+    function flashButton(btn, label, ok) {
+      const original = btn.dataset.originalLabel || btn.textContent;
+      btn.dataset.originalLabel = original;
+      btn.textContent = label;
+      btn.classList.toggle("copied", !!ok);
+      clearTimeout(btn._flashTimer);
+      btn._flashTimer = setTimeout(() => {
+        btn.textContent = btn.dataset.originalLabel;
+        btn.classList.remove("copied");
+      }, 1400);
+    }
+
+    function attachMermaidToolbar(el) {
+      if (!el.classList.contains("mermaid")) return;
+      // The toolbar lives on the wrapper, not inside .mermaid itself —
+      // mermaid 11.x rewrites .mermaid's children so a toolbar appended
+      // inside would be erased on each render.
+      const wrap = el.closest(".mermaid-wrap");
+      if (!wrap) return;
+      if (wrap.dataset.toolbarAttached === "1") return;
+      // Only attach AFTER mermaid finishes rendering and produces an <svg>.
+      if (!el.querySelector("svg")) return;
+      wrap.dataset.toolbarAttached = "1";
+      const bar = document.createElement("div");
+      bar.className = "mermaid-toolbar";
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "mermaid-tool-btn";
+      copyBtn.textContent = "Copy text";
+      copyBtn.title = "Copy all text in this diagram (Alt-drag to select manually)";
+      // Stop these events from bubbling to the diagram's zoom/pan handlers,
+      // otherwise clicking the button would open the lightbox.
+      const stop = (e) => { e.stopPropagation(); };
+      copyBtn.addEventListener("pointerdown", stop);
+      copyBtn.addEventListener("pointerup", stop);
+      copyBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        copyMermaidText(el, copyBtn);
+      });
+      bar.appendChild(copyBtn);
+      wrap.appendChild(bar);
+    }
 
     function getInline(el) {
       let s = inlineState.get(el);
@@ -2413,6 +3794,12 @@ const webAppHTML = `<!doctype html>
 
       el.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
+        // Don't start pan/drag if user is interacting with the diagram toolbar.
+        if (event.target && event.target.closest && event.target.closest(".mermaid-toolbar")) return;
+        // Alt/Option held → user wants to select text, not pan. Check both
+        // the per-event flag AND our authoritative global Alt state so that
+        // we don't miss it when the pointer source doesn't carry modifiers.
+        if (event.altKey || state.altKey) return;
         const s = getInline(el);
         s.dragging = true;
         s.didDrag = false;
@@ -2427,6 +3814,14 @@ const webAppHTML = `<!doctype html>
       el.addEventListener("pointermove", (event) => {
         const s = getInline(el);
         if (!s.dragging) return;
+        // If the user presses Alt mid-drag, abort the pan so they can switch
+        // into text-selection mode without first releasing the mouse button.
+        if (event.altKey || state.altKey) {
+          s.dragging = false;
+          try { el.releasePointerCapture(event.pointerId); } catch (e) {}
+          el.style.cursor = s.scale > 1 ? "grab" : "zoom-in";
+          return;
+        }
         const dx = event.clientX - s.sx;
         const dy = event.clientY - s.sy;
         if (!s.didDrag && Math.hypot(dx, dy) > 3) s.didDrag = true;
@@ -2440,11 +3835,16 @@ const webAppHTML = `<!doctype html>
       el.addEventListener("pointerup", (event) => {
         const s = getInline(el);
         const wasDrag = s.didDrag && s.scale > 1;
+        const fromToolbar = event.target && event.target.closest && event.target.closest(".mermaid-toolbar");
         s.dragging = false;
         try { el.releasePointerCapture(event.pointerId); } catch (e) {}
         applyInlineTransform(el);
-        if (!wasDrag) {
-          // Treat as a click → open lightbox modal.
+        // Don't open lightbox if: user was dragging, clicked the toolbar,
+        // held Alt (text-select mode), or there is an active text selection
+        // they probably want to keep.
+        const sel = window.getSelection && window.getSelection();
+        const hasSelection = sel && !sel.isCollapsed && el.contains(sel.anchorNode);
+        if (!wasDrag && !fromToolbar && !event.altKey && !hasSelection) {
           openLightbox(buildLightboxClone(el));
         }
       });
@@ -2457,6 +3857,8 @@ const webAppHTML = `<!doctype html>
 
       // Suppress default click behavior so it doesn't conflict with our pointerup logic.
       el.addEventListener("click", (event) => {
+        // Toolbar buttons handle their own click; let them through.
+        if (event.target && event.target.closest && event.target.closest(".mermaid-toolbar")) return;
         event.preventDefault();
         event.stopPropagation();
       });
@@ -2464,7 +3866,10 @@ const webAppHTML = `<!doctype html>
 
     function attachZoomToPreview() {
       const targets = previewBodyEl.querySelectorAll("img, .mermaid");
-      targets.forEach(attachInlineZoom);
+      targets.forEach((el) => {
+        attachInlineZoom(el);
+        if (el.classList.contains("mermaid")) attachMermaidToolbar(el);
+      });
     }
 
     // Re-attach zoom handlers any time the preview body content changes.
@@ -2475,6 +3880,10 @@ const webAppHTML = `<!doctype html>
     applySidebarLayout();
     updateSortButtons();
     updateEditorButtons();
+    renderRecents();
+    // Refresh relative-time labels in the Recent sections every minute so
+    // "2m ago" doesn't sit stale at 0s for hours.
+    setInterval(() => { renderRecents(); }, 60 * 1000);
     setInterval(refreshSelected, 2000);
     setInterval(refreshCurrentDir, 2500);
     restoreRoute(routeFromLocation(), "replace");
