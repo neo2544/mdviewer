@@ -28,7 +28,8 @@ type webEntry struct {
 type listResponse struct {
 	Cwd       string     `json:"cwd"`
 	Entries   []webEntry `json:"entries"`
-	Favorites []string   `json:"favorites"`
+	Favorites []string          `json:"favorites"`
+	Aliases   map[string]string `json:"aliases"`
 }
 
 type fileResponse struct {
@@ -61,7 +62,44 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
 	mux.HandleFunc("/api/resolve", s.handleResolve)
 	mux.HandleFunc("/api/usage", s.handleUsage)
+	mux.HandleFunc("/api/aliases", s.handleAliases)
 	return mux
+}
+
+// handleAliases: GET returns the full alias map. POST upserts a single
+// alias ({path, alias}). An empty alias removes the entry.
+func (s *webServer) handleAliases(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeJSON(w, http.StatusOK, s.loadAliases())
+	case http.MethodPost:
+		var payload struct {
+			Path  string `json:"path"`
+			Alias string `json:"alias"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if payload.Path == "" {
+			http.Error(w, "missing path", http.StatusBadRequest)
+			return
+		}
+		aliases := s.loadAliases()
+		trimmed := strings.TrimSpace(payload.Alias)
+		if trimmed == "" {
+			delete(aliases, payload.Path)
+		} else {
+			aliases[payload.Path] = trimmed
+		}
+		if err := s.saveAliases(aliases); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, aliases)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleUsage returns the embedded USAGE_WEB.md content. The web client
@@ -120,6 +158,37 @@ func (s *webServer) saveFavorites(favorites []string) error {
 		return err
 	}
 	return os.WriteFile(s.favoritesPath(), data, 0o644)
+}
+
+// Aliases: user-friendly labels for favorited paths. Stored alongside
+// favorites in their own JSON file so the mapping is shared across
+// browsers / devices the same way favorites are.
+
+func (s *webServer) aliasesPath() string {
+	return filepath.Join(s.appRoot, aliasesFileName)
+}
+
+func (s *webServer) loadAliases() map[string]string {
+	data, err := os.ReadFile(s.aliasesPath())
+	if err != nil {
+		return map[string]string{}
+	}
+	var out map[string]string
+	if err := json.Unmarshal(data, &out); err != nil || out == nil {
+		return map[string]string{}
+	}
+	return out
+}
+
+func (s *webServer) saveAliases(aliases map[string]string) error {
+	if aliases == nil {
+		aliases = map[string]string{}
+	}
+	data, err := json.MarshalIndent(aliases, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.aliasesPath(), data, 0o644)
 }
 
 func (s *webServer) writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -198,6 +267,7 @@ func (s *webServer) handleList(w http.ResponseWriter, r *http.Request) {
 		Cwd:       absDir,
 		Entries:   entries,
 		Favorites: s.loadFavorites(),
+		Aliases:   s.loadAliases(),
 	})
 }
 
@@ -437,6 +507,9 @@ const webAppHTML = `<!doctype html>
   <title>mdviewer web preview</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
+    /* Default = dark. Light tokens are applied either:
+       (a) when the system prefers light AND the user hasn't forced dark, or
+       (b) when the user explicitly picks Light. */
     :root {
       --bg: oklch(0.19 0.02 262);
       --panel: oklch(0.23 0.025 262);
@@ -451,6 +524,34 @@ const webAppHTML = `<!doctype html>
       --sidebar-width: 320px;
       --splitter-width: 12px;
       --file-meta-width: 6.25rem;
+    }
+    /* Light token set, factored so we can apply via either media query or
+       an explicit data-theme attribute. */
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg: oklch(0.985 0.005 250);
+        --panel: oklch(0.96 0.008 250);
+        --panel-2: oklch(0.92 0.012 255);
+        --text: oklch(0.22 0.025 262);
+        --muted: oklch(0.5 0.02 260);
+        --accent: oklch(0.52 0.21 330);
+        --accent-2: oklch(0.55 0.17 235);
+        --line: oklch(0.86 0.01 260);
+        --code: oklch(0.94 0.008 250);
+        --shadow: 0 12px 40px color-mix(in oklab, black 12%, transparent);
+      }
+    }
+    :root[data-theme="light"] {
+      --bg: oklch(0.985 0.005 250);
+      --panel: oklch(0.96 0.008 250);
+      --panel-2: oklch(0.92 0.012 255);
+      --text: oklch(0.22 0.025 262);
+      --muted: oklch(0.5 0.02 260);
+      --accent: oklch(0.52 0.21 330);
+      --accent-2: oklch(0.55 0.17 235);
+      --line: oklch(0.86 0.01 260);
+      --code: oklch(0.94 0.008 250);
+      --shadow: 0 12px 40px color-mix(in oklab, black 12%, transparent);
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -1399,6 +1500,17 @@ const webAppHTML = `<!doctype html>
       .reveal-sidebar { display: inline-flex; }
     }
   </style>
+  <script>
+    // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
+    (function() {
+      try {
+        var t = localStorage.getItem("mdviewer.theme") || "auto";
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <div class="app" id="appShell">
@@ -1469,6 +1581,7 @@ const webAppHTML = `<!doctype html>
           <button class="action" id="editModeButton">Edit</button>
           <button class="action" id="saveButton">Save</button>
           <button class="action" id="refreshButton">Refresh</button>
+          <button class="action" id="themeToggle" title="Cycle theme: Auto → Light → Dark">Auto</button>
           <span class="chip" id="kindChip">Idle</span>
         </div>
       </div>
@@ -2014,9 +2127,10 @@ const webAppHTML = `<!doctype html>
       return (state.aliases && state.aliases[path]) || "";
     }
 
-    function setAlias(path, alias) {
+    async function setAlias(path, alias) {
       if (!path) return;
       const trimmed = (alias || "").trim();
+      // Optimistic local update — instant UI feedback.
       if (trimmed) {
         state.aliases[path] = trimmed;
       } else {
@@ -2024,8 +2138,26 @@ const webAppHTML = `<!doctype html>
       }
       saveTracking();
       renderFavorites();
-      // If a popup is open showing favorites, refresh it too.
       if (state.popupKind === "favorites") renderPopup();
+      // Persist to the server so the alias is visible from other browsers.
+      try {
+        const res = await fetch("/api/aliases", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path, alias: trimmed }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const next = await res.json();
+        if (next && typeof next === "object") {
+          state.aliases = next;
+          saveTracking();
+          renderFavorites();
+          if (state.popupKind === "favorites") renderPopup();
+        }
+      } catch (err) {
+        console.error("setAlias server save failed:", err);
+        statusTextEl.textContent = "Alias saved locally only (server write failed)";
+      }
     }
 
     function promptAlias(path) {
@@ -2148,6 +2280,14 @@ const webAppHTML = `<!doctype html>
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
+      // Server is the source of truth for aliases — merge into state so
+      // they are visible across browsers / devices. (We keep the localStorage
+      // copy as a fallback when the server reply is missing the field, e.g.
+      // very old binaries.)
+      if (data && data.aliases && typeof data.aliases === "object") {
+        state.aliases = data.aliases;
+        try { saveTracking(); } catch (e) {}
+      }
       if (options.clearSelection !== false && !options.keepSelection) {
         state.selectedPath = "";
         state.selectedHash = "";
@@ -2852,6 +2992,32 @@ const webAppHTML = `<!doctype html>
       updateSortButtons();
       renderFiles(state.entries);
     });
+
+    // ---------- Theme toggle (Auto → Light → Dark) ----------
+    const themeToggleEl = document.getElementById("themeToggle");
+    const THEME_ORDER = ["auto", "light", "dark"];
+    const THEME_LABEL = { auto: "Auto", light: "Light", dark: "Dark" };
+    function currentTheme() {
+      try { return localStorage.getItem("mdviewer.theme") || "auto"; }
+      catch (e) { return "auto"; }
+    }
+    function applyTheme(theme) {
+      try { localStorage.setItem("mdviewer.theme", theme); } catch (e) {}
+      if (theme === "auto") {
+        document.documentElement.removeAttribute("data-theme");
+      } else {
+        document.documentElement.setAttribute("data-theme", theme);
+      }
+      if (themeToggleEl) themeToggleEl.textContent = THEME_LABEL[theme] || "Auto";
+    }
+    applyTheme(currentTheme());
+    if (themeToggleEl) {
+      themeToggleEl.onclick = () => {
+        const cur = currentTheme();
+        const next = THEME_ORDER[(THEME_ORDER.indexOf(cur) + 1) % THEME_ORDER.length];
+        applyTheme(next);
+      };
+    }
 
     document.getElementById("refreshButton").onclick = () => state.selectedPath
       ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })

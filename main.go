@@ -129,6 +129,7 @@ type previewTimeoutMsg struct {
 
 const maxMarkdownRenderBytes = 512 * 1024
 const favoritesFileName = ".mdviewer_favorites.json"
+const aliasesFileName = ".mdviewer_aliases.json"
 
 var mermaidEdgePattern = regexp.MustCompile(`^\s*([A-Za-z0-9_]+(?:\[[^\]]+\]|\([^)]+\)|\{[^}]+\})?)\s*(?:-->|==>|-.->|---|~~~)\s*([A-Za-z0-9_]+(?:\[[^\]]+\]|\([^)]+\)|\{[^}]+\})?)`)
 var toolLookupOnce sync.Once
