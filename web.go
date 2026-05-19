@@ -964,23 +964,186 @@ const webAppHTML = `<!doctype html>
       direction: rtl;
       text-align: left;
     }
-    .actions { display: flex; gap: 10px; }
-    .actions { flex: 0 0 auto; }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+    .actions .divider {
+      width: 1px;
+      height: 22px;
+      margin: 0 4px;
+      background: color-mix(in oklab, var(--line) 75%, transparent);
+      flex: 0 0 auto;
+    }
     .chip, .action {
       border-radius: 999px;
       border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
       background: color-mix(in oklab, var(--panel-2) 78%, transparent);
       color: var(--text);
-      padding: 9px 12px;
+      padding: 7px 12px;
       font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.005em;
       appearance: none;
       -webkit-appearance: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      line-height: 1;
+      transition:
+        background 140ms ease,
+        border-color 140ms ease,
+        color 140ms ease,
+        transform 80ms ease,
+        box-shadow 140ms ease;
     }
     .action { cursor: pointer; }
+    .action:hover:not(:disabled):not(.is-primary) {
+      background: color-mix(in oklab, var(--panel-2) 92%, var(--text) 8%);
+      border-color: color-mix(in oklab, var(--line) 60%, var(--text) 12%);
+    }
+    .action:active:not(:disabled) { transform: scale(0.97); }
+    .action:focus-visible {
+      outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+      outline-offset: 2px;
+    }
     .action:disabled {
-      opacity: 0.45;
+      opacity: 0.4;
       cursor: default;
     }
+    .action .ico {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      stroke: currentColor;
+      stroke-width: 1.7;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.85;
+    }
+    .action kbd {
+      font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+      font-size: 10.5px;
+      padding: 1px 5px;
+      margin-left: 2px;
+      border-radius: 4px;
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      background: color-mix(in oklab, var(--bg) 60%, transparent);
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+
+    /* Segmented control for Preview/Edit (mutually exclusive modes) */
+    .seg {
+      display: inline-flex;
+      padding: 3px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 50%, transparent);
+      gap: 2px;
+    }
+    .seg-btn {
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 5px 11px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      line-height: 1;
+      transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+    }
+    .seg-btn .ico {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      stroke-width: 1.7;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.8;
+    }
+    .seg-btn:hover:not(:disabled):not(.active) {
+      color: var(--text);
+      background: color-mix(in oklab, var(--panel-2) 80%, transparent);
+    }
+    .seg-btn.active {
+      color: var(--text);
+      background: var(--panel);
+      box-shadow:
+        0 1px 0 color-mix(in oklab, var(--line) 60%, transparent),
+        0 2px 6px color-mix(in oklab, black 18%, transparent);
+    }
+    .seg-btn.active .ico { opacity: 1; color: var(--accent); }
+    .seg-btn:focus-visible {
+      outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+      outline-offset: 2px;
+    }
+    .seg-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* Icon-only round buttons */
+    .action.icon-only {
+      padding: 7px;
+      width: 30px;
+      height: 30px;
+      justify-content: center;
+    }
+    .action.icon-only .ico { width: 15px; height: 15px; opacity: 0.85; }
+
+    /* Save when dirty — primary emphasis */
+    .action.is-primary {
+      background: var(--accent);
+      border-color: color-mix(in oklab, var(--accent) 80%, black 20%);
+      color: oklch(0.99 0.005 250);
+      box-shadow:
+        0 1px 0 color-mix(in oklab, var(--accent) 50%, white 30%) inset,
+        0 4px 12px color-mix(in oklab, var(--accent) 35%, transparent);
+    }
+    .action.is-primary:hover:not(:disabled) {
+      background: color-mix(in oklab, var(--accent) 88%, white 12%);
+      border-color: color-mix(in oklab, var(--accent) 72%, black 28%);
+    }
+    .action.is-primary .ico { opacity: 1; stroke-width: 2; }
+    .action.is-primary kbd {
+      background: color-mix(in oklab, black 22%, transparent);
+      border-color: color-mix(in oklab, black 30%, transparent);
+      color: color-mix(in oklab, white 85%, transparent);
+    }
+
+    /* Info chip — clearly non-interactive */
+    .chip {
+      cursor: default;
+      padding: 6px 10px 6px 9px;
+      background: transparent;
+      border-color: color-mix(in oklab, var(--line) 60%, transparent);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .chip::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+      box-shadow: 0 0 0 2px color-mix(in oklab, var(--muted) 25%, transparent);
+    }
+    .chip[data-kind="markdown"]::before,
+    .chip[data-kind="text"]::before { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 25%, transparent); }
+    .chip[data-kind="image"]::before { background: var(--accent-2); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-2) 25%, transparent); }
+    .chip[data-kind="mermaid"]::before { background: oklch(0.78 0.16 145); box-shadow: 0 0 0 2px oklch(0.78 0.16 145 / 0.25); }
     .collapse-toggle {
       min-width: 40px;
       padding-inline: 0;
@@ -1577,12 +1740,29 @@ const webAppHTML = `<!doctype html>
           <div class="subtle" id="previewMeta"></div>
         </div>
         <div class="actions">
-          <button class="action" id="previewModeButton">Preview</button>
-          <button class="action" id="editModeButton">Edit</button>
-          <button class="action" id="saveButton">Save</button>
-          <button class="action" id="refreshButton">Refresh</button>
-          <button class="action" id="themeToggle" title="Cycle theme: Auto → Light → Dark">Auto</button>
-          <span class="chip" id="kindChip">Idle</span>
+          <div class="seg" role="tablist" aria-label="View mode">
+            <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Preview</span>
+            </button>
+            <button class="seg-btn" id="editModeButton" type="button" role="tab" aria-selected="false">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <span>Edit</span>
+            </button>
+          </div>
+          <button class="action" id="saveButton" type="button" title="Save (⌘S)">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+            <span>Save</span>
+            <kbd>⌘S</kbd>
+          </button>
+          <button class="action icon-only" id="refreshButton" type="button" title="Refresh" aria-label="Refresh">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
+          </button>
+          <span class="divider" aria-hidden="true"></span>
+          <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark" aria-label="Theme">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          </button>
+          <span class="chip" id="kindChip" data-kind="idle" aria-live="polite">Idle</span>
         </div>
       </div>
       <div class="preview-body" id="previewBody">
@@ -1934,10 +2114,16 @@ const webAppHTML = `<!doctype html>
 
     function updateEditorButtons() {
       const editable = canEditKind(state.selectedKind);
-      previewModeButtonEl.classList.toggle("active", state.editorMode === "preview");
-      editModeButtonEl.classList.toggle("active", state.editorMode === "edit");
+      const previewActive = state.editorMode === "preview";
+      const editActive = state.editorMode === "edit";
+      previewModeButtonEl.classList.toggle("active", previewActive);
+      editModeButtonEl.classList.toggle("active", editActive);
+      previewModeButtonEl.setAttribute("aria-selected", previewActive ? "true" : "false");
+      editModeButtonEl.setAttribute("aria-selected", editActive ? "true" : "false");
       editModeButtonEl.disabled = !editable || !state.selectedPath;
-      saveButtonEl.disabled = !editable || !state.selectedPath || !state.editDirty;
+      const canSave = editable && state.selectedPath && state.editDirty;
+      saveButtonEl.disabled = !canSave;
+      saveButtonEl.classList.toggle("is-primary", !!canSave);
     }
 
     function setEditorMode(mode) {
@@ -2548,6 +2734,7 @@ const webAppHTML = `<!doctype html>
       previewTitleEl.textContent = data.name;
       previewMetaEl.textContent = new Date(data.mod_time).toLocaleString() + " · " + humanSize(data.size);
       kindChipEl.textContent = data.kind;
+      kindChipEl.setAttribute("data-kind", data.kind || "idle");
       await renderCurrentView(data);
       if (state.selectedHash) {
         requestAnimationFrame(() => scrollToHash(state.selectedHash));
@@ -2579,6 +2766,7 @@ const webAppHTML = `<!doctype html>
         previewTitleEl.textContent = "Markdown Browser";
         previewMetaEl.textContent = "Usage guide";
         kindChipEl.textContent = "Help";
+        kindChipEl.setAttribute("data-kind", "help");
       } catch (err) {
         console.error("usage load failed:", err);
         previewBodyEl.innerHTML = '<div class="empty">Choose a Markdown, text, Mermaid, or image file from the left.</div>';
@@ -2997,6 +3185,11 @@ const webAppHTML = `<!doctype html>
     const themeToggleEl = document.getElementById("themeToggle");
     const THEME_ORDER = ["auto", "light", "dark"];
     const THEME_LABEL = { auto: "Auto", light: "Light", dark: "Dark" };
+    const THEME_ICON = {
+      auto:  '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>',
+      light: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+      dark:  '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>',
+    };
     function currentTheme() {
       try { return localStorage.getItem("mdviewer.theme") || "auto"; }
       catch (e) { return "auto"; }
@@ -3008,7 +3201,12 @@ const webAppHTML = `<!doctype html>
       } else {
         document.documentElement.setAttribute("data-theme", theme);
       }
-      if (themeToggleEl) themeToggleEl.textContent = THEME_LABEL[theme] || "Auto";
+      if (themeToggleEl) {
+        themeToggleEl.innerHTML = THEME_ICON[theme] || THEME_ICON.auto;
+        const label = THEME_LABEL[theme] || "Auto";
+        themeToggleEl.title = "Theme: " + label + " (click to cycle)";
+        themeToggleEl.setAttribute("aria-label", "Theme: " + label);
+      }
     }
     applyTheme(currentTheme());
     if (themeToggleEl) {
