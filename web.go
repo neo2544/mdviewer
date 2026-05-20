@@ -2143,6 +2143,10 @@ const webAppHTML = `<!doctype html>
       sortDirection: "asc",
       selectedPath: "",
       selectedHash: "",
+      // graph-rail state
+      graphAvailable: false,
+      graphConcepts: [],
+      graphActiveNodeId: null,
       favorites: [],
       selectedKind: "",
       selectedModTime: "",
@@ -2939,6 +2943,107 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    const graphChipsEl = document.getElementById("graphChips");
+    const graphLinksEl = document.getElementById("graphLinks");
+    const graphEmptyEl = document.getElementById("graphEmpty");
+    const graphBannerEl = document.getElementById("graphBanner");
+
+    async function refreshGraphStatus() {
+      try {
+        const r = await fetch("/api/graph/status");
+        const data = await r.json();
+        state.graphAvailable = !!data.available;
+        if (!state.graphAvailable) {
+          graphBannerEl.hidden = false;
+          graphBannerEl.textContent =
+            "Run graphify . in this folder to enable concept search.";
+        } else {
+          graphBannerEl.hidden = true;
+        }
+      } catch (err) {
+        state.graphAvailable = false;
+      }
+    }
+
+    async function loadConceptsForFile(absPath) {
+      graphLinksEl.innerHTML = "";
+      state.graphActiveNodeId = null;
+      if (!state.graphAvailable || !absPath) {
+        graphChipsEl.innerHTML = "";
+        graphChipsEl.appendChild(graphEmptyEl);
+        graphEmptyEl.textContent = state.graphAvailable
+          ? "Open a file to see extracted concepts."
+          : "";
+        return;
+      }
+      let nodes = [];
+      try {
+        const r = await fetch("/api/graph/file?path=" + encodeURIComponent(absPath));
+        nodes = await r.json();
+      } catch (err) {
+        nodes = [];
+      }
+      state.graphConcepts = nodes;
+      graphChipsEl.innerHTML = "";
+      if (!nodes.length) {
+        const e = document.createElement("div");
+        e.className = "graph-empty";
+        e.textContent = "No concepts extracted from this file.";
+        graphChipsEl.appendChild(e);
+        return;
+      }
+      for (const n of nodes) {
+        const btn = document.createElement("button");
+        btn.className = "graph-chip";
+        btn.type = "button";
+        btn.dataset.id = n.id;
+        btn.dataset.fileType = n.file_type || "";
+        btn.textContent = n.label;
+        btn.addEventListener("click", () => activateConcept(n.id, btn));
+        graphChipsEl.appendChild(btn);
+      }
+    }
+
+    async function activateConcept(nodeId, chipEl) {
+      for (const c of graphChipsEl.querySelectorAll(".graph-chip")) {
+        c.classList.toggle("active", c === chipEl);
+      }
+      state.graphActiveNodeId = nodeId;
+      graphLinksEl.innerHTML = "";
+      let refs = [];
+      try {
+        const r = await fetch("/api/graph/concept?id=" + encodeURIComponent(nodeId));
+        if (!r.ok) throw new Error(String(r.status));
+        refs = await r.json();
+      } catch (err) {
+        const e = document.createElement("div");
+        e.className = "graph-empty";
+        e.textContent = "Concept lookup failed.";
+        graphLinksEl.appendChild(e);
+        return;
+      }
+      if (!refs.length) {
+        const e = document.createElement("div");
+        e.className = "graph-empty";
+        e.textContent = "No other files contain this concept.";
+        graphLinksEl.appendChild(e);
+        return;
+      }
+      for (const ref of refs) {
+        const row = document.createElement("div");
+        row.className = "graph-link";
+        row.title = ref.path;
+        const name = ref.path.split("/").pop();
+        row.innerHTML =
+          '<span>' + name + '</span>' +
+          '<span class="graph-link-path">' + ref.path + '</span>';
+        row.addEventListener("click", () => {
+          selectFile(ref.path, { historyMode: "push" });
+        });
+        graphLinksEl.appendChild(row);
+      }
+    }
+
     async function selectFile(path, options = {}) {
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
@@ -2983,6 +3088,9 @@ const webAppHTML = `<!doctype html>
       if (options.historyMode) {
         syncHistory(options.historyMode);
       }
+      // graph rail update — runs in parallel with the rest, never blocks
+      // selection. Errors are swallowed by loadConceptsForFile itself.
+      loadConceptsForFile(path);
     }
 
     let usageGuideCache = null;
@@ -4516,6 +4624,7 @@ const webAppHTML = `<!doctype html>
     updateSortButtons();
     updateEditorButtons();
     renderRecents();
+    refreshGraphStatus();
     // Refresh relative-time labels in the Recent sections every minute so
     // "2m ago" doesn't sit stale at 0s for hours.
     setInterval(() => { renderRecents(); }, 60 * 1000);
