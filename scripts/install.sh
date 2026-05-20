@@ -74,7 +74,10 @@ chmod +x "$TMP_APP/Contents/MacOS/${APP_NAME}"
 
 # Include the menu-bar icon as the app icon too (handy when listed in
 # Spotlight; the menu-bar icon itself is embedded in the binary already).
-if [[ -f "$REPO_ROOT/assets/menubar-icon@2x.png" ]]; then
+# Prefer the hires source so Spotlight / Finder previews stay crisp.
+if [[ -f "$REPO_ROOT/assets/menubar-icon@hires.png" ]]; then
+    cp "$REPO_ROOT/assets/menubar-icon@hires.png" "$TMP_APP/Contents/Resources/AppIcon.png"
+elif [[ -f "$REPO_ROOT/assets/menubar-icon@2x.png" ]]; then
     cp "$REPO_ROOT/assets/menubar-icon@2x.png" "$TMP_APP/Contents/Resources/AppIcon.png"
 fi
 

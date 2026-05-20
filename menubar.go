@@ -24,6 +24,14 @@ var menubarIconPNG []byte
 //go:embed assets/menubar-icon@2x.png
 var menubarIconRetinaPNG []byte
 
+// menubarIconHiresPNG is the 512×512 master. The systray doesn't need it
+// (macOS renders the @2x at 44px), but the web server hands it to browsers
+// as /favicon.ico / /icon.png so Retina tabs and the in-app sidebar logo
+// stay crisp.
+//
+//go:embed assets/menubar-icon@hires.png
+var menubarIconHiresPNG []byte
+
 // openFileChan delivers file paths that need to be opened in the web
 // viewer. macOS Apple-Event handlers (see menubar_darwin.go) push paths
 // here, and the menu-bar loop consumes them.
@@ -83,7 +91,7 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 		registerOpenHandler()
 		// Template icons render correctly in both light and dark menu bars
 		// (macOS inverts the alpha for us).
-		systray.SetTemplateIcon(menubarIconPNG, menubarIconPNG)
+		systray.SetTemplateIcon(menubarIconPNG, menubarIconRetinaPNG)
 		systray.SetTooltip("MD Viewer · " + serverURL)
 
 		mOpen := systray.AddMenuItem("Open in Browser", "Open the viewer in your default browser")

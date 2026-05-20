@@ -47,3 +47,8 @@ Desktop.ini
 *.log
 *.tmp
 *.bak
+
+# --- graphify output ---
+# Knowledge-graph build artifacts produced by `graphify`; user-specific
+# and re-creatable. Keep `testdata/` for committed fixtures.
+graphify-out/

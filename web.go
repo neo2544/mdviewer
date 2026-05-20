@@ -55,6 +55,8 @@ type saveFileRequest struct {
 func (s *webServer) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/icon.png", s.handleIcon)
+	mux.HandleFunc("/favicon.ico", s.handleIcon)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -64,6 +66,16 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/aliases", s.handleAliases)
 	return mux
+}
+
+// handleIcon serves the same M↓ template image embedded for the systray.
+// Browsers use it as the tab favicon (/favicon.ico → png ok in modern UAs)
+// and the apple-touch-icon. Black-with-alpha PNG; visibility in dark tabs
+// depends on the browser's tab strip colour, same as any single-tone icon.
+func (s *webServer) handleIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(menubarIconHiresPNG)
 }
 
 // handleAliases: GET returns the full alias map. POST upserts a single
@@ -213,6 +225,9 @@ func (s *webServer) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// show_hidden=1 includes dotfiles. Defaults to false (Finder-like).
+	showHidden := r.URL.Query().Get("show_hidden") == "1"
+
 	items, err := os.ReadDir(absDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -230,7 +245,7 @@ func (s *webServer) handleList(w http.ResponseWriter, r *http.Request) {
 
 	var dirs, files []webEntry
 	for _, item := range items {
-		if strings.HasPrefix(item.Name(), ".") {
+		if !showHidden && strings.HasPrefix(item.Name(), ".") {
 			continue
 		}
 		fullPath := filepath.Join(absDir, item.Name())
@@ -313,6 +328,9 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 		resp.Content = string(data)
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
 		resp.Kind = "image"
+		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
+	case ".html", ".htm":
+		resp.Kind = "html"
 		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
 	case ".txt", ".go", ".py", ".js", ".ts", ".sh", ".yaml", ".yml", ".json", ".toml", ".sql", ".log":
 		data, err := os.ReadFile(absPath)
@@ -505,6 +523,8 @@ const webAppHTML = `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mdviewer web preview</title>
+  <link rel="icon" type="image/png" href="/icon.png" />
+  <link rel="apple-touch-icon" href="/icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     /* Default = dark. Light tokens are applied either:
@@ -632,6 +652,24 @@ const webAppHTML = `<!doctype html>
     }
     .eyebrow { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .18em; }
     .title { margin-top: 8px; font-size: 22px; font-weight: 700; }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      color: var(--accent);
+    }
+    .brand-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      color: var(--text);
+    }
     .subtle { color: var(--muted); font-size: 13px; }
     #cwd {
       display: block;
@@ -1144,6 +1182,43 @@ const webAppHTML = `<!doctype html>
     .chip[data-kind="text"]::before { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 25%, transparent); }
     .chip[data-kind="image"]::before { background: var(--accent-2); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-2) 25%, transparent); }
     .chip[data-kind="mermaid"]::before { background: oklch(0.78 0.16 145); box-shadow: 0 0 0 2px oklch(0.78 0.16 145 / 0.25); }
+    .chip[data-kind="html"]::before { background: oklch(0.76 0.17 50); box-shadow: 0 0 0 2px oklch(0.76 0.17 50 / 0.25); }
+
+    /* Sandboxed HTML preview — fills the preview body bleed-to-edge */
+    .html-frame-wrap {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      background: var(--bg);
+    }
+    .html-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+      display: block;
+    }
+    .html-frame-note {
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--muted);
+      background: color-mix(in oklab, var(--panel) 90%, transparent);
+      border-top: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      letter-spacing: 0.02em;
+    }
+    .html-frame-note a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px dashed color-mix(in oklab, var(--accent) 40%, transparent);
+    }
+    .html-frame-note a:hover {
+      color: color-mix(in oklab, var(--accent) 85%, var(--text) 15%);
+    }
+    .preview-body:has(.html-frame-wrap) { padding: 0; position: relative; }
     .collapse-toggle {
       min-width: 40px;
       padding-inline: 0;
@@ -1680,6 +1755,17 @@ const webAppHTML = `<!doctype html>
     <aside class="shell sidebar sidebar-shell">
       <div class="topbar sidebar-topbar">
         <div>
+          <div class="brand-row">
+            <svg class="brand-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"
+                 fill="none" stroke="currentColor" stroke-width="7"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="5" y="11" width="90" height="78" rx="10" />
+              <path d="M 21.5 27.5 L 21.5 72.5 M 21.5 27.5 L 37.2 56.2 L 52.9 27.5 L 52.9 72.5" />
+              <line x1="69.2" y1="33.4" x2="69.2" y2="72.5" />
+              <polyline points="64.1,55.9 69.2,72.5 74.3,55.9" />
+            </svg>
+            <span class="brand-name">MD Viewer</span>
+          </div>
           <div class="eyebrow">Local Preview</div>
           <div class="title">Markdown Browser</div>
           <div class="subtle" id="cwd"></div>
@@ -1923,6 +2009,8 @@ const webAppHTML = `<!doctype html>
       restoringHistory: false,
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
+      // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
+      showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
     };
 
     // Persist lastSeenAt on unload so the next session can use it for "recent" detection.
@@ -2452,7 +2540,10 @@ const webAppHTML = `<!doctype html>
     }
 
     async function loadDir(dir = "", options = {}) {
-      const query = dir ? "?dir=" + encodeURIComponent(dir) : "";
+      const params = new URLSearchParams();
+      if (dir) params.set("dir", dir);
+      if (state.showHidden) params.set("show_hidden", "1");
+      const query = params.toString() ? "?" + params.toString() : "";
       let data;
       try {
         data = await fetchJSON("/api/list" + query);
@@ -2828,6 +2919,29 @@ const webAppHTML = `<!doctype html>
       }
       if (data.kind === "image") {
         previewBodyEl.innerHTML = '<img alt="" src="' + data.raw_url + '&t=' + Date.now() + '" />';
+        return;
+      }
+      if (data.kind === "html") {
+        // Render HTML files in a sandboxed iframe. allow-scripts only —
+        // no same-origin, so inline JS (vis-network, d3, etc.) works but
+        // cannot reach the host page's storage or DOM.
+        previewBodyEl.innerHTML = "";
+        const wrap = document.createElement("div");
+        wrap.className = "html-frame-wrap";
+        const frame = document.createElement("iframe");
+        frame.className = "html-frame";
+        frame.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms");
+        frame.setAttribute("loading", "lazy");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.title = data.name || "HTML preview";
+        frame.src = data.raw_url + "&t=" + Date.now();
+        wrap.appendChild(frame);
+        // Small footer chip indicating sandboxed mode + "open in new tab" escape hatch.
+        const note = document.createElement("div");
+        note.className = "html-frame-note";
+        note.innerHTML = '<span>Sandboxed preview</span> · <a href="' + data.raw_url + '" target="_blank" rel="noopener">Open in new tab ↗</a>';
+        wrap.appendChild(note);
+        previewBodyEl.appendChild(wrap);
         return;
       }
       if (data.kind === "text") {
@@ -3588,6 +3702,18 @@ const webAppHTML = `<!doctype html>
         event.preventDefault();
         pathInputEl.focus();
         pathInputEl.select();
+        return;
+      }
+      // Cmd/Ctrl+Shift+. → Finder-style toggle for showing hidden (dot) files.
+      // Match by event.code so it works regardless of which character the
+      // Shift+. combo emits ('>' on US layouts, etc.).
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey &&
+          (event.code === "Period" || lowerKey === "." || lowerKey === ">")) {
+        event.preventDefault();
+        state.showHidden = !state.showHidden;
+        try { localStorage.setItem("mdviewer.showHidden", state.showHidden ? "1" : "0"); } catch (e) {}
+        statusTextEl.textContent = state.showHidden ? "Hidden files: shown" : "Hidden files: hidden";
+        loadDir(state.cwd, { keepSelection: true, silent: true });
         return;
       }
       const isSaveKey = (event.metaKey || event.ctrlKey) && lowerKey === "s";
