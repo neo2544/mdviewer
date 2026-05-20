@@ -63,6 +63,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/icon.png", s.handleIcon)
 	mux.HandleFunc("/favicon.ico", s.handleIcon)
 	mux.HandleFunc("/api/graph/status", s.handleGraphStatus)
+	mux.HandleFunc("/api/graph/file", s.handleGraphFile)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -4441,4 +4442,26 @@ func (s *webServer) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
 		resp.LoadedAt = g.LoadedAt()
 	}
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *webServer) handleGraphFile(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	g := s.currentGraph()
+	if g == nil {
+		// Match the "no concepts" empty response so the frontend has
+		// a single render path; the rail decides what to show based
+		// on /api/graph/status.
+		s.writeJSON(w, http.StatusOK, []Node{})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, g.ConceptsInFile(abs))
 }

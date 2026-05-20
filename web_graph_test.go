@@ -68,3 +68,44 @@ func TestGraphStatusWithGraph(t *testing.T) {
 		t.Errorf("NodeCount = %d, want 3", resp.NodeCount)
 	}
 }
+
+func TestGraphFileReturnsConcepts(t *testing.T) {
+	s := newTestServer(t, true)
+	abs := filepath.Join(s.startDir, "auth/session.go")
+	req := httptest.NewRequest("GET", "/api/graph/file?path="+abs, nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got []Node
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "auth_session_token" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestGraphFileMissingPath(t *testing.T) {
+	s := newTestServer(t, true)
+	req := httptest.NewRequest("GET", "/api/graph/file", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestGraphFileNoGraph(t *testing.T) {
+	s := newTestServer(t, false)
+	req := httptest.NewRequest("GET", "/api/graph/file?path=/nope", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() == "null\n" {
+		t.Errorf("response is null; should be []")
+	}
+}
