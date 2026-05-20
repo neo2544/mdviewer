@@ -3033,10 +3033,13 @@ const webAppHTML = `<!doctype html>
         const row = document.createElement("div");
         row.className = "graph-link";
         row.title = ref.path;
-        const name = ref.path.split("/").pop();
-        row.innerHTML =
-          '<span>' + name + '</span>' +
-          '<span class="graph-link-path">' + ref.path + '</span>';
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = ref.path.split("/").pop();
+        const pathSpan = document.createElement("span");
+        pathSpan.className = "graph-link-path";
+        pathSpan.textContent = ref.path;
+        row.appendChild(nameSpan);
+        row.appendChild(pathSpan);
         row.addEventListener("click", () => {
           selectFile(ref.path, { historyMode: "push" });
         });
