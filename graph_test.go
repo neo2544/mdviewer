@@ -6,7 +6,10 @@ import (
 )
 
 func TestGraphIndexLoad(t *testing.T) {
-	root, _ := filepath.Abs(".")
+	root, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
 	g, err := LoadGraph("testdata/graph_simple.json", root)
 	if err != nil {
 		t.Fatalf("LoadGraph error: %v", err)
