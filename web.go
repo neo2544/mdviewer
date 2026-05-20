@@ -1875,6 +1875,34 @@ const webAppHTML = `<!doctype html>
       font-size: 12px;
       font-style: italic;
     }
+    .graph-build {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .graph-build-btn {
+      padding: 6px 12px;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .graph-build-btn:disabled { opacity: 0.5; cursor: progress; }
+    .graph-build-log {
+      max-height: 120px;
+      overflow-y: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--code);
+      padding: 6px 8px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+    }
+    .graph-build-log[hidden] { display: none; }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -2013,6 +2041,10 @@ const webAppHTML = `<!doctype html>
         <div class="graph-links" id="graphLinks"></div>
       </div>
       <div class="graph-section-title" id="graphBanner" hidden></div>
+      <div class="graph-build" id="graphBuildBox" hidden>
+        <button class="graph-build-btn" id="graphBuildBtn" type="button">Build graph</button>
+        <div class="graph-build-log" id="graphBuildLog" hidden></div>
+      </div>
     </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
@@ -2953,6 +2985,9 @@ const webAppHTML = `<!doctype html>
     const graphLinksEl = document.getElementById("graphLinks");
     const graphEmptyEl = document.getElementById("graphEmpty");
     const graphBannerEl = document.getElementById("graphBanner");
+    const graphBuildBoxEl = document.getElementById("graphBuildBox");
+    const graphBuildBtnEl = document.getElementById("graphBuildBtn");
+    const graphBuildLogEl = document.getElementById("graphBuildLog");
 
     async function refreshGraphStatus() {
       try {
@@ -2962,13 +2997,66 @@ const webAppHTML = `<!doctype html>
         if (!state.graphAvailable) {
           graphBannerEl.hidden = false;
           graphBannerEl.textContent =
-            "Run graphify . in this folder to enable concept search.";
+            "Graph not built yet. Click 'Build graph' to extract concepts from this folder.";
+          graphBuildBoxEl.hidden = false;
         } else {
           graphBannerEl.hidden = true;
+          graphBuildBoxEl.hidden = true;
         }
       } catch (err) {
         state.graphAvailable = false;
+        graphBuildBoxEl.hidden = false;
       }
+    }
+
+    graphBuildBtnEl.addEventListener("click", startGraphBuild);
+
+    async function startGraphBuild() {
+      graphBuildBtnEl.disabled = true;
+      graphBuildLogEl.hidden = false;
+      graphBuildLogEl.textContent = "Starting graphify…\n";
+      let resp;
+      try {
+        resp = await fetch("/api/graph/build", { method: "POST" });
+      } catch (err) {
+        graphBuildLogEl.textContent += "network error: " + err + "\n";
+        graphBuildBtnEl.disabled = false;
+        return;
+      }
+      if (!resp.ok) {
+        const msg = await resp.text();
+        graphBuildLogEl.textContent += "error: " + msg + "\n";
+        graphBuildBtnEl.disabled = false;
+        return;
+      }
+      const src = new EventSource("/api/graph/build/status");
+      src.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.phase === "closed") {
+            graphBuildLogEl.textContent += data.ok ? "done.\n" : "failed: " + data.message + "\n";
+            src.close();
+            graphBuildBtnEl.disabled = false;
+            if (data.ok) {
+              refreshGraphStatus().then(() => {
+                if (state.selectedPath) loadConceptsForFile(state.selectedPath);
+              });
+            }
+            return;
+          }
+          const ts = data.at ? data.at.replace("T", " ").slice(11, 19) : "";
+          graphBuildLogEl.textContent +=
+            "[" + ts + "] " + (data.phase || "log") + ": " + (data.message || "") + "\n";
+          graphBuildLogEl.scrollTop = graphBuildLogEl.scrollHeight;
+        } catch (e) {
+          // ignore parse errors
+        }
+      };
+      src.onerror = () => {
+        graphBuildLogEl.textContent += "stream closed.\n";
+        src.close();
+        graphBuildBtnEl.disabled = false;
+      };
     }
 
     async function loadConceptsForFile(absPath) {
