@@ -152,3 +152,43 @@ func (g *GraphIndex) ConceptsInFile(absPath string) []Node {
 	}
 	return out
 }
+
+// fileMTime returns the modification time of the source path or zero if
+// the file is unreadable.
+func (g *GraphIndex) fileMTime() time.Time {
+	fi, err := os.Stat(g.sourcePath)
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
+}
+
+// ReloadIfChanged re-reads graph.json when its mtime is newer than the
+// timestamp captured at the previous load. Returns (true, nil) if the
+// in-memory index was replaced, (false, nil) otherwise.
+//
+// Reload is in-place — callers keep the same *GraphIndex pointer — so
+// existing references in the webServer struct don't need re-wiring.
+func (g *GraphIndex) ReloadIfChanged() (bool, error) {
+	current := g.fileMTime()
+	if current.IsZero() {
+		return false, fmt.Errorf("stat %s: file unreadable", g.sourcePath)
+	}
+	g.mu.RLock()
+	prev := g.loadedAt
+	g.mu.RUnlock()
+	if !current.After(prev) {
+		return false, nil
+	}
+	fresh, err := LoadGraph(g.sourcePath, g.projectRoot)
+	if err != nil {
+		return false, err
+	}
+	g.mu.Lock()
+	g.nodes = fresh.nodes
+	g.byFile = fresh.byFile
+	g.neighbors = fresh.neighbors
+	g.loadedAt = current
+	g.mu.Unlock()
+	return true, nil
+}
