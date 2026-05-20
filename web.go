@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +21,8 @@ type webServer struct {
 	graphMu   sync.RWMutex
 	graph     *GraphIndex // nil = no graph available
 	graphPath string      // <startDir>/graphify-out/graph.json
+
+	buildManager *BuildManager
 }
 
 type webEntry struct {
@@ -65,6 +68,8 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/graph/status", s.handleGraphStatus)
 	mux.HandleFunc("/api/graph/file", s.handleGraphFile)
 	mux.HandleFunc("/api/graph/concept", s.handleGraphConcept)
+	mux.HandleFunc("/api/graph/build", s.handleGraphBuild)
+	mux.HandleFunc("/api/graph/build/status", s.handleGraphBuildStatus)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -140,6 +145,7 @@ func runWebServer(startDir, appRoot, addr string) error {
 		graphPath: filepath.Join(startDir, "graphify-out", "graph.json"),
 	}
 	server.tryLoadGraph()
+	server.buildManager = newBuildManager()
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
 	return http.ListenAndServe(addr, server.routes())
 }
@@ -4696,4 +4702,65 @@ func (s *webServer) handleGraphConcept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, g.FilesForConcept(id))
+}
+
+func (s *webServer) handleGraphBuild(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sess, err := s.buildManager.Start(r.Context(), s.startDir)
+	if err != nil {
+		// "already running" → 409; everything else (no PATH, no key) → 503
+		if strings.Contains(err.Error(), "already running") {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	s.writeJSON(w, http.StatusAccepted, map[string]string{"job_id": sess.ID()})
+}
+
+func (s *webServer) handleGraphBuildStatus(w http.ResponseWriter, r *http.Request) {
+	sess := s.buildManager.Current()
+	if sess == nil {
+		http.Error(w, "no build sessions", http.StatusNotFound)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	encoder := json.NewEncoder(w)
+	for ev := range sess.Events() {
+		_, _ = io.WriteString(w, "data: ")
+		_ = encoder.Encode(ev)
+		_, _ = io.WriteString(w, "\n")
+		flusher.Flush()
+	}
+
+	final := map[string]any{
+		"phase":   "closed",
+		"ok":      sess.OK(),
+		"message": "",
+	}
+	if e := sess.Err(); e != nil {
+		final["message"] = e.Error()
+	}
+	_, _ = io.WriteString(w, "data: ")
+	_ = encoder.Encode(final)
+	_, _ = io.WriteString(w, "\n")
+	flusher.Flush()
+
+	if sess.OK() {
+		s.tryLoadGraph()
+	}
 }

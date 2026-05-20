@@ -53,6 +53,7 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 		graphPath: filepath.Join(startDir, "graphify-out", "graph.json"),
 	}
 	server.tryLoadGraph()
+	server.buildManager = newBuildManager()
 
 	// Pre-bind the listener synchronously so we fail FAST on port
 	// conflicts (typically "another mdviewer is already running").

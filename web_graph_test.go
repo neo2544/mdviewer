@@ -136,3 +136,27 @@ func TestGraphConceptMissingNode(t *testing.T) {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestGraphBuildMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, false)
+	s.buildManager = newBuildManager()
+	req := httptest.NewRequest("GET", "/api/graph/build", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestGraphBuildMissingAPIKey(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	s := newTestServer(t, false)
+	s.buildManager = newBuildManager()
+	req := httptest.NewRequest("POST", "/api/graph/build", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+}
