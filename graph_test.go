@@ -37,3 +37,31 @@ func TestConceptsInFile(t *testing.T) {
 		t.Errorf("ConceptsInFile(missing) should return non-nil empty slice")
 	}
 }
+
+func TestFilesForConcept(t *testing.T) {
+	root, _ := filepath.Abs(".")
+	g, err := LoadGraph("testdata/graph_simple.json", root)
+	if err != nil {
+		t.Fatalf("LoadGraph: %v", err)
+	}
+	refs := g.FilesForConcept("auth_session_token")
+	gotPaths := map[string]bool{}
+	for _, r := range refs {
+		gotPaths[r.Path] = true
+	}
+	wantPaths := []string{
+		filepath.Join(root, "auth/login.go"),
+		filepath.Join(root, "docs/intro.md"),
+	}
+	for _, w := range wantPaths {
+		if !gotPaths[w] {
+			t.Errorf("FilesForConcept missing %s; got %v", w, refs)
+		}
+	}
+	if gotPaths[filepath.Join(root, "auth/session.go")] {
+		t.Errorf("FilesForConcept should not return the source file of the node itself")
+	}
+	if g.FilesForConcept("nonexistent") == nil {
+		t.Errorf("missing node should return non-nil empty slice, not nil")
+	}
+}

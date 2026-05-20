@@ -95,6 +95,49 @@ func (g *GraphIndex) normalisePath(p string) string {
 	return filepath.Join(g.projectRoot, p)
 }
 
+// FilesForConcept returns the OTHER files that contain the given node
+// or any of its graph neighbours. Used by the "Linked files" panel —
+// the file the node itself was extracted from is excluded so the panel
+// only shows targets the user can actually jump to.
+func (g *GraphIndex) FilesForConcept(nodeID string) []FileRef {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	base, ok := g.nodes[nodeID]
+	if !ok {
+		return []FileRef{}
+	}
+	selfFile := base.SourceFile
+	seen := map[string]bool{selfFile: true}
+	out := []FileRef{}
+	add := func(n Node) {
+		if n.SourceFile == "" || seen[n.SourceFile] {
+			return
+		}
+		seen[n.SourceFile] = true
+		out = append(out, FileRef{Path: n.SourceFile, Label: n.Label, FileType: n.FileType})
+	}
+	for _, nid := range g.neighbors[nodeID] {
+		if n, ok := g.nodes[nid]; ok {
+			add(n)
+		}
+	}
+	return out
+}
+
+// NodeCount is read by /api/graph/status.
+func (g *GraphIndex) NodeCount() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.nodes)
+}
+
+// LoadedAt is read by /api/graph/status.
+func (g *GraphIndex) LoadedAt() time.Time {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.loadedAt
+}
+
 // ConceptsInFile returns nodes whose source_file equals absPath. Returns
 // a non-nil empty slice when the file has no extracted concepts so JSON
 // responses render as [] rather than null.
