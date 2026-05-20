@@ -9,12 +9,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 type webServer struct {
 	startDir string
 	appRoot  string
+
+	graphMu   sync.RWMutex
+	graph     *GraphIndex // nil = no graph available
+	graphPath string      // <startDir>/graphify-out/graph.json
 }
 
 type webEntry struct {
@@ -127,11 +132,50 @@ func runWebServer(startDir, appRoot, addr string) error {
 		addr = "127.0.0.1:8421"
 	}
 	server := &webServer{
-		startDir: startDir,
-		appRoot:  appRoot,
+		startDir:  startDir,
+		appRoot:   appRoot,
+		graphPath: filepath.Join(startDir, "graphify-out", "graph.json"),
 	}
+	server.tryLoadGraph()
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
 	return http.ListenAndServe(addr, server.routes())
+}
+
+// tryLoadGraph is best-effort. A missing graph.json is the common case
+// (user hasn't run graphify yet) and must not break startup.
+func (s *webServer) tryLoadGraph() {
+	g, err := LoadGraph(s.graphPath, s.startDir)
+	if err != nil {
+		return
+	}
+	s.graphMu.Lock()
+	s.graph = g
+	s.graphMu.Unlock()
+}
+
+// currentGraph returns the active index, refreshing it if graph.json's
+// mtime has advanced since the last load. Returns nil when no graph
+// exists (caller MUST nil-check).
+func (s *webServer) currentGraph() *GraphIndex {
+	s.graphMu.RLock()
+	g := s.graph
+	s.graphMu.RUnlock()
+	if g == nil {
+		// Re-attempt cold load — handles the "graph appeared after
+		// startup" case (e.g. user ran graphify in another terminal).
+		s.tryLoadGraph()
+		s.graphMu.RLock()
+		g = s.graph
+		s.graphMu.RUnlock()
+		return g
+	}
+	if _, err := g.ReloadIfChanged(); err != nil {
+		// Treat reload error as "stale data is better than nothing".
+		// Logging here would spam the console on every request when
+		// the file is being rewritten by graphify; silently keep the
+		// previous index.
+	}
+	return g
 }
 
 func (s *webServer) favoritesPath() string {
