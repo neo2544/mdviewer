@@ -94,3 +94,18 @@ func (g *GraphIndex) normalisePath(p string) string {
 	}
 	return filepath.Join(g.projectRoot, p)
 }
+
+// ConceptsInFile returns nodes whose source_file equals absPath. Returns
+// a non-nil empty slice when the file has no extracted concepts so JSON
+// responses render as [] rather than null.
+func (g *GraphIndex) ConceptsInFile(absPath string) []Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	key := filepath.Clean(absPath)
+	ids := g.byFile[key]
+	out := make([]Node, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, g.nodes[id])
+	}
+	return out
+}
