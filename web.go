@@ -591,6 +591,7 @@ const webAppHTML = `<!doctype html>
       --sidebar-width: 320px;
       --splitter-width: 12px;
       --file-meta-width: 6.25rem;
+      --graph-rail-width: 240px;
     }
     /* Light token set, factored so we can apply via either media query or
        an explicit data-theme attribute. */
@@ -633,14 +634,32 @@ const webAppHTML = `<!doctype html>
     }
     .app {
       display: grid;
-      grid-template-columns: var(--sidebar-width) var(--splitter-width) minmax(0, 1fr);
+      grid-template-columns:
+        var(--sidebar-width)
+        var(--splitter-width)
+        minmax(0, 1fr)
+        var(--graph-rail-width);
       height: 100vh;
       gap: 0;
       padding: 18px;
       overflow: hidden;
     }
     .app.sidebar-collapsed {
-      grid-template-columns: 0px 0px minmax(0, 1fr);
+      grid-template-columns:
+        0px
+        0px
+        minmax(0, 1fr)
+        var(--graph-rail-width);
+    }
+    .app.graph-rail-collapsed {
+      grid-template-columns:
+        var(--sidebar-width)
+        var(--splitter-width)
+        minmax(0, 1fr)
+        0px;
+    }
+    .app.sidebar-collapsed.graph-rail-collapsed {
+      grid-template-columns: 0px 0px minmax(0, 1fr) 0px;
     }
     .shell {
       background: color-mix(in oklab, var(--panel) 92%, black);
@@ -1784,6 +1803,72 @@ const webAppHTML = `<!doctype html>
       .app.sidebar-collapsed .sidebar-shell { display: none; }
       .reveal-sidebar { display: inline-flex; }
     }
+    .graph-rail {
+      margin-left: 14px;
+      padding: 14px 14px 18px;
+      background: color-mix(in oklab, var(--panel) 92%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .app.graph-rail-collapsed .graph-rail {
+      display: none;
+    }
+    .graph-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .18em;
+      color: var(--muted);
+    }
+    .graph-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .graph-chip {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .graph-chip:hover { border-color: var(--accent); }
+    .graph-chip.active { background: var(--accent); color: var(--bg); border-color: transparent; }
+    .graph-chip[data-file-type="document"] { border-left: 3px solid var(--accent); }
+    .graph-chip[data-file-type="code"]     { border-left: 3px solid var(--accent-2); }
+    .graph-chip[data-file-type="paper"]    { border-left: 3px solid color-mix(in oklab, var(--accent) 60%, white); }
+    .graph-chip[data-file-type="image"]    { border-left: 3px solid var(--muted); }
+    .graph-links {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .graph-link {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .graph-link:hover { background: var(--panel-2); }
+    .graph-link .graph-link-path {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .graph-empty {
+      color: var(--muted);
+      font-size: 12px;
+      font-style: italic;
+    }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -1910,6 +1995,19 @@ const webAppHTML = `<!doctype html>
         <span id="scrollText">Preview 0%</span>
       </div>
     </main>
+    <aside class="shell graph-rail" id="graphRail" aria-label="Graph concepts">
+      <div>
+        <div class="graph-section-title">Concepts in this file</div>
+        <div class="graph-chips" id="graphChips">
+          <div class="graph-empty" id="graphEmpty">Open a file to see extracted concepts.</div>
+        </div>
+      </div>
+      <div>
+        <div class="graph-section-title">Linked files</div>
+        <div class="graph-links" id="graphLinks"></div>
+      </div>
+      <div class="graph-section-title" id="graphBanner" hidden></div>
+    </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
