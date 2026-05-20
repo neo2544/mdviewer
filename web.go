@@ -62,6 +62,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/icon.png", s.handleIcon)
 	mux.HandleFunc("/favicon.ico", s.handleIcon)
+	mux.HandleFunc("/api/graph/status", s.handleGraphStatus)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -4424,3 +4425,20 @@ const webAppHTML = `<!doctype html>
   </script>
 </body>
 </html>`
+
+type graphStatusResponse struct {
+	Available bool      `json:"available"`
+	NodeCount int       `json:"node_count"`
+	LoadedAt  time.Time `json:"loaded_at,omitempty"`
+	Path      string    `json:"path"`
+}
+
+func (s *webServer) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
+	resp := graphStatusResponse{Path: s.graphPath}
+	if g := s.currentGraph(); g != nil {
+		resp.Available = true
+		resp.NodeCount = g.NodeCount()
+		resp.LoadedAt = g.LoadedAt()
+	}
+	s.writeJSON(w, http.StatusOK, resp)
+}
