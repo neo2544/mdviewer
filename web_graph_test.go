@@ -109,3 +109,30 @@ func TestGraphFileNoGraph(t *testing.T) {
 		t.Errorf("response is null; should be []")
 	}
 }
+
+func TestGraphConceptReturnsFiles(t *testing.T) {
+	s := newTestServer(t, true)
+	req := httptest.NewRequest("GET", "/api/graph/concept?id=auth_session_token", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got []FileRef
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d files, want 2", len(got))
+	}
+}
+
+func TestGraphConceptMissingNode(t *testing.T) {
+	s := newTestServer(t, true)
+	req := httptest.NewRequest("GET", "/api/graph/concept?id=nope", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}

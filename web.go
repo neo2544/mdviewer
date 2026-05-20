@@ -64,6 +64,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/favicon.ico", s.handleIcon)
 	mux.HandleFunc("/api/graph/status", s.handleGraphStatus)
 	mux.HandleFunc("/api/graph/file", s.handleGraphFile)
+	mux.HandleFunc("/api/graph/concept", s.handleGraphConcept)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -4464,4 +4465,25 @@ func (s *webServer) handleGraphFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, g.ConceptsInFile(abs))
+}
+
+func (s *webServer) handleGraphConcept(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	g := s.currentGraph()
+	if g == nil {
+		http.Error(w, "no graph available", http.StatusNotFound)
+		return
+	}
+	g.mu.RLock()
+	_, exists := g.nodes[id]
+	g.mu.RUnlock()
+	if !exists {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, g.FilesForConcept(id))
 }
