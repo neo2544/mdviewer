@@ -1937,6 +1937,32 @@ const webAppHTML = `<!doctype html>
       font-size: 12px;
     }
     .graph-backend-select:disabled { opacity: 0.5; }
+    .graph-built-at {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .graph-progress {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--panel-2);
+      overflow: hidden;
+    }
+    .graph-progress[hidden] { display: none; }
+    .graph-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+    .graph-progress-fill.error { background: oklch(0.6 0.2 25); }
+    .graph-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .graph-progress-meta[hidden] { display: none; }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -2066,6 +2092,7 @@ const webAppHTML = `<!doctype html>
     <aside class="shell graph-rail" id="graphRail" aria-label="Graph concepts">
       <div>
         <div class="graph-section-title">Concepts in this file</div>
+        <div class="graph-built-at" id="graphBuiltAt" hidden></div>
         <div class="graph-chips" id="graphChips">
           <div class="graph-empty" id="graphEmpty">Open a file to see extracted concepts.</div>
         </div>
@@ -2078,6 +2105,13 @@ const webAppHTML = `<!doctype html>
       <div class="graph-build" id="graphBuildBox" hidden>
         <select class="graph-backend-select" id="graphBackendSelect" aria-label="Build backend"></select>
         <button class="graph-build-btn" id="graphBuildBtn" type="button">Build graph</button>
+        <div class="graph-progress" id="graphProgress" hidden>
+          <div class="graph-progress-fill" id="graphProgressFill"></div>
+        </div>
+        <div class="graph-progress-meta" id="graphProgressMeta" hidden>
+          <span id="graphProgressPhase">starting&#x2026;</span>
+          <span id="graphProgressTime">0:00</span>
+        </div>
         <div class="graph-build-hint" id="graphBuildHint">
           Needs <code>GEMINI_API_KEY</code>. No key? Run <code>/graphify .</code> in Claude Code, then refresh.
         </div>
@@ -3032,12 +3066,26 @@ const webAppHTML = `<!doctype html>
     const graphBuildBtnEl = document.getElementById("graphBuildBtn");
     const graphBuildLogEl = document.getElementById("graphBuildLog");
     const graphBackendSelectEl = document.getElementById("graphBackendSelect");
+    const graphBuiltAtEl = document.getElementById("graphBuiltAt");
+    const graphProgressEl = document.getElementById("graphProgress");
+    const graphProgressFillEl = document.getElementById("graphProgressFill");
+    const graphProgressMetaEl = document.getElementById("graphProgressMeta");
+    const graphProgressPhaseEl = document.getElementById("graphProgressPhase");
+    const graphProgressTimeEl = document.getElementById("graphProgressTime");
 
     async function refreshGraphStatus() {
       try {
         const r = await fetch("/api/graph/status?dir=" + encodeURIComponent(state.cwd || ""));
         const data = await r.json();
         state.graphAvailable = !!data.available;
+        if (data.available && data.built_at) {
+          graphBuiltAtEl.hidden = false;
+          graphBuiltAtEl.textContent =
+            "Last built " + relativeTime(data.built_at) +
+            " \xb7 " + (data.node_count || 0) + " nodes";
+        } else {
+          graphBuiltAtEl.hidden = true;
+        }
         if (!state.graphAvailable) {
           graphBannerEl.hidden = false;
           graphBannerEl.textContent =
@@ -3080,8 +3128,50 @@ const webAppHTML = `<!doctype html>
 
     graphBuildBtnEl.addEventListener("click", startGraphBuild);
 
+    function relativeTime(iso) {
+      if (!iso) return "";
+      const then = new Date(iso).getTime();
+      if (isNaN(then)) return "";
+      const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+      if (secs < 60) return secs + "s ago";
+      const mins = Math.round(secs / 60);
+      if (mins < 60) return mins + "m ago";
+      const hrs = Math.round(mins / 60);
+      if (hrs < 24) return hrs + "h ago";
+      return Math.round(hrs / 24) + "d ago";
+    }
+
+    function phaseToPercent(phase) {
+      switch (phase) {
+        case "detect":  return 15;
+        case "extract": return 65;
+        case "cluster": return 85;
+        case "report":  return 95;
+        case "done":    return 100;
+        default:        return -1;
+      }
+    }
+
+    function formatElapsed(totalSecs) {
+      const m = Math.floor(totalSecs / 60);
+      const s = totalSecs % 60;
+      return m + ":" + (s < 10 ? "0" : "") + s;
+    }
+
     async function startGraphBuild() {
       graphBuildBtnEl.disabled = true;
+      graphProgressEl.hidden = false;
+      graphProgressMetaEl.hidden = false;
+      graphProgressFillEl.classList.remove("error");
+      graphProgressFillEl.style.width = "0%";
+      graphProgressPhaseEl.textContent = "starting…";
+      graphProgressTimeEl.textContent = "0:00";
+      let progressPct = 0;
+      const buildStart = Date.now();
+      const elapsedTimer = setInterval(function () {
+        graphProgressTimeEl.textContent =
+          formatElapsed(Math.floor((Date.now() - buildStart) / 1000));
+      }, 1000);
       graphBuildLogEl.hidden = false;
       graphBuildLogEl.textContent = "Starting graphify…\n";
       let resp;
@@ -3114,10 +3204,16 @@ const webAppHTML = `<!doctype html>
             graphBuildLogEl.textContent += data.ok ? "done.\n" : "failed: " + data.message + "\n";
             src.close();
             graphBuildBtnEl.disabled = false;
+            clearInterval(elapsedTimer);
             if (data.ok) {
+              graphProgressFillEl.style.width = "100%";
+              graphProgressPhaseEl.textContent = "done";
               refreshGraphStatus().then(() => {
                 if (state.selectedPath) loadConceptsForFile(state.selectedPath);
               });
+            } else {
+              graphProgressFillEl.classList.add("error");
+              graphProgressPhaseEl.textContent = "failed";
             }
             return;
           }
@@ -3125,11 +3221,20 @@ const webAppHTML = `<!doctype html>
           graphBuildLogEl.textContent +=
             "[" + ts + "] " + (data.phase || "log") + ": " + (data.message || "") + "\n";
           graphBuildLogEl.scrollTop = graphBuildLogEl.scrollHeight;
+          const pct = phaseToPercent(data.phase);
+          if (pct > progressPct) {
+            progressPct = pct;
+            graphProgressFillEl.style.width = progressPct + "%";
+          }
+          if (data.phase && data.phase !== "log") {
+            graphProgressPhaseEl.textContent = data.phase;
+          }
         } catch (e) {
           // ignore parse errors
         }
       };
       src.onerror = () => {
+        clearInterval(elapsedTimer);
         graphBuildLogEl.textContent += "stream closed.\n";
         src.close();
         graphBuildBtnEl.disabled = false;
