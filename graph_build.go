@@ -237,3 +237,94 @@ func pumpLines(r io.Reader, sess *BuildSession, wg *sync.WaitGroup) {
 		})
 	}
 }
+
+// Backend describes one selectable graph-build backend for the UI.
+type Backend struct {
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Available    bool   `json:"available"`
+	Experimental bool   `json:"experimental"`
+}
+
+// detectBackends scans the environment and PATH and reports which build
+// backends are usable on this machine. The order is the auto-selection
+// priority order (see pickAutoBackend).
+func detectBackends() []Backend {
+	hasGeminiKey := os.Getenv("GEMINI_API_KEY") != "" || os.Getenv("GOOGLE_API_KEY") != ""
+	onPath := func(bin string) bool {
+		_, err := exec.LookPath(bin)
+		return err == nil
+	}
+	return []Backend{
+		{ID: "gemini-api", Label: "Gemini API", Available: hasGeminiKey},
+		{ID: "claude-cli", Label: "Claude CLI", Available: onPath("claude")},
+		{ID: "ollama", Label: "Ollama (local)", Available: onPath("ollama")},
+		{ID: "gemini-cli", Label: "Gemini CLI", Available: onPath("gemini"), Experimental: true},
+		{ID: "codex-cli", Label: "Codex CLI", Available: onPath("codex"), Experimental: true},
+	}
+}
+
+// pickAutoBackend returns the first available backend ID in priority
+// order, or "" when nothing is usable.
+func pickAutoBackend() string {
+	for _, b := range detectBackends() {
+		if b.Available {
+			return b.ID
+		}
+	}
+	return ""
+}
+
+// graphifyTriggerPrompt is the natural-language instruction handed to an
+// agent CLI (gemini, codex) that doesn't support graphify's "/graphify"
+// slash command directly. Best-effort — these backends are experimental.
+const graphifyTriggerPrompt = "Use the graphify tool to build a knowledge graph for the current directory. Run it non-interactively and write the result to graphify-out/graph.json."
+
+// buildCommand constructs the exec.Cmd for the requested backend. An
+// empty or "auto" backendID resolves to pickAutoBackend(). The returned
+// command, when run, must produce <root>/graphify-out/graph.json.
+func buildCommand(ctx context.Context, backendID, root string) (*exec.Cmd, error) {
+	resolved := backendID
+	if resolved == "" || resolved == "auto" {
+		resolved = pickAutoBackend()
+		if resolved == "" {
+			return nil, errors.New("no usable build backend found: set GEMINI_API_KEY, or install the claude/gemini/codex/ollama CLI")
+		}
+	}
+
+	graphifyCmd := func(extraArgs ...string) (*exec.Cmd, error) {
+		bin, err := exec.LookPath("graphify")
+		if err != nil {
+			return nil, fmt.Errorf("graphify not found on PATH (try `pip install graphifyy`): %w", err)
+		}
+		args := append([]string{"extract", root}, extraArgs...)
+		return exec.CommandContext(ctx, bin, args...), nil
+	}
+	agentCmd := func(bin string, args ...string) (*exec.Cmd, error) {
+		path, err := exec.LookPath(bin)
+		if err != nil {
+			return nil, fmt.Errorf("%s not found on PATH: %w", bin, err)
+		}
+		c := exec.CommandContext(ctx, path, args...)
+		c.Dir = root // agent CLIs and the graphify skill default to cwd
+		return c, nil
+	}
+
+	switch resolved {
+	case "gemini-api":
+		if os.Getenv("GEMINI_API_KEY") == "" && os.Getenv("GOOGLE_API_KEY") == "" {
+			return nil, errors.New("gemini-api backend requires GEMINI_API_KEY or GOOGLE_API_KEY")
+		}
+		return graphifyCmd("--backend", "gemini")
+	case "ollama":
+		return graphifyCmd("--backend", "ollama")
+	case "claude-cli":
+		return agentCmd("claude", "-p", "/graphify .", "--dangerously-skip-permissions")
+	case "gemini-cli":
+		return agentCmd("gemini", "-p", graphifyTriggerPrompt)
+	case "codex-cli":
+		return agentCmd("codex", "exec", graphifyTriggerPrompt)
+	default:
+		return nil, fmt.Errorf("unknown backend: %s", resolved)
+	}
+}

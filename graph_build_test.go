@@ -133,3 +133,75 @@ func TestBuildSessionRequiresGraphifyOnPath(t *testing.T) {
 		t.Fatalf("graphify unexpectedly on PATH: %v", e)
 	}
 }
+
+func TestDetectBackends(t *testing.T) {
+	backends := detectBackends()
+	if len(backends) != 5 {
+		t.Fatalf("detectBackends returned %d backends, want 5", len(backends))
+	}
+	ids := map[string]Backend{}
+	for _, b := range backends {
+		ids[b.ID] = b
+	}
+	for _, want := range []string{"gemini-api", "claude-cli", "gemini-cli", "codex-cli", "ollama"} {
+		if _, ok := ids[want]; !ok {
+			t.Errorf("missing backend %q", want)
+		}
+	}
+	if !ids["gemini-cli"].Experimental || !ids["codex-cli"].Experimental {
+		t.Errorf("gemini-cli and codex-cli must be marked Experimental")
+	}
+	if ids["claude-cli"].Experimental {
+		t.Errorf("claude-cli must not be Experimental")
+	}
+}
+
+func TestDetectBackendsGeminiAPIKey(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	for _, b := range detectBackends() {
+		if b.ID == "gemini-api" && b.Available {
+			t.Errorf("gemini-api should be unavailable with no key")
+		}
+	}
+	t.Setenv("GOOGLE_API_KEY", "x")
+	for _, b := range detectBackends() {
+		if b.ID == "gemini-api" && !b.Available {
+			t.Errorf("gemini-api should be available with GOOGLE_API_KEY set")
+		}
+	}
+}
+
+func TestBuildCommandGeminiAPI(t *testing.T) {
+	root := t.TempDir()
+	installStubGraphify(t, root, 0) // also sets GEMINI_API_KEY
+	cmd, err := buildCommand(context.Background(), "gemini-api", root)
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	args := cmd.Args
+	if len(args) < 4 || args[1] != "extract" || args[2] != root {
+		t.Errorf("unexpected args: %v", args)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--backend gemini") {
+		t.Errorf("expected --backend gemini in %v", args)
+	}
+}
+
+func TestBuildCommandGeminiAPINoKey(t *testing.T) {
+	root := t.TempDir()
+	installStubGraphify(t, root, 0)
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	if _, err := buildCommand(context.Background(), "gemini-api", root); err == nil {
+		t.Errorf("expected error for gemini-api with no key")
+	}
+}
+
+func TestBuildCommandUnknownBackend(t *testing.T) {
+	root := t.TempDir()
+	if _, err := buildCommand(context.Background(), "nonsense", root); err == nil {
+		t.Errorf("expected error for unknown backend")
+	}
+}
