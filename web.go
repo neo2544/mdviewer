@@ -1918,6 +1918,16 @@ const webAppHTML = `<!doctype html>
       color: var(--text);
     }
     .graph-build-hint.warn { color: var(--accent); }
+    .graph-backend-select {
+      width: 100%;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 12px;
+    }
+    .graph-backend-select:disabled { opacity: 0.5; }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -2057,6 +2067,7 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="graph-section-title" id="graphBanner" hidden></div>
       <div class="graph-build" id="graphBuildBox" hidden>
+        <select class="graph-backend-select" id="graphBackendSelect" aria-label="Build backend"></select>
         <button class="graph-build-btn" id="graphBuildBtn" type="button">Build graph</button>
         <div class="graph-build-hint" id="graphBuildHint">
           Needs <code>GEMINI_API_KEY</code>. No key? Run <code>/graphify .</code> in Claude Code, then refresh.
@@ -3006,6 +3017,7 @@ const webAppHTML = `<!doctype html>
     const graphBuildBoxEl = document.getElementById("graphBuildBox");
     const graphBuildBtnEl = document.getElementById("graphBuildBtn");
     const graphBuildLogEl = document.getElementById("graphBuildLog");
+    const graphBackendSelectEl = document.getElementById("graphBackendSelect");
 
     async function refreshGraphStatus() {
       try {
@@ -3027,6 +3039,31 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    async function loadGraphBackends() {
+      let backends = [];
+      try {
+        const r = await fetch("/api/graph/backends");
+        backends = await r.json();
+      } catch (err) {
+        backends = [];
+      }
+      graphBackendSelectEl.innerHTML = "";
+      const auto = document.createElement("option");
+      auto.value = "auto";
+      auto.textContent = "Auto (best available)";
+      graphBackendSelectEl.appendChild(auto);
+      for (const b of backends) {
+        const opt = document.createElement("option");
+        opt.value = b.id;
+        let label = b.label;
+        if (b.experimental) label += " \xb7 experimental";
+        if (!b.available) label += " (unavailable)";
+        opt.textContent = label;
+        opt.disabled = !b.available;
+        graphBackendSelectEl.appendChild(opt);
+      }
+    }
+
     graphBuildBtnEl.addEventListener("click", startGraphBuild);
 
     async function startGraphBuild() {
@@ -3035,7 +3072,8 @@ const webAppHTML = `<!doctype html>
       graphBuildLogEl.textContent = "Starting graphify…\n";
       let resp;
       try {
-        resp = await fetch("/api/graph/build", { method: "POST" });
+        const backend = graphBackendSelectEl.value || "auto";
+        resp = await fetch("/api/graph/build?backend=" + encodeURIComponent(backend), { method: "POST" });
       } catch (err) {
         graphBuildLogEl.textContent += "network error: " + err + "\n";
         graphBuildBtnEl.disabled = false;
@@ -4746,6 +4784,7 @@ const webAppHTML = `<!doctype html>
     updateEditorButtons();
     renderRecents();
     refreshGraphStatus();
+    loadGraphBackends();
     // Refresh relative-time labels in the Recent sections every minute so
     // "2m ago" doesn't sit stale at 0s for hours.
     setInterval(() => { renderRecents(); }, 60 * 1000);
