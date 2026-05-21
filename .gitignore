@@ -25,6 +25,7 @@ vendor/
 
 # --- mdviewer runtime data ---
 .mdviewer_favorites.json
+.mdviewer_graph_history.json
 .mdviewer_history.json
 .mdviewer_state.json
 

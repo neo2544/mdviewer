@@ -142,7 +142,7 @@ func (m *BuildManager) Start(ctx context.Context, root, backendID string) (*Buil
 		running := !m.current.done
 		m.current.mu.Unlock()
 		if running {
-			return nil, fmt.Errorf("a graphify build is already running (id=%s)", m.current.id)
+			return nil, fmt.Errorf("a graphify build is already running for %s", m.current.root)
 		}
 	}
 

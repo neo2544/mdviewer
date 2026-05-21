@@ -206,6 +206,55 @@ func TestGraphStatusBuiltAtZeroWhenNoGraph(t *testing.T) {
 	}
 }
 
+func TestRecordBuildAndHistory(t *testing.T) {
+	s := newTestServer(t, true) // fixture graph at <startDir>/graphify-out/graph.json
+	s.recordBuild(s.startDir)
+
+	req := httptest.NewRequest("GET", "/api/graph/history", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got []graphHistoryEntry
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || filepath.Clean(got[0].Dir) != filepath.Clean(s.startDir) {
+		t.Errorf("history = %+v, want one entry for %s", got, s.startDir)
+	}
+	if got[0].BuiltAt.IsZero() {
+		t.Errorf("history entry should carry the graph.json mtime")
+	}
+}
+
+func TestGraphHistoryDropsMissing(t *testing.T) {
+	s := newTestServer(t, false) // NO graph file
+	// Record a dir whose graph.json does not exist.
+	s.recordBuild(s.startDir)
+
+	req := httptest.NewRequest("GET", "/api/graph/history", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	var got []graphHistoryEntry
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("history should drop entries whose graph.json is gone, got %+v", got)
+	}
+}
+
+func TestRecordBuildDedupes(t *testing.T) {
+	s := newTestServer(t, true)
+	s.recordBuild(s.startDir)
+	s.recordBuild(s.startDir)
+	s.recordBuild(s.startDir)
+	if dirs := s.loadGraphHistory(); len(dirs) != 1 {
+		t.Errorf("recordBuild should dedupe, got %v", dirs)
+	}
+}
+
 func TestGraphBuildSurvivesRequestCompletion(t *testing.T) {
 	root := t.TempDir()
 	installStubGraphify(t, root, 0) // stub graphify on PATH; sets GEMINI_API_KEY

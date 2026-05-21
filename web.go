@@ -22,6 +22,8 @@ type webServer struct {
 	graphMu    sync.RWMutex
 	graphCache map[string]*GraphIndex // abs folder path -> its graph index
 
+	historyMu sync.Mutex
+
 	buildManager *BuildManager
 }
 
@@ -71,6 +73,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/graph/build", s.handleGraphBuild)
 	mux.HandleFunc("/api/graph/build/status", s.handleGraphBuildStatus)
 	mux.HandleFunc("/api/graph/backends", s.handleGraphBackends)
+	mux.HandleFunc("/api/graph/history", s.handleGraphHistory)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -4946,6 +4949,7 @@ func (s *webServer) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Available = true
 		resp.NodeCount = g.NodeCount()
 		resp.LoadedAt = g.LoadedAt()
+		s.recordBuild(dir)
 	}
 	s.writeJSON(w, http.StatusOK, resp)
 }
@@ -5054,6 +5058,7 @@ func (s *webServer) handleGraphBuildStatus(w http.ResponseWriter, r *http.Reques
 
 	if sess.OK() {
 		s.invalidateGraph(sess.Root())
+		s.recordBuild(sess.Root())
 	}
 }
 
@@ -5061,4 +5066,89 @@ func (s *webServer) handleGraphBuildStatus(w http.ResponseWriter, r *http.Reques
 // the UI can populate the backend dropdown.
 func (s *webServer) handleGraphBackends(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, detectBackends())
+}
+
+const graphHistoryFileName = ".mdviewer_graph_history.json"
+
+// graphHistoryEntry is one row of build history returned to the UI.
+type graphHistoryEntry struct {
+	Dir     string    `json:"dir"`
+	BuiltAt time.Time `json:"built_at"`
+}
+
+func (s *webServer) graphHistoryPath() string {
+	return filepath.Join(s.appRoot, graphHistoryFileName)
+}
+
+// loadGraphHistory reads the persisted list of built directories
+// (most-recent-first). Missing / unreadable file -> nil.
+func (s *webServer) loadGraphHistory() []string {
+	data, err := os.ReadFile(s.graphHistoryPath())
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	if err := json.Unmarshal(data, &dirs); err != nil {
+		return nil
+	}
+	return dirs
+}
+
+func (s *webServer) saveGraphHistory(dirs []string) {
+	data, err := json.MarshalIndent(dirs, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.graphHistoryPath(), data, 0o644)
+}
+
+// recordBuild moves dir to the front of the build-history list
+// (de-duplicated, capped at 50). A no-op when dir is already the most
+// recent entry, so repeated /api/graph/status hits stay cheap.
+func (s *webServer) recordBuild(dir string) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return
+	}
+	abs = filepath.Clean(abs)
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	existing := s.loadGraphHistory()
+	if len(existing) > 0 && existing[0] == abs {
+		return
+	}
+	out := []string{abs}
+	for _, d := range existing {
+		if d != abs {
+			out = append(out, d)
+		}
+	}
+	if len(out) > 50 {
+		out = out[:50]
+	}
+	s.saveGraphHistory(out)
+}
+
+// handleGraphHistory returns the build history, freshest first. Entries
+// whose graph.json no longer exists are dropped and the file is rewritten
+// (self-healing).
+func (s *webServer) handleGraphHistory(w http.ResponseWriter, r *http.Request) {
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	dirs := s.loadGraphHistory()
+	out := []graphHistoryEntry{}
+	kept := []string{}
+	for _, dir := range dirs {
+		info, err := os.Stat(filepath.Join(dir, "graphify-out", "graph.json"))
+		if err != nil {
+			continue
+		}
+		out = append(out, graphHistoryEntry{Dir: dir, BuiltAt: info.ModTime()})
+		kept = append(kept, dir)
+	}
+	if len(kept) != len(dirs) {
+		s.saveGraphHistory(kept)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BuiltAt.After(out[j].BuiltAt) })
+	s.writeJSON(w, http.StatusOK, out)
 }
