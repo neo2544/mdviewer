@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -48,11 +47,10 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 	serverURL := "http://" + addr
 
 	server := &webServer{
-		startDir:  startDir,
-		appRoot:   appRoot,
-		graphPath: filepath.Join(startDir, "graphify-out", "graph.json"),
+		startDir:   startDir,
+		appRoot:    appRoot,
+		graphCache: make(map[string]*GraphIndex),
 	}
-	server.tryLoadGraph()
 	server.buildManager = newBuildManager()
 
 	// Pre-bind the listener synchronously so we fail FAST on port

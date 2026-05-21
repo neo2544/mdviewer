@@ -27,18 +27,16 @@ func newTestServer(t *testing.T, withGraph bool) *webServer {
 			t.Fatal(err)
 		}
 	}
-	s := &webServer{
-		startDir:  root,
-		appRoot:   root,
-		graphPath: filepath.Join(root, "graphify-out", "graph.json"),
+	return &webServer{
+		startDir:   root,
+		appRoot:    root,
+		graphCache: make(map[string]*GraphIndex),
 	}
-	s.tryLoadGraph()
-	return s
 }
 
 func TestGraphStatusNoGraph(t *testing.T) {
 	s := newTestServer(t, false)
-	req := httptest.NewRequest("GET", "/api/graph/status", nil)
+	req := httptest.NewRequest("GET", "/api/graph/status?dir="+s.startDir, nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -55,7 +53,7 @@ func TestGraphStatusNoGraph(t *testing.T) {
 
 func TestGraphStatusWithGraph(t *testing.T) {
 	s := newTestServer(t, true)
-	req := httptest.NewRequest("GET", "/api/graph/status", nil)
+	req := httptest.NewRequest("GET", "/api/graph/status?dir="+s.startDir, nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	var resp graphStatusResponse
@@ -73,7 +71,8 @@ func TestGraphStatusWithGraph(t *testing.T) {
 func TestGraphFileReturnsConcepts(t *testing.T) {
 	s := newTestServer(t, true)
 	abs := filepath.Join(s.startDir, "auth/session.go")
-	req := httptest.NewRequest("GET", "/api/graph/file?path="+abs, nil)
+	req := httptest.NewRequest("GET",
+		"/api/graph/file?dir="+s.startDir+"&path="+abs, nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -90,7 +89,7 @@ func TestGraphFileReturnsConcepts(t *testing.T) {
 
 func TestGraphFileMissingPath(t *testing.T) {
 	s := newTestServer(t, true)
-	req := httptest.NewRequest("GET", "/api/graph/file", nil)
+	req := httptest.NewRequest("GET", "/api/graph/file?dir="+s.startDir, nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -100,7 +99,7 @@ func TestGraphFileMissingPath(t *testing.T) {
 
 func TestGraphFileNoGraph(t *testing.T) {
 	s := newTestServer(t, false)
-	req := httptest.NewRequest("GET", "/api/graph/file?path=/nope", nil)
+	req := httptest.NewRequest("GET", "/api/graph/file?dir="+s.startDir+"&path=/nope", nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -113,7 +112,7 @@ func TestGraphFileNoGraph(t *testing.T) {
 
 func TestGraphConceptReturnsFiles(t *testing.T) {
 	s := newTestServer(t, true)
-	req := httptest.NewRequest("GET", "/api/graph/concept?id=auth_session_token", nil)
+	req := httptest.NewRequest("GET", "/api/graph/concept?dir="+s.startDir+"&id=auth_session_token", nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -130,7 +129,7 @@ func TestGraphConceptReturnsFiles(t *testing.T) {
 
 func TestGraphConceptMissingNode(t *testing.T) {
 	s := newTestServer(t, true)
-	req := httptest.NewRequest("GET", "/api/graph/concept?id=nope", nil)
+	req := httptest.NewRequest("GET", "/api/graph/concept?dir="+s.startDir+"&id=nope", nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -184,9 +183,9 @@ func TestGraphBuildSurvivesRequestCompletion(t *testing.T) {
 	installStubGraphify(t, root, 0) // stub graphify on PATH; sets GEMINI_API_KEY
 
 	s := &webServer{
-		startDir:  root,
-		appRoot:   root,
-		graphPath: filepath.Join(root, "graphify-out", "graph.json"),
+		startDir:   root,
+		appRoot:    root,
+		graphCache: make(map[string]*GraphIndex),
 	}
 	s.buildManager = newBuildManager()
 

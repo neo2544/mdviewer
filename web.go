@@ -19,9 +19,8 @@ type webServer struct {
 	startDir string
 	appRoot  string
 
-	graphMu   sync.RWMutex
-	graph     *GraphIndex // nil = no graph available
-	graphPath string      // <startDir>/graphify-out/graph.json
+	graphMu    sync.RWMutex
+	graphCache map[string]*GraphIndex // abs folder path -> its graph index
 
 	buildManager *BuildManager
 }
@@ -142,51 +141,60 @@ func runWebServer(startDir, appRoot, addr string) error {
 		addr = "127.0.0.1:8421"
 	}
 	server := &webServer{
-		startDir:  startDir,
-		appRoot:   appRoot,
-		graphPath: filepath.Join(startDir, "graphify-out", "graph.json"),
+		startDir:   startDir,
+		appRoot:    appRoot,
+		graphCache: make(map[string]*GraphIndex),
 	}
-	server.tryLoadGraph()
 	server.buildManager = newBuildManager()
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
 	return http.ListenAndServe(addr, server.routes())
 }
 
-// tryLoadGraph is best-effort. A missing graph.json is the common case
-// (user hasn't run graphify yet) and must not break startup.
-func (s *webServer) tryLoadGraph() {
-	g, err := LoadGraph(s.graphPath, s.startDir)
+// graphForDir returns the graph index for the graphify-out/graph.json
+// inside dir, loading and caching it on first use and hot-reloading it
+// when the file's mtime advances. Returns nil when dir has no graph.
+// An empty dir falls back to the server's launch root.
+func (s *webServer) graphForDir(dir string) *GraphIndex {
+	if dir == "" {
+		dir = s.startDir
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil
+	}
+	abs = filepath.Clean(abs)
+
+	s.graphMu.RLock()
+	g := s.graphCache[abs]
+	s.graphMu.RUnlock()
+	if g != nil {
+		// Stale data beats no data — ignore reload errors (the file may
+		// be mid-rewrite by a running graphify build).
+		_, _ = g.ReloadIfChanged()
+		return g
+	}
+
+	jsonPath := filepath.Join(abs, "graphify-out", "graph.json")
+	loaded, err := LoadGraph(jsonPath, abs)
+	if err != nil {
+		return nil
+	}
+	s.graphMu.Lock()
+	s.graphCache[abs] = loaded
+	s.graphMu.Unlock()
+	return loaded
+}
+
+// invalidateGraph drops the cached index for dir so the next graphForDir
+// call reloads it from disk. Called after a build completes.
+func (s *webServer) invalidateGraph(dir string) {
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return
 	}
 	s.graphMu.Lock()
-	s.graph = g
+	delete(s.graphCache, filepath.Clean(abs))
 	s.graphMu.Unlock()
-}
-
-// currentGraph returns the active index, refreshing it if graph.json's
-// mtime has advanced since the last load. Returns nil when no graph
-// exists (caller MUST nil-check).
-func (s *webServer) currentGraph() *GraphIndex {
-	s.graphMu.RLock()
-	g := s.graph
-	s.graphMu.RUnlock()
-	if g == nil {
-		// Re-attempt cold load — handles the "graph appeared after
-		// startup" case (e.g. user ran graphify in another terminal).
-		s.tryLoadGraph()
-		s.graphMu.RLock()
-		g = s.graph
-		s.graphMu.RUnlock()
-		return g
-	}
-	if _, err := g.ReloadIfChanged(); err != nil {
-		// Treat reload error as "stale data is better than nothing".
-		// Logging here would spam the console on every request when
-		// the file is being rewritten by graphify; silently keep the
-		// previous index.
-	}
-	return g
 }
 
 func (s *webServer) favoritesPath() string {
@@ -4800,12 +4808,21 @@ type graphStatusResponse struct {
 	Available bool      `json:"available"`
 	NodeCount int       `json:"node_count"`
 	LoadedAt  time.Time `json:"loaded_at,omitempty"`
+	Dir       string    `json:"dir"`
 	Path      string    `json:"path"`
 }
 
 func (s *webServer) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
-	resp := graphStatusResponse{Path: s.graphPath}
-	if g := s.currentGraph(); g != nil {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	abs, _ := filepath.Abs(dir)
+	resp := graphStatusResponse{
+		Dir:  abs,
+		Path: filepath.Join(abs, "graphify-out", "graph.json"),
+	}
+	if g := s.graphForDir(dir); g != nil {
 		resp.Available = true
 		resp.NodeCount = g.NodeCount()
 		resp.LoadedAt = g.LoadedAt()
@@ -4824,11 +4841,8 @@ func (s *webServer) handleGraphFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	g := s.currentGraph()
+	g := s.graphForDir(r.URL.Query().Get("dir"))
 	if g == nil {
-		// Match the "no concepts" empty response so the frontend has
-		// a single render path; the rail decides what to show based
-		// on /api/graph/status.
 		s.writeJSON(w, http.StatusOK, []Node{})
 		return
 	}
@@ -4841,7 +4855,7 @@ func (s *webServer) handleGraphConcept(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	g := s.currentGraph()
+	g := s.graphForDir(r.URL.Query().Get("dir"))
 	if g == nil {
 		http.Error(w, "no graph available", http.StatusNotFound)
 		return
@@ -4861,12 +4875,15 @@ func (s *webServer) handleGraphBuild(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
 	// The build outlives this HTTP request (202 returns immediately, the
 	// build runs in a background goroutine). Binding it to r.Context()
 	// would cancel the subprocess the instant the handler returns.
-	sess, err := s.buildManager.Start(context.Background(), s.startDir, r.URL.Query().Get("backend"))
+	sess, err := s.buildManager.Start(context.Background(), dir, r.URL.Query().Get("backend"))
 	if err != nil {
-		// "already running" → 409; everything else (no PATH, no key) → 503
 		if strings.Contains(err.Error(), "already running") {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -4916,7 +4933,7 @@ func (s *webServer) handleGraphBuildStatus(w http.ResponseWriter, r *http.Reques
 	flusher.Flush()
 
 	if sess.OK() {
-		s.tryLoadGraph()
+		s.invalidateGraph(sess.Root())
 	}
 }
 
