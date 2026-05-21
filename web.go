@@ -1903,6 +1903,20 @@ const webAppHTML = `<!doctype html>
       white-space: pre-wrap;
     }
     .graph-build-log[hidden] { display: none; }
+    .graph-build-hint {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .graph-build-hint code {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--code);
+      color: var(--text);
+    }
+    .graph-build-hint.warn { color: var(--accent); }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -2043,6 +2057,9 @@ const webAppHTML = `<!doctype html>
       <div class="graph-section-title" id="graphBanner" hidden></div>
       <div class="graph-build" id="graphBuildBox" hidden>
         <button class="graph-build-btn" id="graphBuildBtn" type="button">Build graph</button>
+        <div class="graph-build-hint" id="graphBuildHint">
+          Needs <code>GEMINI_API_KEY</code>. No key? Run <code>/graphify .</code> in Claude Code, then refresh.
+        </div>
         <div class="graph-build-log" id="graphBuildLog" hidden></div>
       </div>
     </aside>
@@ -3026,6 +3043,12 @@ const webAppHTML = `<!doctype html>
       if (!resp.ok) {
         const msg = await resp.text();
         graphBuildLogEl.textContent += "error: " + msg + "\n";
+        // Highlight the hint when the error is about the missing API key,
+        // so the "/graphify . in Claude Code" alternative stands out.
+        const hintEl = document.getElementById("graphBuildHint");
+        if (hintEl && /API_KEY/.test(msg)) {
+          hintEl.classList.add("warn");
+        }
         graphBuildBtnEl.disabled = false;
         return;
       }
