@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -119,16 +118,26 @@ func TestBuildSessionGeminiAPIRequiresKey(t *testing.T) {
 
 func TestBuildSessionRequiresGraphifyOnPath(t *testing.T) {
 	root := t.TempDir()
+	// Eliminate PATH-based lookup.
 	t.Setenv("PATH", "/dev/null")
+	// Point HOME at an empty temp dir so ~/... extra dirs don't resolve to
+	// a real installation. This also prevents resolveBin from finding
+	// graphify in ~/.local/bin, ~/bin, ~/go/bin, etc.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("GEMINI_API_KEY", "stub")
+
+	// If graphify is installed in a static system dir (e.g. /opt/homebrew/bin
+	// or /usr/local/bin), resolveBin will still find it — skip rather than
+	// fail, because the machine genuinely has graphify available.
+	staticDirs := []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"}
+	if _, ok := resolveBinIn("graphify", staticDirs); ok {
+		t.Skip("graphify found in a static extra-bin dir; 'not-found' path not reachable on this machine")
+	}
 
 	mgr := newBuildManager()
 	_, err := mgr.Start(context.Background(), root, "gemini-api")
 	if err == nil {
 		t.Fatalf("expected 'not found' error")
-	}
-	if _, e := exec.LookPath("graphify"); e == nil {
-		t.Fatalf("graphify unexpectedly on PATH")
 	}
 }
 
@@ -201,5 +210,58 @@ func TestBuildCommandUnknownBackend(t *testing.T) {
 	root := t.TempDir()
 	if _, err := buildCommand(context.Background(), "nonsense", root); err == nil {
 		t.Errorf("expected error for unknown backend")
+	}
+}
+
+func TestResolveBinInFindsOnPath(t *testing.T) {
+	// "sh" is always on PATH on a POSIX system.
+	if _, ok := resolveBinIn("sh", nil); !ok {
+		t.Errorf("resolveBinIn should find sh via PATH")
+	}
+}
+
+func TestResolveBinInFindsInExtraDir(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "fakegraphtool")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Not on PATH, but resolveBinIn should find it via the dir list.
+	got, ok := resolveBinIn("fakegraphtool", []string{dir})
+	if !ok || got != fake {
+		t.Errorf("resolveBinIn(extra dir) = %q, %v; want %q, true", got, ok, fake)
+	}
+}
+
+func TestResolveBinInMissing(t *testing.T) {
+	if _, ok := resolveBinIn("definitely-not-a-real-binary-xyz123", []string{t.TempDir()}); ok {
+		t.Errorf("resolveBinIn should not find a nonexistent binary")
+	}
+}
+
+func TestResolveBinInSkipsNonExecutable(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plainfile")
+	if err := os.WriteFile(plain, []byte("data"), 0o644); err != nil { // not executable
+		t.Fatal(err)
+	}
+	if _, ok := resolveBinIn("plainfile", []string{dir}); ok {
+		t.Errorf("resolveBinIn should skip a non-executable file")
+	}
+}
+
+func TestAugmentedEnvHasExtraDirs(t *testing.T) {
+	env := augmentedEnv()
+	var pathLine string
+	for _, kv := range env {
+		if len(kv) > 5 && kv[:5] == "PATH=" {
+			pathLine = kv
+		}
+	}
+	if pathLine == "" {
+		t.Fatal("augmentedEnv produced no PATH entry")
+	}
+	if !strings.Contains(pathLine, "/opt/homebrew/bin") {
+		t.Errorf("augmentedEnv PATH missing /opt/homebrew/bin: %s", pathLine)
 	}
 }

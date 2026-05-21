@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -246,6 +248,60 @@ func pumpLines(r io.Reader, sess *BuildSession, wg *sync.WaitGroup) {
 	}
 }
 
+// extraBinDirs are well-known executable locations probed when a binary
+// is not on PATH. GUI / LaunchAgent processes inherit only a minimal
+// PATH (/usr/bin:/bin:...) and miss Homebrew, ~/.local/bin, etc.
+func extraBinDirs() []string {
+	dirs := []string{
+		"/opt/homebrew/bin", "/opt/homebrew/sbin",
+		"/usr/local/bin", "/usr/local/sbin",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs,
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+			filepath.Join(home, "go", "bin"),
+		)
+	}
+	return dirs
+}
+
+// resolveBinIn finds an executable named `name` by first consulting PATH
+// (exec.LookPath) and then probing the given directories. Returns the
+// resolved path and true when found.
+func resolveBinIn(name string, dirs []string) (string, bool) {
+	if p, err := exec.LookPath(name); err == nil {
+		return p, true
+	}
+	for _, dir := range dirs {
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// resolveBin is resolveBinIn against the standard extraBinDirs().
+func resolveBin(name string) (string, bool) {
+	return resolveBinIn(name, extraBinDirs())
+}
+
+// augmentedEnv returns os.Environ() with extraBinDirs() prepended to
+// PATH, so spawned subprocesses (graphify, claude, etc.) and their own
+// children can find tools even under a minimal LaunchAgent PATH.
+func augmentedEnv() []string {
+	env := os.Environ()
+	extra := strings.Join(extraBinDirs(), ":")
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			env[i] = "PATH=" + extra + ":" + kv[len("PATH="):]
+			return env
+		}
+	}
+	return append(env, "PATH="+extra)
+}
+
 // Backend describes one selectable graph-build backend for the UI.
 type Backend struct {
 	ID           string `json:"id"`
@@ -260,8 +316,8 @@ type Backend struct {
 func detectBackends() []Backend {
 	hasGeminiKey := os.Getenv("GEMINI_API_KEY") != "" || os.Getenv("GOOGLE_API_KEY") != ""
 	onPath := func(bin string) bool {
-		_, err := exec.LookPath(bin)
-		return err == nil
+		_, ok := resolveBin(bin)
+		return ok
 	}
 	return []Backend{
 		{ID: "gemini-api", Label: "Gemini API", Available: hasGeminiKey},
@@ -301,20 +357,23 @@ func buildCommand(ctx context.Context, backendID, root string) (*exec.Cmd, error
 	}
 
 	graphifyCmd := func(extraArgs ...string) (*exec.Cmd, error) {
-		bin, err := exec.LookPath("graphify")
-		if err != nil {
-			return nil, fmt.Errorf("graphify not found on PATH (try `pip install graphifyy`): %w", err)
+		bin, ok := resolveBin("graphify")
+		if !ok {
+			return nil, errors.New("graphify not found (looked on PATH and in Homebrew / ~/.local/bin; try `pip install graphifyy`)")
 		}
 		args := append([]string{"extract", root}, extraArgs...)
-		return exec.CommandContext(ctx, bin, args...), nil
+		c := exec.CommandContext(ctx, bin, args...)
+		c.Env = augmentedEnv()
+		return c, nil
 	}
 	agentCmd := func(bin string, args ...string) (*exec.Cmd, error) {
-		path, err := exec.LookPath(bin)
-		if err != nil {
-			return nil, fmt.Errorf("%s not found on PATH: %w", bin, err)
+		path, ok := resolveBin(bin)
+		if !ok {
+			return nil, fmt.Errorf("%s not found (looked on PATH and in Homebrew / ~/.local/bin)", bin)
 		}
 		c := exec.CommandContext(ctx, path, args...)
 		c.Dir = root // agent CLIs and the graphify skill default to cwd
+		c.Env = augmentedEnv()
 		return c, nil
 	}
 

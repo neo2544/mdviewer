@@ -205,6 +205,9 @@ killall Finder >/dev/null 2>&1 || true
 
 echo ">> writing LaunchAgent…"
 mkdir -p "$LAUNCH_AGENT_DIR" "$LOG_DIR"
+# Capture the installer shell's PATH so the LaunchAgent (which otherwise
+# gets only /usr/bin:/bin:...) can find graphify and the agent CLIs.
+AGENT_PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin"
 cat > "$LAUNCH_AGENT_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -221,6 +224,11 @@ cat > "$LAUNCH_AGENT_PLIST" <<PLIST
         <string>--port</string>
         <string>${PORT}</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${AGENT_PATH}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
