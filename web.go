@@ -3081,7 +3081,7 @@ const webAppHTML = `<!doctype html>
         if (data.available && data.built_at) {
           graphBuiltAtEl.hidden = false;
           graphBuiltAtEl.textContent =
-            "Last built " + relativeTime(data.built_at) +
+            "Last built " + graphRelativeTime(data.built_at) +
             " \xb7 " + (data.node_count || 0) + " nodes";
         } else {
           graphBuiltAtEl.hidden = true;
@@ -3097,6 +3097,7 @@ const webAppHTML = `<!doctype html>
         }
       } catch (err) {
         state.graphAvailable = false;
+        graphBuiltAtEl.hidden = true;
         graphBuildBoxEl.hidden = false;
       }
     }
@@ -3128,7 +3129,7 @@ const webAppHTML = `<!doctype html>
 
     graphBuildBtnEl.addEventListener("click", startGraphBuild);
 
-    function relativeTime(iso) {
+    function graphRelativeTime(iso) {
       if (!iso) return "";
       const then = new Date(iso).getTime();
       if (isNaN(then)) return "";
@@ -3160,18 +3161,6 @@ const webAppHTML = `<!doctype html>
 
     async function startGraphBuild() {
       graphBuildBtnEl.disabled = true;
-      graphProgressEl.hidden = false;
-      graphProgressMetaEl.hidden = false;
-      graphProgressFillEl.classList.remove("error");
-      graphProgressFillEl.style.width = "0%";
-      graphProgressPhaseEl.textContent = "starting…";
-      graphProgressTimeEl.textContent = "0:00";
-      let progressPct = 0;
-      const buildStart = Date.now();
-      const elapsedTimer = setInterval(function () {
-        graphProgressTimeEl.textContent =
-          formatElapsed(Math.floor((Date.now() - buildStart) / 1000));
-      }, 1000);
       graphBuildLogEl.hidden = false;
       graphBuildLogEl.textContent = "Starting graphify…\n";
       let resp;
@@ -3196,6 +3185,18 @@ const webAppHTML = `<!doctype html>
         graphBuildBtnEl.disabled = false;
         return;
       }
+      graphProgressEl.hidden = false;
+      graphProgressMetaEl.hidden = false;
+      graphProgressFillEl.classList.remove("error");
+      graphProgressFillEl.style.width = "0%";
+      graphProgressPhaseEl.textContent = "starting…";
+      graphProgressTimeEl.textContent = "0:00";
+      let progressPct = 0;
+      const buildStart = Date.now();
+      const elapsedTimer = setInterval(function () {
+        graphProgressTimeEl.textContent =
+          formatElapsed(Math.floor((Date.now() - buildStart) / 1000));
+      }, 1000);
       const src = new EventSource("/api/graph/build/status");
       src.onmessage = (ev) => {
         try {
