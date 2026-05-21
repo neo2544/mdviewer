@@ -1966,6 +1966,24 @@ const webAppHTML = `<!doctype html>
       color: var(--muted);
     }
     .graph-progress-meta[hidden] { display: none; }
+    .graph-build-status {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: color-mix(in oklab, var(--accent) 8%, var(--panel));
+    }
+    .graph-build-status[hidden] { display: none; }
+    .graph-build-status-folder {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -2093,6 +2111,17 @@ const webAppHTML = `<!doctype html>
       </div>
     </main>
     <aside class="shell graph-rail" id="graphRail" aria-label="Graph concepts">
+      <div class="graph-build-status" id="graphBuildStatus" hidden>
+        <div class="graph-build-status-folder" id="graphBuildStatusFolder"></div>
+        <div class="graph-progress" id="graphProgress">
+          <div class="graph-progress-fill" id="graphProgressFill"></div>
+        </div>
+        <div class="graph-progress-meta" id="graphProgressMeta">
+          <span id="graphProgressPhase">starting</span>
+          <span id="graphProgressTime">0:00</span>
+        </div>
+        <div class="graph-build-log" id="graphBuildLog" hidden></div>
+      </div>
       <div>
         <div class="graph-section-title">Concepts in this file</div>
         <div class="graph-built-at" id="graphBuiltAt" hidden></div>
@@ -2108,17 +2137,9 @@ const webAppHTML = `<!doctype html>
       <div class="graph-build" id="graphBuildBox" hidden>
         <select class="graph-backend-select" id="graphBackendSelect" aria-label="Build backend"></select>
         <button class="graph-build-btn" id="graphBuildBtn" type="button">Build graph</button>
-        <div class="graph-progress" id="graphProgress" hidden>
-          <div class="graph-progress-fill" id="graphProgressFill"></div>
-        </div>
-        <div class="graph-progress-meta" id="graphProgressMeta" hidden>
-          <span id="graphProgressPhase">starting&#x2026;</span>
-          <span id="graphProgressTime">0:00</span>
-        </div>
         <div class="graph-build-hint" id="graphBuildHint">
           Needs <code>GEMINI_API_KEY</code>. No key? Run <code>/graphify .</code> in Claude Code, then refresh.
         </div>
-        <div class="graph-build-log" id="graphBuildLog" hidden></div>
       </div>
     </aside>
   </div>
@@ -3075,6 +3096,8 @@ const webAppHTML = `<!doctype html>
     const graphProgressMetaEl = document.getElementById("graphProgressMeta");
     const graphProgressPhaseEl = document.getElementById("graphProgressPhase");
     const graphProgressTimeEl = document.getElementById("graphProgressTime");
+    const graphBuildStatusEl = document.getElementById("graphBuildStatus");
+    const graphBuildStatusFolderEl = document.getElementById("graphBuildStatusFolder");
 
     async function refreshGraphStatus() {
       try {
@@ -3164,6 +3187,10 @@ const webAppHTML = `<!doctype html>
 
     async function startGraphBuild() {
       graphBuildBtnEl.disabled = true;
+      const buildDir = state.cwd || "";
+      const buildFolderName = buildDir.split("/").filter(Boolean).pop() || buildDir || "(root)";
+      graphBuildStatusEl.hidden = false;
+      graphBuildStatusFolderEl.textContent = "Building " + buildFolderName;
       graphBuildLogEl.hidden = false;
       graphBuildLogEl.textContent = "Starting graphify…\n";
       let resp;
@@ -3209,6 +3236,8 @@ const webAppHTML = `<!doctype html>
             src.close();
             graphBuildBtnEl.disabled = false;
             clearInterval(elapsedTimer);
+            graphBuildStatusFolderEl.textContent =
+              (data.ok ? "Built " : "Build failed: ") + buildFolderName;
             if (data.ok) {
               graphProgressFillEl.style.width = "100%";
               graphProgressPhaseEl.textContent = "done";
