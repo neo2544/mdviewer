@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -4860,7 +4861,10 @@ func (s *webServer) handleGraphBuild(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	sess, err := s.buildManager.Start(r.Context(), s.startDir, r.URL.Query().Get("backend"))
+	// The build outlives this HTTP request (202 returns immediately, the
+	// build runs in a background goroutine). Binding it to r.Context()
+	// would cancel the subprocess the instant the handler returns.
+	sess, err := s.buildManager.Start(context.Background(), s.startDir, r.URL.Query().Get("backend"))
 	if err != nil {
 		// "already running" → 409; everything else (no PATH, no key) → 503
 		if strings.Contains(err.Error(), "already running") {

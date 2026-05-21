@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // newTestServer points a webServer at a temp dir, optionally copying the
@@ -176,4 +177,41 @@ func TestGraphBackendsLists(t *testing.T) {
 	if len(got) != 5 {
 		t.Errorf("got %d backends, want 5", len(got))
 	}
+}
+
+func TestGraphBuildSurvivesRequestCompletion(t *testing.T) {
+	root := t.TempDir()
+	installStubGraphify(t, root, 0) // stub graphify on PATH; sets GEMINI_API_KEY
+
+	s := &webServer{
+		startDir:  root,
+		appRoot:   root,
+		graphPath: filepath.Join(root, "graphify-out", "graph.json"),
+	}
+	s.buildManager = newBuildManager()
+
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/graph/build?backend=gemini-api", "", nil)
+	if err != nil {
+		t.Fatalf("POST build: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("build POST status = %d, want 202", resp.StatusCode)
+	}
+
+	// The stub graphify sleeps ~0.1s then writes graph.json. With the bug
+	// (r.Context()), the subprocess is killed the moment this POST returns
+	// and graph.json never appears. With the fix it completes.
+	graphPath := filepath.Join(root, "graphify-out", "graph.json")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(graphPath); err == nil {
+			return // build completed — fix works
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("graph.json never appeared — build was likely killed by request-context cancellation")
 }
