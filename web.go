@@ -4816,6 +4816,7 @@ type graphStatusResponse struct {
 	Available bool      `json:"available"`
 	NodeCount int       `json:"node_count"`
 	LoadedAt  time.Time `json:"loaded_at,omitempty"`
+	BuiltAt   time.Time `json:"built_at,omitempty"`
 	Dir       string    `json:"dir"`
 	Path      string    `json:"path"`
 }
@@ -4829,6 +4830,11 @@ func (s *webServer) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
 	resp := graphStatusResponse{
 		Dir:  abs,
 		Path: filepath.Join(abs, "graphify-out", "graph.json"),
+	}
+	// built_at = the graph.json file's mtime — the moment graphify last
+	// wrote it. Distinct from loaded_at (when the server read it).
+	if info, err := os.Stat(resp.Path); err == nil {
+		resp.BuiltAt = info.ModTime()
 	}
 	if g := s.graphForDir(dir); g != nil {
 		resp.Available = true

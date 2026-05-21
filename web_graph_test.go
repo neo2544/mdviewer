@@ -178,6 +178,34 @@ func TestGraphBackendsLists(t *testing.T) {
 	}
 }
 
+func TestGraphStatusReportsBuiltAt(t *testing.T) {
+	s := newTestServer(t, true)
+	req := httptest.NewRequest("GET", "/api/graph/status?dir="+s.startDir, nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	var resp graphStatusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.BuiltAt.IsZero() {
+		t.Errorf("BuiltAt should be set when a graph file exists")
+	}
+}
+
+func TestGraphStatusBuiltAtZeroWhenNoGraph(t *testing.T) {
+	s := newTestServer(t, false)
+	req := httptest.NewRequest("GET", "/api/graph/status?dir="+s.startDir, nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	var resp graphStatusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.BuiltAt.IsZero() {
+		t.Errorf("BuiltAt should be zero when no graph file exists")
+	}
+}
+
 func TestGraphBuildSurvivesRequestCompletion(t *testing.T) {
 	root := t.TempDir()
 	installStubGraphify(t, root, 0) // stub graphify on PATH; sets GEMINI_API_KEY
