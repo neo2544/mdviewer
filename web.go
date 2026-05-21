@@ -70,6 +70,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/graph/concept", s.handleGraphConcept)
 	mux.HandleFunc("/api/graph/build", s.handleGraphBuild)
 	mux.HandleFunc("/api/graph/build/status", s.handleGraphBuildStatus)
+	mux.HandleFunc("/api/graph/backends", s.handleGraphBackends)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -4874,4 +4875,10 @@ func (s *webServer) handleGraphBuildStatus(w http.ResponseWriter, r *http.Reques
 	if sess.OK() {
 		s.tryLoadGraph()
 	}
+}
+
+// handleGraphBackends lists the build backends usable on this machine so
+// the UI can populate the backend dropdown.
+func (s *webServer) handleGraphBackends(w http.ResponseWriter, r *http.Request) {
+	s.writeJSON(w, http.StatusOK, detectBackends())
 }

@@ -160,3 +160,20 @@ func TestGraphBuildMissingAPIKey(t *testing.T) {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
 }
+
+func TestGraphBackendsLists(t *testing.T) {
+	s := newTestServer(t, false)
+	req := httptest.NewRequest("GET", "/api/graph/backends", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got []Backend
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Errorf("got %d backends, want 5", len(got))
+	}
+}
