@@ -1956,6 +1956,25 @@ const webAppHTML = `<!doctype html>
     }
     .graph-open-btn:hover { border-color: var(--accent); }
     .graph-open-btn[hidden] { display: none; }
+    .graph-history {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .graph-history-row {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text);
+      overflow: hidden;
+    }
+    .graph-history-row:hover { background: var(--panel-2); }
+    .graph-history-row .graph-history-when {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+    }
     .graph-progress {
       height: 6px;
       border-radius: 999px;
@@ -2145,6 +2164,10 @@ const webAppHTML = `<!doctype html>
       <div>
         <div class="graph-section-title">Linked files</div>
         <div class="graph-links" id="graphLinks"></div>
+      </div>
+      <div>
+        <div class="graph-section-title">Build history</div>
+        <div class="graph-history" id="graphHistory"></div>
       </div>
       <div class="graph-section-title" id="graphBanner" hidden></div>
       <div class="graph-build" id="graphBuildBox" hidden>
@@ -3113,6 +3136,7 @@ const webAppHTML = `<!doctype html>
     const graphProgressTimeEl = document.getElementById("graphProgressTime");
     const graphBuildStatusEl = document.getElementById("graphBuildStatus");
     const graphBuildStatusFolderEl = document.getElementById("graphBuildStatusFolder");
+    const graphHistoryEl = document.getElementById("graphHistory");
 
     async function refreshGraphStatus() {
       try {
@@ -3194,6 +3218,41 @@ const webAppHTML = `<!doctype html>
       return Math.round(hrs / 24) + "d ago";
     }
 
+    async function loadGraphHistory() {
+      let entries = [];
+      try {
+        const r = await fetch("/api/graph/history");
+        entries = await r.json();
+      } catch (err) {
+        entries = [];
+      }
+      graphHistoryEl.innerHTML = "";
+      if (!entries || !entries.length) {
+        const e = document.createElement("div");
+        e.className = "graph-empty";
+        e.textContent = "No builds yet.";
+        graphHistoryEl.appendChild(e);
+        return;
+      }
+      for (const entry of entries) {
+        const row = document.createElement("div");
+        row.className = "graph-history-row";
+        row.title = entry.dir;
+        const name = entry.dir.split("/").filter(Boolean).pop() || entry.dir;
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = name;
+        const whenSpan = document.createElement("span");
+        whenSpan.className = "graph-history-when";
+        whenSpan.textContent = "built " + graphRelativeTime(entry.built_at);
+        row.appendChild(nameSpan);
+        row.appendChild(whenSpan);
+        row.addEventListener("click", function () {
+          loadDir(entry.dir, { historyMode: "push" });
+        });
+        graphHistoryEl.appendChild(row);
+      }
+    }
+
     function phaseToPercent(phase) {
       switch (phase) {
         case "detect":  return 15;
@@ -3267,9 +3326,10 @@ const webAppHTML = `<!doctype html>
             if (data.ok) {
               graphProgressFillEl.style.width = "100%";
               graphProgressPhaseEl.textContent = "done";
-              refreshGraphStatus().then(() => {
+              refreshGraphStatus().then(function () {
                 if (state.selectedPath) loadConceptsForFile(state.selectedPath);
               });
+              loadGraphHistory();
             } else {
               graphProgressFillEl.classList.add("error");
               graphProgressPhaseEl.textContent = "failed";
@@ -4966,6 +5026,7 @@ const webAppHTML = `<!doctype html>
     renderRecents();
     refreshGraphStatus();
     loadGraphBackends();
+    loadGraphHistory();
     // Refresh relative-time labels in the Recent sections every minute so
     // "2m ago" doesn't sit stale at 0s for hours.
     setInterval(() => { renderRecents(); }, 60 * 1000);
