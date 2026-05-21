@@ -61,10 +61,10 @@ func itoa(n int) string {
 
 func TestBuildSessionSuccess(t *testing.T) {
 	root := t.TempDir()
-	installStubGraphify(t, root, 0)
+	installStubGraphify(t, root, 0) // sets GEMINI_API_KEY=stub-key
 
 	mgr := newBuildManager()
-	sess, err := mgr.Start(context.Background(), root)
+	sess, err := mgr.Start(context.Background(), root, "gemini-api")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -77,7 +77,6 @@ func TestBuildSessionSuccess(t *testing.T) {
 			t.Fatalf("build did not finish in time; phases so far: %v", phases)
 		case ev, ok := <-sess.Events():
 			if !ok {
-				// channel closed = done
 				if sess.Err() != nil {
 					t.Fatalf("session ended with err: %v", sess.Err())
 				}
@@ -96,25 +95,25 @@ func TestBuildSessionRejectsConcurrent(t *testing.T) {
 	installStubGraphify(t, root, 0)
 
 	mgr := newBuildManager()
-	if _, err := mgr.Start(context.Background(), root); err != nil {
+	if _, err := mgr.Start(context.Background(), root, "gemini-api"); err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
-	_, err := mgr.Start(context.Background(), root)
+	_, err := mgr.Start(context.Background(), root, "gemini-api")
 	if err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Errorf("expected 'already running' error, got %v", err)
 	}
 }
 
-func TestBuildSessionRequiresAPIKey(t *testing.T) {
+func TestBuildSessionGeminiAPIRequiresKey(t *testing.T) {
 	root := t.TempDir()
 	installStubGraphify(t, root, 0)
 	t.Setenv("GEMINI_API_KEY", "")
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	mgr := newBuildManager()
-	_, err := mgr.Start(context.Background(), root)
+	_, err := mgr.Start(context.Background(), root, "gemini-api")
 	if err == nil {
-		t.Fatalf("expected API key error")
+		t.Fatalf("expected gemini-api to reject with no key")
 	}
 }
 
@@ -124,13 +123,12 @@ func TestBuildSessionRequiresGraphifyOnPath(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "stub")
 
 	mgr := newBuildManager()
-	_, err := mgr.Start(context.Background(), root)
+	_, err := mgr.Start(context.Background(), root, "gemini-api")
 	if err == nil {
 		t.Fatalf("expected 'not found' error")
 	}
-	// sanity: confirm exec.LookPath fails
 	if _, e := exec.LookPath("graphify"); e == nil {
-		t.Fatalf("graphify unexpectedly on PATH: %v", e)
+		t.Fatalf("graphify unexpectedly on PATH")
 	}
 }
 

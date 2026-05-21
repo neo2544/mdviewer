@@ -153,7 +153,7 @@ func TestGraphBuildMissingAPIKey(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 	s := newTestServer(t, false)
 	s.buildManager = newBuildManager()
-	req := httptest.NewRequest("POST", "/api/graph/build", nil)
+	req := httptest.NewRequest("POST", "/api/graph/build?backend=gemini-api", nil)
 	rec := httptest.NewRecorder()
 	s.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {

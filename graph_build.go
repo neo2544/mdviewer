@@ -123,15 +123,14 @@ type BuildManager struct {
 
 func newBuildManager() *BuildManager { return &BuildManager{} }
 
-// Start launches a new build session. Returns an error if one is already
-// running, graphify isn't on PATH, or no LLM API key is set.
-func (m *BuildManager) Start(ctx context.Context, root string) (*BuildSession, error) {
-	if os.Getenv("GEMINI_API_KEY") == "" && os.Getenv("GOOGLE_API_KEY") == "" {
-		return nil, errors.New("GEMINI_API_KEY or GOOGLE_API_KEY must be set to run graphify")
-	}
-	bin, err := exec.LookPath("graphify")
+// Start launches a new build session using the given backend. Returns an
+// error if one is already running, or the backend cannot produce a
+// runnable command (missing binary, missing key). An empty backendID
+// resolves to the auto-selected backend.
+func (m *BuildManager) Start(ctx context.Context, root, backendID string) (*BuildSession, error) {
+	cmd, err := buildCommand(ctx, backendID, root)
 	if err != nil {
-		return nil, fmt.Errorf("graphify not found on PATH (try `pip install graphifyy`): %w", err)
+		return nil, err
 	}
 
 	m.mu.Lock()
@@ -152,7 +151,7 @@ func (m *BuildManager) Start(ctx context.Context, root string) (*BuildSession, e
 	}
 	m.current = sess
 
-	go runBuild(ctx, bin, sess)
+	go runBuild(cmd, sess)
 	return sess, nil
 }
 
@@ -163,12 +162,21 @@ func (m *BuildManager) Current() *BuildSession {
 	return m.current
 }
 
-// runBuild is the actual subprocess driver. It streams stdout/stderr
-// line-by-line and pushes a BuildEvent per non-empty line.
-func runBuild(ctx context.Context, bin string, sess *BuildSession) {
-	cmd := exec.CommandContext(ctx, bin, sess.root)
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
+// runBuild drives the prepared command, streaming stdout/stderr
+// line-by-line and pushing a BuildEvent per non-empty line.
+func runBuild(cmd *exec.Cmd, sess *BuildSession) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		sess.push(BuildEvent{Phase: "error", Message: "stdout pipe: " + err.Error(), At: time.Now()})
+		sess.finish(err)
+		return
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		sess.push(BuildEvent{Phase: "error", Message: "stderr pipe: " + err.Error(), At: time.Now()})
+		sess.finish(err)
+		return
+	}
 
 	if err := cmd.Start(); err != nil {
 		sess.push(BuildEvent{Phase: "error", Message: "spawn: " + err.Error(), At: time.Now()})
@@ -182,13 +190,13 @@ func runBuild(ctx context.Context, bin string, sess *BuildSession) {
 	go pumpLines(stderr, sess, &wg)
 	wg.Wait()
 
-	err := cmd.Wait()
-	if err != nil {
-		sess.push(BuildEvent{Phase: "error", Message: err.Error(), At: time.Now()})
+	werr := cmd.Wait()
+	if werr != nil {
+		sess.push(BuildEvent{Phase: "error", Message: werr.Error(), At: time.Now()})
 	} else {
-		sess.push(BuildEvent{Phase: "done", Message: "graphify exited 0", At: time.Now()})
+		sess.push(BuildEvent{Phase: "done", Message: "build exited 0", At: time.Now()})
 	}
-	sess.finish(err)
+	sess.finish(werr)
 }
 
 // phaseFromLine maps a log line to one of detect | extract | cluster |

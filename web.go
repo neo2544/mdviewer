@@ -4820,7 +4820,7 @@ func (s *webServer) handleGraphBuild(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	sess, err := s.buildManager.Start(r.Context(), s.startDir)
+	sess, err := s.buildManager.Start(r.Context(), s.startDir, r.URL.Query().Get("backend"))
 	if err != nil {
 		// "already running" → 409; everything else (no PATH, no key) → 503
 		if strings.Contains(err.Error(), "already running") {
