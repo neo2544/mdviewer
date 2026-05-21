@@ -1944,6 +1944,18 @@ const webAppHTML = `<!doctype html>
       font-size: 11px;
       color: var(--muted);
     }
+    .graph-open-btn {
+      align-self: flex-start;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .graph-open-btn:hover { border-color: var(--accent); }
+    .graph-open-btn[hidden] { display: none; }
     .graph-progress {
       height: 6px;
       border-radius: 999px;
@@ -2125,6 +2137,7 @@ const webAppHTML = `<!doctype html>
       <div>
         <div class="graph-section-title">Concepts in this file</div>
         <div class="graph-built-at" id="graphBuiltAt" hidden></div>
+        <button class="graph-open-btn" id="graphOpenBtn" type="button" hidden>Open graph &#x2197;</button>
         <div class="graph-chips" id="graphChips">
           <div class="graph-empty" id="graphEmpty">Open a file to see extracted concepts.</div>
         </div>
@@ -2281,6 +2294,7 @@ const webAppHTML = `<!doctype html>
       graphAvailable: false,
       graphConcepts: [],
       graphActiveNodeId: null,
+      graphDir: "",
       favorites: [],
       selectedKind: "",
       selectedModTime: "",
@@ -3091,6 +3105,7 @@ const webAppHTML = `<!doctype html>
     const graphBuildLogEl = document.getElementById("graphBuildLog");
     const graphBackendSelectEl = document.getElementById("graphBackendSelect");
     const graphBuiltAtEl = document.getElementById("graphBuiltAt");
+    const graphOpenBtnEl = document.getElementById("graphOpenBtn");
     const graphProgressEl = document.getElementById("graphProgress");
     const graphProgressFillEl = document.getElementById("graphProgressFill");
     const graphProgressMetaEl = document.getElementById("graphProgressMeta");
@@ -3109,8 +3124,12 @@ const webAppHTML = `<!doctype html>
           graphBuiltAtEl.textContent =
             "Last built " + graphRelativeTime(data.built_at) +
             " \xb7 " + (data.node_count || 0) + " nodes";
+          state.graphDir = data.dir || "";
+          graphOpenBtnEl.hidden = false;
         } else {
           graphBuiltAtEl.hidden = true;
+          state.graphDir = "";
+          graphOpenBtnEl.hidden = true;
         }
         if (!state.graphAvailable) {
           graphBannerEl.hidden = false;
@@ -3124,6 +3143,8 @@ const webAppHTML = `<!doctype html>
       } catch (err) {
         state.graphAvailable = false;
         graphBuiltAtEl.hidden = true;
+        state.graphDir = "";
+        graphOpenBtnEl.hidden = true;
         graphBuildBoxEl.hidden = false;
       }
     }
@@ -3154,6 +3175,11 @@ const webAppHTML = `<!doctype html>
     }
 
     graphBuildBtnEl.addEventListener("click", startGraphBuild);
+
+    graphOpenBtnEl.addEventListener("click", function () {
+      if (!state.graphDir) return;
+      selectFile(state.graphDir + "/graphify-out/graph.html", { historyMode: "push" });
+    });
 
     function graphRelativeTime(iso) {
       if (!iso) return "";
