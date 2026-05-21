@@ -2779,6 +2779,11 @@ const webAppHTML = `<!doctype html>
         return;
       }
       state.cwd = data.cwd;
+      // The graph rail is per-folder — re-evaluate it whenever the
+      // current directory changes.
+      refreshGraphStatus().then(function () {
+        loadConceptsForFile(state.selectedPath || "");
+      });
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
@@ -3030,7 +3035,7 @@ const webAppHTML = `<!doctype html>
 
     async function refreshGraphStatus() {
       try {
-        const r = await fetch("/api/graph/status");
+        const r = await fetch("/api/graph/status?dir=" + encodeURIComponent(state.cwd || ""));
         const data = await r.json();
         state.graphAvailable = !!data.available;
         if (!state.graphAvailable) {
@@ -3082,7 +3087,8 @@ const webAppHTML = `<!doctype html>
       let resp;
       try {
         const backend = graphBackendSelectEl.value || "auto";
-        resp = await fetch("/api/graph/build?backend=" + encodeURIComponent(backend), { method: "POST" });
+        resp = await fetch("/api/graph/build?dir=" + encodeURIComponent(state.cwd || "") +
+                           "&backend=" + encodeURIComponent(backend), { method: "POST" });
       } catch (err) {
         graphBuildLogEl.textContent += "network error: " + err + "\n";
         graphBuildBtnEl.disabled = false;
@@ -3143,7 +3149,8 @@ const webAppHTML = `<!doctype html>
       }
       let nodes = [];
       try {
-        const r = await fetch("/api/graph/file?path=" + encodeURIComponent(absPath));
+        const r = await fetch("/api/graph/file?dir=" + encodeURIComponent(state.cwd || "") +
+                              "&path=" + encodeURIComponent(absPath));
         nodes = await r.json();
       } catch (err) {
         nodes = [];
@@ -3177,7 +3184,8 @@ const webAppHTML = `<!doctype html>
       graphLinksEl.innerHTML = "";
       let refs = [];
       try {
-        const r = await fetch("/api/graph/concept?id=" + encodeURIComponent(nodeId));
+        const r = await fetch("/api/graph/concept?dir=" + encodeURIComponent(state.cwd || "") +
+                              "&id=" + encodeURIComponent(nodeId));
         if (!r.ok) throw new Error(String(r.status));
         refs = await r.json();
       } catch (err) {
