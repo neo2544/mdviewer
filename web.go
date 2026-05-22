@@ -1319,6 +1319,20 @@ const webAppHTML = `<!doctype html>
     .app.sidebar-collapsed + .reveal-sidebar {
       display: inline-flex;
     }
+    .collapse-graph-rail {
+      align-self: flex-end;
+    }
+    .reveal-graph-rail {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 20;
+      display: none;
+    }
+    .app.graph-rail-collapsed ~ .reveal-graph-rail {
+      display: inline-flex;
+    }
+    .reveal-graph-rail[hidden] { display: none; }
     .preview-body {
       overflow: auto;
       padding: 24px clamp(18px, 4vw, 42px) 32px;
@@ -2142,6 +2156,7 @@ const webAppHTML = `<!doctype html>
       </div>
     </main>
     <aside class="shell graph-rail" id="graphRail" aria-label="Graph concepts">
+      <button class="action collapse-graph-rail" id="collapseGraphRail" type="button" title="Hide graph panel">&#x203A;</button>
       <div class="graph-build-status" id="graphBuildStatus" hidden>
         <div class="graph-build-status-folder" id="graphBuildStatusFolder"></div>
         <div class="graph-progress" id="graphProgress">
@@ -2180,6 +2195,7 @@ const webAppHTML = `<!doctype html>
     </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
+  <button class="action reveal-graph-rail" id="revealGraphRail" type="button" title="Show graph panel" hidden>&#x2726; Graph</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
   <div class="popup-modal" id="listPopup" hidden>
     <div class="popup-card">
@@ -2329,6 +2345,7 @@ const webAppHTML = `<!doctype html>
       restoringHistory: false,
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
+      graphRailCollapsed: localStorage.getItem("mdviewer.graphRailCollapsed") === "1",
       // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
       showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
     };
@@ -2581,6 +2598,14 @@ const webAppHTML = `<!doctype html>
     function setSidebarCollapsed(collapsed) {
       state.sidebarCollapsed = collapsed;
       applySidebarLayout();
+    }
+
+    function applyGraphRailCollapsed() {
+      appShellEl.classList.toggle("graph-rail-collapsed", state.graphRailCollapsed);
+      revealGraphRailEl.hidden = !state.graphRailCollapsed;
+      try {
+        localStorage.setItem("mdviewer.graphRailCollapsed", state.graphRailCollapsed ? "1" : "0");
+      } catch (e) {}
     }
 
     function updateChangedPaths(dir, entries, options = {}) {
@@ -3137,6 +3162,8 @@ const webAppHTML = `<!doctype html>
     const graphBuildStatusEl = document.getElementById("graphBuildStatus");
     const graphBuildStatusFolderEl = document.getElementById("graphBuildStatusFolder");
     const graphHistoryEl = document.getElementById("graphHistory");
+    const collapseGraphRailEl = document.getElementById("collapseGraphRail");
+    const revealGraphRailEl = document.getElementById("revealGraphRail");
 
     async function refreshGraphStatus() {
       try {
@@ -3917,6 +3944,14 @@ const webAppHTML = `<!doctype html>
 
     collapseSidebarEl.onclick = () => setSidebarCollapsed(!state.sidebarCollapsed);
     revealSidebarEl.onclick = () => setSidebarCollapsed(false);
+    collapseGraphRailEl.onclick = function () {
+      state.graphRailCollapsed = true;
+      applyGraphRailCollapsed();
+    };
+    revealGraphRailEl.onclick = function () {
+      state.graphRailCollapsed = false;
+      applyGraphRailCollapsed();
+    };
     previewModeButtonEl.onclick = () => setEditorMode("preview");
     editModeButtonEl.onclick = () => {
       if (!canEditKind(state.selectedKind)) return;
@@ -5021,6 +5056,7 @@ const webAppHTML = `<!doctype html>
     attachZoomToPreview();
 
     applySidebarLayout();
+    applyGraphRailCollapsed();
     updateSortButtons();
     updateEditorButtons();
     renderRecents();
