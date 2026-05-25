@@ -951,6 +951,28 @@ const webAppHTML = `<!doctype html>
       padding: 0 8px;
     }
     .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+      background: none;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .section-toggle:hover .section-chevron { color: var(--accent); }
+    .section-toggle .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-chevron {
+      display: inline-block;
+      width: 12px;
+      color: var(--muted);
+      transition: transform 120ms ease, color 120ms ease;
+    }
+    .section.collapsed .section-chevron { transform: rotate(-90deg); }
+    .section.collapsed .section-list { display: none; }
     .section-actions {
       display: flex;
       gap: 4px;
@@ -1914,35 +1936,44 @@ const webAppHTML = `<!doctype html>
         </div>
         <div id="files"></div>
       </div>
-      <div class="section">
+      <div class="section" data-section="recentFiles">
         <div class="section-head">
-          <div class="section-title">Recent files</div>
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">Recent files</span>
+          </button>
           <div class="section-actions">
             <button class="action" id="showAllRecentFiles" title="Show all recent files" hidden>Show all</button>
             <button class="action" id="clearRecentFiles" title="Clear recent files">Clear</button>
           </div>
         </div>
-        <div id="recentFiles"></div>
+        <div class="section-list" id="recentFiles"></div>
       </div>
-      <div class="section">
+      <div class="section" data-section="recentDirs">
         <div class="section-head">
-          <div class="section-title">Recent folders</div>
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">Recent folders</span>
+          </button>
           <div class="section-actions">
             <button class="action" id="showAllRecentDirs" title="Show all recent folders" hidden>Show all</button>
             <button class="action" id="clearRecentDirs" title="Clear recent folders">Clear</button>
           </div>
         </div>
-        <div id="recentDirs"></div>
+        <div class="section-list" id="recentDirs"></div>
       </div>
-      <div class="section">
+      <div class="section" data-section="favorites">
         <div class="section-head">
-          <div class="section-title">Favorites</div>
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">Favorites</span>
+          </button>
           <div class="section-actions">
             <button class="action" id="showAllFavorites" title="Show all favorites" hidden>Show all</button>
             <button class="action" id="toggleFavorite">Toggle current</button>
           </div>
         </div>
-        <div id="favorites"></div>
+        <div class="section-list" id="favorites"></div>
       </div>
     </aside>
     <div class="splitter" id="splitter" aria-hidden="true"></div>
@@ -2162,6 +2193,11 @@ const webAppHTML = `<!doctype html>
       searchQueryRight: "",   // distinct from the left-sidebar file-name search
       searchInFileHits: [],   // array of <mark> elements in preview order
       searchInFileFocus: -1,  // index of the currently emphasized hit
+      sectionCollapsed: {
+        recentFiles: localStorage.getItem("mdviewer.section.recentFiles.collapsed") === "1",
+        recentDirs:  localStorage.getItem("mdviewer.section.recentDirs.collapsed") === "1",
+        favorites:   localStorage.getItem("mdviewer.section.favorites.collapsed") === "1",
+      },
     };
 
     // Persist lastSeenAt on unload so the next session can use it for "recent" detection.
@@ -2206,6 +2242,33 @@ const webAppHTML = `<!doctype html>
       collapseSidebarEl.title = state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
       localStorage.setItem("mdviewer.sidebarWidth", String(width));
       localStorage.setItem("mdviewer.sidebarCollapsed", state.sidebarCollapsed ? "1" : "0");
+    }
+
+    function applySectionLayout(name) {
+      const sec = document.querySelector('.section[data-section="' + name + '"]');
+      if (!sec) return;
+      const collapsed = !!(state.sectionCollapsed && state.sectionCollapsed[name]);
+      sec.classList.toggle("collapsed", collapsed);
+      const btn = sec.querySelector(".section-toggle");
+      if (btn) {
+        btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        btn.title = collapsed ? "Expand section" : "Collapse section";
+      }
+      try {
+        localStorage.setItem("mdviewer.section." + name + ".collapsed", collapsed ? "1" : "0");
+      } catch (e) {}
+    }
+
+    function applyAllSectionLayouts() {
+      applySectionLayout("recentFiles");
+      applySectionLayout("recentDirs");
+      applySectionLayout("favorites");
+    }
+
+    function toggleSection(name) {
+      if (!state.sectionCollapsed) state.sectionCollapsed = {};
+      state.sectionCollapsed[name] = !state.sectionCollapsed[name];
+      applySectionLayout(name);
     }
 
     function applySearchPanelLayout() {
@@ -4783,6 +4846,13 @@ const webAppHTML = `<!doctype html>
     updateSortButtons();
     updateEditorButtons();
     renderRecents();
+    for (const btn of document.querySelectorAll('.section[data-section] .section-toggle')) {
+      const sec = btn.closest('.section');
+      const name = sec && sec.dataset.section;
+      if (!name) continue;
+      btn.addEventListener("click", function () { toggleSection(name); });
+    }
+    applyAllSectionLayouts();
     // Refresh relative-time labels in the Recent sections every minute so
     // "2m ago" doesn't sit stale at 0s for hours.
     setInterval(() => { renderRecents(); }, 60 * 1000);
