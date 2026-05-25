@@ -2955,6 +2955,144 @@ const webAppHTML = `<!doctype html>
     const searchInFileHitsEl = document.getElementById("searchInFileHits");
     const searchFolderHitsEl = document.getElementById("searchFolderHits");
 
+    // clearInFileHighlights removes any <mark.search-mark> wrappers from
+    // previewBodyEl, restoring the text nodes.
+    function clearInFileHighlights() {
+      const marks = previewBodyEl.querySelectorAll("mark.search-mark");
+      for (const m of marks) {
+        const parent = m.parentNode;
+        if (!parent) continue;
+        parent.replaceChild(document.createTextNode(m.textContent || ""), m);
+        parent.normalize();
+      }
+      state.searchInFileHits = [];
+      state.searchInFileFocus = -1;
+    }
+
+    // walkTextNodes yields every text node descendant of root that has
+    // non-empty content and isn't inside a SCRIPT/STYLE/MARK element.
+    function walkTextNodes(root, visit) {
+      const SKIP = { SCRIPT: 1, STYLE: 1, MARK: 1 };
+      const stack = [root];
+      while (stack.length) {
+        const node = stack.pop();
+        for (const child of Array.from(node.childNodes)) {
+          if (child.nodeType === 1) {
+            if (!SKIP[child.tagName]) stack.push(child);
+          } else if (child.nodeType === 3) {
+            if (child.nodeValue && child.nodeValue.length) visit(child);
+          }
+        }
+      }
+    }
+
+    // highlightInFile wraps each occurrence of needle in previewBodyEl with
+    // <mark class="search-mark">. Case-insensitive. Returns the array of
+    // mark elements in document order.
+    function highlightInFile(needle) {
+      clearInFileHighlights();
+      if (!needle) return [];
+      const lower = needle.toLowerCase();
+      const len = needle.length;
+      const hits = [];
+      const targets = [];
+      walkTextNodes(previewBodyEl, function (t) { targets.push(t); });
+      for (const node of targets) {
+        const text = node.nodeValue || "";
+        const lo = text.toLowerCase();
+        let idx = lo.indexOf(lower);
+        if (idx < 0) continue;
+        const parent = node.parentNode;
+        if (!parent) continue;
+        let cursor = 0;
+        const frag = document.createDocumentFragment();
+        while (idx >= 0) {
+          if (idx > cursor) {
+            frag.appendChild(document.createTextNode(text.substring(cursor, idx)));
+          }
+          const mark = document.createElement("mark");
+          mark.className = "search-mark";
+          mark.textContent = text.substring(idx, idx + len);
+          frag.appendChild(mark);
+          hits.push(mark);
+          cursor = idx + len;
+          idx = lo.indexOf(lower, cursor);
+        }
+        if (cursor < text.length) {
+          frag.appendChild(document.createTextNode(text.substring(cursor)));
+        }
+        parent.replaceChild(frag, node);
+      }
+      state.searchInFileHits = hits;
+      state.searchInFileFocus = -1;
+      return hits;
+    }
+
+    // focusHit scrolls to the i-th in-file hit and emphasises it.
+    function focusHit(i) {
+      const hits = state.searchInFileHits;
+      if (!hits.length) return;
+      if (state.searchInFileFocus >= 0 && hits[state.searchInFileFocus]) {
+        hits[state.searchInFileFocus].classList.remove("current");
+      }
+      const clamped = Math.max(0, Math.min(i, hits.length - 1));
+      state.searchInFileFocus = clamped;
+      const mark = hits[clamped];
+      mark.classList.add("current");
+      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    // renderInFileResults updates the summary + clickable hit list in the
+    // right panel.
+    function renderInFileResults(needle, hits) {
+      searchInFileHitsEl.innerHTML = "";
+      if (!needle) {
+        searchInFileSummaryEl.textContent = "Type to search.";
+        return;
+      }
+      if (!hits.length) {
+        searchInFileSummaryEl.textContent = "No matches in this file.";
+        return;
+      }
+      searchInFileSummaryEl.textContent = hits.length + " match" + (hits.length === 1 ? "" : "es");
+      const maxList = 50;
+      const shown = hits.slice(0, maxList);
+      for (let i = 0; i < shown.length; i++) {
+        const mark = shown[i];
+        const ctxBefore = (mark.previousSibling && mark.previousSibling.nodeValue) || "";
+        const ctxAfter  = (mark.nextSibling && mark.nextSibling.nodeValue) || "";
+        const row = document.createElement("div");
+        row.className = "search-hit";
+        const pre = document.createElement("span");
+        pre.textContent = "..." + ctxBefore.slice(-30);
+        const hit = document.createElement("span");
+        hit.className = "search-hit-needle";
+        hit.textContent = mark.textContent;
+        const post = document.createElement("span");
+        post.textContent = ctxAfter.slice(0, 30) + "...";
+        row.appendChild(pre);
+        row.appendChild(hit);
+        row.appendChild(post);
+        row.addEventListener("click", function () { focusHit(i); });
+        searchInFileHitsEl.appendChild(row);
+      }
+      if (hits.length > maxList) {
+        const more = document.createElement("div");
+        more.className = "search-empty";
+        more.textContent = (hits.length - maxList) + " more matches not shown.";
+        searchInFileHitsEl.appendChild(more);
+      }
+    }
+
+    // runInFileSearch ties the two together.
+    function runInFileSearch(needle) {
+      const hits = highlightInFile(needle);
+      renderInFileResults(needle, hits);
+    }
+
+    // runFolderSearch stub — Task 5 fills this in.
+    function runFolderSearch(needle) { /* Task 5 fills this in */ }
+
     async function selectFile(path, options = {}) {
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
@@ -2998,6 +3136,11 @@ const webAppHTML = `<!doctype html>
       updateEditorButtons();
       if (options.historyMode) {
         syncHistory(options.historyMode);
+      }
+      // re-run in-file search on the newly rendered preview, if a query
+      // is active.
+      if (state.searchQueryRight) {
+        runInFileSearch(state.searchQueryRight);
       }
     }
 
@@ -3439,6 +3582,15 @@ const webAppHTML = `<!doctype html>
       setEditorMode("edit");
     };
     saveButtonEl.onclick = () => saveCurrentFile();
+    let searchDebounce = null;
+    searchPanelInputEl.addEventListener("input", function () {
+      state.searchQueryRight = searchPanelInputEl.value || "";
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(function () {
+        runInFileSearch(state.searchQueryRight);
+        runFolderSearch(state.searchQueryRight);
+      }, 120);
+    });
     searchInputEl.addEventListener("input", (event) => {
       state.searchQuery = event.target.value || "";
       renderFiles(state.entries);
