@@ -47,11 +47,9 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 	serverURL := "http://" + addr
 
 	server := &webServer{
-		startDir:   startDir,
-		appRoot:    appRoot,
-		graphCache: make(map[string]*GraphIndex),
+		startDir: startDir,
+		appRoot:  appRoot,
 	}
-	server.buildManager = newBuildManager()
 
 	// Pre-bind the listener synchronously so we fail FAST on port
 	// conflicts (typically "another mdviewer is already running").
