@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -290,4 +291,37 @@ func TestGraphBuildSurvivesRequestCompletion(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("graph.json never appeared — build was likely killed by request-context cancellation")
+}
+
+func TestGraphDataReturnsJSON(t *testing.T) {
+	s := newTestServer(t, true) // copies fixture graph.json to <root>/graphify-out/
+	req := httptest.NewRequest("GET", "/api/graph/data?dir="+s.startDir, nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var doc map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["nodes"]; !ok {
+		t.Errorf("response missing nodes key")
+	}
+	if _, ok := doc["links"]; !ok {
+		t.Errorf("response missing links key")
+	}
+}
+
+func TestGraphDataMissing(t *testing.T) {
+	s := newTestServer(t, false) // no graph file
+	req := httptest.NewRequest("GET", "/api/graph/data?dir="+s.startDir, nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
 }

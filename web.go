@@ -74,6 +74,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/graph/build/status", s.handleGraphBuildStatus)
 	mux.HandleFunc("/api/graph/backends", s.handleGraphBackends)
 	mux.HandleFunc("/api/graph/history", s.handleGraphHistory)
+	mux.HandleFunc("/api/graph/data", s.handleGraphData)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -5303,4 +5304,27 @@ func (s *webServer) handleGraphHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].BuiltAt.After(out[j].BuiltAt) })
 	s.writeJSON(w, http.StatusOK, out)
+}
+
+// handleGraphData streams the raw graphify graph.json for the given dir.
+// The native graph view fetches this and renders it client-side.
+func (s *webServer) handleGraphData(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid dir", http.StatusBadRequest)
+		return
+	}
+	jsonPath := filepath.Join(abs, "graphify-out", "graph.json")
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		http.Error(w, "no graph for "+abs, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }
