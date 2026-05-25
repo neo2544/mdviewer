@@ -1,30 +1,20 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
 type webServer struct {
 	startDir string
 	appRoot  string
-
-	graphMu    sync.RWMutex
-	graphCache map[string]*GraphIndex // abs folder path -> its graph index
-
-	historyMu sync.Mutex
-
-	buildManager *BuildManager
 }
 
 type webEntry struct {
@@ -67,14 +57,6 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/icon.png", s.handleIcon)
 	mux.HandleFunc("/favicon.ico", s.handleIcon)
-	mux.HandleFunc("/api/graph/status", s.handleGraphStatus)
-	mux.HandleFunc("/api/graph/file", s.handleGraphFile)
-	mux.HandleFunc("/api/graph/concept", s.handleGraphConcept)
-	mux.HandleFunc("/api/graph/build", s.handleGraphBuild)
-	mux.HandleFunc("/api/graph/build/status", s.handleGraphBuildStatus)
-	mux.HandleFunc("/api/graph/backends", s.handleGraphBackends)
-	mux.HandleFunc("/api/graph/history", s.handleGraphHistory)
-	mux.HandleFunc("/api/graph/data", s.handleGraphData)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -83,6 +65,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/resolve", s.handleResolve)
 	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/aliases", s.handleAliases)
+	mux.HandleFunc("/api/search", s.handleSearch)
 	return mux
 }
 
@@ -145,60 +128,11 @@ func runWebServer(startDir, appRoot, addr string) error {
 		addr = "127.0.0.1:8421"
 	}
 	server := &webServer{
-		startDir:   startDir,
-		appRoot:    appRoot,
-		graphCache: make(map[string]*GraphIndex),
+		startDir: startDir,
+		appRoot:  appRoot,
 	}
-	server.buildManager = newBuildManager()
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
 	return http.ListenAndServe(addr, server.routes())
-}
-
-// graphForDir returns the graph index for the graphify-out/graph.json
-// inside dir, loading and caching it on first use and hot-reloading it
-// when the file's mtime advances. Returns nil when dir has no graph.
-// An empty dir falls back to the server's launch root.
-func (s *webServer) graphForDir(dir string) *GraphIndex {
-	if dir == "" {
-		dir = s.startDir
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return nil
-	}
-	abs = filepath.Clean(abs)
-
-	s.graphMu.RLock()
-	g := s.graphCache[abs]
-	s.graphMu.RUnlock()
-	if g != nil {
-		// Stale data beats no data — ignore reload errors (the file may
-		// be mid-rewrite by a running graphify build).
-		_, _ = g.ReloadIfChanged()
-		return g
-	}
-
-	jsonPath := filepath.Join(abs, "graphify-out", "graph.json")
-	loaded, err := LoadGraph(jsonPath, abs)
-	if err != nil {
-		return nil
-	}
-	s.graphMu.Lock()
-	s.graphCache[abs] = loaded
-	s.graphMu.Unlock()
-	return loaded
-}
-
-// invalidateGraph drops the cached index for dir so the next graphForDir
-// call reloads it from disk. Called after a build completes.
-func (s *webServer) invalidateGraph(dir string) {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return
-	}
-	s.graphMu.Lock()
-	delete(s.graphCache, filepath.Clean(abs))
-	s.graphMu.Unlock()
 }
 
 func (s *webServer) favoritesPath() string {
@@ -611,7 +545,7 @@ const webAppHTML = `<!doctype html>
       --sidebar-width: 320px;
       --splitter-width: 12px;
       --file-meta-width: 6.25rem;
-      --graph-rail-width: 240px;
+      --search-panel-width: 240px;
     }
     /* Light token set, factored so we can apply via either media query or
        an explicit data-theme attribute. */
@@ -658,7 +592,7 @@ const webAppHTML = `<!doctype html>
         var(--sidebar-width)
         var(--splitter-width)
         minmax(0, 1fr)
-        var(--graph-rail-width);
+        var(--search-panel-width);
       height: 100vh;
       gap: 0;
       padding: 18px;
@@ -669,16 +603,16 @@ const webAppHTML = `<!doctype html>
         0px
         0px
         minmax(0, 1fr)
-        var(--graph-rail-width);
+        var(--search-panel-width);
     }
-    .app.graph-rail-collapsed {
+    .app.search-panel-collapsed {
       grid-template-columns:
         var(--sidebar-width)
         var(--splitter-width)
         minmax(0, 1fr)
         0px;
     }
-    .app.sidebar-collapsed.graph-rail-collapsed {
+    .app.sidebar-collapsed.search-panel-collapsed {
       grid-template-columns: 0px 0px minmax(0, 1fr) 0px;
     }
     .shell {
@@ -1320,20 +1254,20 @@ const webAppHTML = `<!doctype html>
     .app.sidebar-collapsed + .reveal-sidebar {
       display: inline-flex;
     }
-    .collapse-graph-rail {
+    .collapse-search-panel {
       align-self: flex-end;
     }
-    .reveal-graph-rail {
+    .reveal-search-panel {
       position: fixed;
       top: 18px;
       right: 18px;
       z-index: 20;
       display: none;
     }
-    .app.graph-rail-collapsed ~ .reveal-graph-rail {
+    .app.search-panel-collapsed ~ .reveal-search-panel {
       display: inline-flex;
     }
-    .reveal-graph-rail[hidden] { display: none; }
+    .reveal-search-panel[hidden] { display: none; }
     .preview-body {
       overflow: auto;
       padding: 24px clamp(18px, 4vw, 42px) 32px;
@@ -1837,7 +1771,7 @@ const webAppHTML = `<!doctype html>
       .app.sidebar-collapsed .sidebar-shell { display: none; }
       .reveal-sidebar { display: inline-flex; }
     }
-    .graph-rail {
+    .search-panel {
       margin-left: 14px;
       padding: 14px 14px 18px;
       background: color-mix(in oklab, var(--panel) 92%, transparent);
@@ -1848,239 +1782,8 @@ const webAppHTML = `<!doctype html>
       flex-direction: column;
       gap: 14px;
     }
-    .app.graph-rail-collapsed .graph-rail {
+    .app.search-panel-collapsed .search-panel {
       display: none;
-    }
-    .graph-section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .18em;
-      color: var(--muted);
-    }
-    .graph-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .graph-chip {
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: var(--panel-2);
-      color: var(--text);
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .graph-chip:hover { border-color: var(--accent); }
-    .graph-chip.active { background: var(--accent); color: var(--bg); border-color: transparent; }
-    .graph-chip[data-file-type="document"] { border-left: 3px solid var(--accent); }
-    .graph-chip[data-file-type="code"]     { border-left: 3px solid var(--accent-2); }
-    .graph-chip[data-file-type="paper"]    { border-left: 3px solid color-mix(in oklab, var(--accent) 60%, white); }
-    .graph-chip[data-file-type="image"]    { border-left: 3px solid var(--muted); }
-    .graph-links {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .graph-link {
-      padding: 6px 8px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      color: var(--text);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .graph-link:hover { background: var(--panel-2); }
-    .graph-link .graph-link-path {
-      display: block;
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .graph-empty {
-      color: var(--muted);
-      font-size: 12px;
-      font-style: italic;
-    }
-    .graph-build {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 6px;
-    }
-    .graph-build-btn {
-      padding: 6px 12px;
-      border: 1px solid var(--accent);
-      background: transparent;
-      color: var(--accent);
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .graph-build-btn:disabled { opacity: 0.5; cursor: progress; }
-    .graph-build-log {
-      max-height: 120px;
-      overflow-y: auto;
-      font-family: ui-monospace, monospace;
-      font-size: 11px;
-      color: var(--muted);
-      background: var(--code);
-      padding: 6px 8px;
-      border-radius: 6px;
-      white-space: pre-wrap;
-    }
-    .graph-build-log[hidden] { display: none; }
-    .graph-build-hint {
-      font-size: 11px;
-      color: var(--muted);
-      line-height: 1.55;
-    }
-    .graph-build-hint code {
-      font-family: ui-monospace, monospace;
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      background: var(--code);
-      color: var(--text);
-    }
-    .graph-build-hint.warn { color: var(--accent); }
-    .graph-backend-select {
-      width: 100%;
-      padding: 5px 8px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-2);
-      color: var(--text);
-      font-size: 12px;
-    }
-    .graph-backend-select:disabled { opacity: 0.5; }
-    .graph-built-at {
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .graph-open-btn {
-      align-self: flex-start;
-      padding: 4px 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-2);
-      color: var(--text);
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .graph-open-btn:hover { border-color: var(--accent); }
-    .graph-open-btn[hidden] { display: none; }
-    .graph-history {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-    }
-    .graph-history-row {
-      padding: 6px 8px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      color: var(--text);
-      overflow: hidden;
-    }
-    .graph-history-row:hover { background: var(--panel-2); }
-    .graph-history-row .graph-history-when {
-      display: block;
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .graph-progress {
-      height: 6px;
-      border-radius: 999px;
-      background: var(--panel-2);
-      overflow: hidden;
-    }
-    .graph-progress[hidden] { display: none; }
-    .graph-progress-fill {
-      height: 100%;
-      width: 0%;
-      background: var(--accent);
-      border-radius: 999px;
-      transition: width 0.4s ease;
-    }
-    .graph-progress-fill.error { background: oklch(0.6 0.2 25); }
-    .graph-progress-meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .graph-progress-meta[hidden] { display: none; }
-    .graph-build-status {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: color-mix(in oklab, var(--accent) 8%, var(--panel));
-    }
-    .graph-build-status[hidden] { display: none; }
-    .graph-build-status-folder {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .native-graph-host {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      background: var(--code);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .native-graph-canvas {
-      width: 100%;
-      height: 100%;
-    }
-    .native-graph-bar {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      pointer-events: none;
-    }
-    .native-graph-bar > * { pointer-events: auto; }
-    .native-graph-bar .label {
-      font-size: 11px;
-      color: var(--muted);
-      background: color-mix(in oklab, var(--panel) 80%, transparent);
-      padding: 4px 8px;
-      border-radius: 6px;
-    }
-    .native-graph-bar button {
-      padding: 4px 10px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel-2);
-      color: var(--text);
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .native-graph-bar button.active {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    .native-graph-loading {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      color: var(--muted);
     }
   </style>
   <script>
@@ -2208,47 +1911,12 @@ const webAppHTML = `<!doctype html>
         <span id="scrollText">Preview 0%</span>
       </div>
     </main>
-    <aside class="shell graph-rail" id="graphRail" aria-label="Graph concepts">
-      <button class="action collapse-graph-rail" id="collapseGraphRail" type="button" title="Hide graph panel">&#x203A;</button>
-      <div class="graph-build-status" id="graphBuildStatus" hidden>
-        <div class="graph-build-status-folder" id="graphBuildStatusFolder"></div>
-        <div class="graph-progress" id="graphProgress">
-          <div class="graph-progress-fill" id="graphProgressFill"></div>
-        </div>
-        <div class="graph-progress-meta" id="graphProgressMeta">
-          <span id="graphProgressPhase">starting</span>
-          <span id="graphProgressTime">0:00</span>
-        </div>
-        <div class="graph-build-log" id="graphBuildLog" hidden></div>
-      </div>
-      <div>
-        <div class="graph-section-title">Concepts in this file</div>
-        <div class="graph-built-at" id="graphBuiltAt" hidden></div>
-        <button class="graph-open-btn" id="graphOpenBtn" type="button" hidden>Open graph &#x2197;</button>
-        <div class="graph-chips" id="graphChips">
-          <div class="graph-empty" id="graphEmpty">Open a file to see extracted concepts.</div>
-        </div>
-      </div>
-      <div>
-        <div class="graph-section-title">Linked files</div>
-        <div class="graph-links" id="graphLinks"></div>
-      </div>
-      <div>
-        <div class="graph-section-title">Build history</div>
-        <div class="graph-history" id="graphHistory"></div>
-      </div>
-      <div class="graph-section-title" id="graphBanner" hidden></div>
-      <div class="graph-build" id="graphBuildBox" hidden>
-        <select class="graph-backend-select" id="graphBackendSelect" aria-label="Build backend"></select>
-        <button class="graph-build-btn" id="graphBuildBtn" type="button">Build graph</button>
-        <div class="graph-build-hint" id="graphBuildHint">
-          Needs <code>GEMINI_API_KEY</code>. No key? Run <code>/graphify .</code> in Claude Code, then refresh.
-        </div>
-      </div>
+    <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
+      <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
     </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
-  <button class="action reveal-graph-rail" id="revealGraphRail" type="button" title="Show graph panel" hidden>&#x2726; Graph</button>
+  <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show search panel" hidden>&#x1F50D; Search</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
   <div class="popup-modal" id="listPopup" hidden>
     <div class="popup-card">
@@ -2382,11 +2050,6 @@ const webAppHTML = `<!doctype html>
       sortDirection: "asc",
       selectedPath: "",
       selectedHash: "",
-      // graph-rail state
-      graphAvailable: false,
-      graphConcepts: [],
-      graphActiveNodeId: null,
-      graphDir: "",
       favorites: [],
       selectedKind: "",
       selectedModTime: "",
@@ -2395,13 +2058,10 @@ const webAppHTML = `<!doctype html>
       editDraft: "",
       editBaseModTime: "",
       editDirty: false,
-      activeGraphDir: "",
-      activeGraphFocus: "",
-      activeGraphMode: "",
       restoringHistory: false,
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
-      graphRailCollapsed: localStorage.getItem("mdviewer.graphRailCollapsed") === "1",
+      searchPanelCollapsed: localStorage.getItem("mdviewer.searchPanelCollapsed") === "1",
       // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
       showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
     };
@@ -2656,11 +2316,11 @@ const webAppHTML = `<!doctype html>
       applySidebarLayout();
     }
 
-    function applyGraphRailCollapsed() {
-      appShellEl.classList.toggle("graph-rail-collapsed", state.graphRailCollapsed);
-      revealGraphRailEl.hidden = !state.graphRailCollapsed;
+    function applySearchPanelCollapsed() {
+      appShellEl.classList.toggle("search-panel-collapsed", state.searchPanelCollapsed);
+      revealSearchPanelEl.hidden = !state.searchPanelCollapsed;
       try {
-        localStorage.setItem("mdviewer.graphRailCollapsed", state.graphRailCollapsed ? "1" : "0");
+        localStorage.setItem("mdviewer.searchPanelCollapsed", state.searchPanelCollapsed ? "1" : "0");
       } catch (e) {}
     }
 
@@ -2892,7 +2552,6 @@ const webAppHTML = `<!doctype html>
 
     function currentRoute() {
       return {
-        graph: state.activeGraphDir || "",
         dir: state.cwd || "",
         path: state.selectedPath || "",
         hash: state.selectedHash || "",
@@ -2901,7 +2560,6 @@ const webAppHTML = `<!doctype html>
 
     function routeURL(route) {
       const params = new URLSearchParams();
-      if (route.graph) params.set("graph", route.graph);
       if (route.dir) params.set("dir", route.dir);
       if (route.path) params.set("path", route.path);
       if (route.hash) params.set("hash", route.hash);
@@ -2923,7 +2581,6 @@ const webAppHTML = `<!doctype html>
     function routeFromLocation() {
       const params = new URLSearchParams(location.search);
       return {
-        graph: params.get("graph") || "",
         dir: params.get("dir") || "",
         path: params.get("path") || "",
         hash: params.get("hash") || "",
@@ -2944,9 +2601,6 @@ const webAppHTML = `<!doctype html>
     }
 
     async function loadDir(dir = "", options = {}) {
-      state.activeGraphDir = "";
-      state.activeGraphFocus = "";
-      state.activeGraphMode = "";
       const params = new URLSearchParams();
       if (dir) params.set("dir", dir);
       if (state.showHidden) params.set("show_hidden", "1");
@@ -2961,11 +2615,6 @@ const webAppHTML = `<!doctype html>
         return;
       }
       state.cwd = data.cwd;
-      // The graph rail is per-folder — re-evaluate it whenever the
-      // current directory changes.
-      refreshGraphStatus().then(function () {
-        loadConceptsForFile(state.selectedPath || "");
-      });
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
@@ -3206,518 +2855,10 @@ const webAppHTML = `<!doctype html>
       }
     }
 
-    const graphChipsEl = document.getElementById("graphChips");
-    const graphLinksEl = document.getElementById("graphLinks");
-    const graphEmptyEl = document.getElementById("graphEmpty");
-    const graphBannerEl = document.getElementById("graphBanner");
-    const graphBuildBoxEl = document.getElementById("graphBuildBox");
-    const graphBuildBtnEl = document.getElementById("graphBuildBtn");
-    const graphBuildLogEl = document.getElementById("graphBuildLog");
-    const graphBackendSelectEl = document.getElementById("graphBackendSelect");
-    const graphBuiltAtEl = document.getElementById("graphBuiltAt");
-    const graphOpenBtnEl = document.getElementById("graphOpenBtn");
-    const graphProgressEl = document.getElementById("graphProgress");
-    const graphProgressFillEl = document.getElementById("graphProgressFill");
-    const graphProgressMetaEl = document.getElementById("graphProgressMeta");
-    const graphProgressPhaseEl = document.getElementById("graphProgressPhase");
-    const graphProgressTimeEl = document.getElementById("graphProgressTime");
-    const graphBuildStatusEl = document.getElementById("graphBuildStatus");
-    const graphBuildStatusFolderEl = document.getElementById("graphBuildStatusFolder");
-    const graphHistoryEl = document.getElementById("graphHistory");
-    const collapseGraphRailEl = document.getElementById("collapseGraphRail");
-    const revealGraphRailEl = document.getElementById("revealGraphRail");
-
-    async function refreshGraphStatus() {
-      try {
-        const r = await fetch("/api/graph/status?dir=" + encodeURIComponent(state.cwd || ""));
-        const data = await r.json();
-        state.graphAvailable = !!data.available;
-        if (data.available && data.built_at) {
-          graphBuiltAtEl.hidden = false;
-          graphBuiltAtEl.textContent =
-            "Last built " + graphRelativeTime(data.built_at) +
-            " \xb7 " + (data.node_count || 0) + " nodes";
-          state.graphDir = data.dir || "";
-          graphOpenBtnEl.hidden = false;
-        } else {
-          graphBuiltAtEl.hidden = true;
-          state.graphDir = "";
-          graphOpenBtnEl.hidden = true;
-        }
-        if (!state.graphAvailable) {
-          graphBannerEl.hidden = false;
-          graphBannerEl.textContent =
-            "Graph not built yet. Click 'Build graph' to extract concepts from this folder.";
-          graphBuildBoxEl.hidden = false;
-        } else {
-          graphBannerEl.hidden = true;
-          graphBuildBoxEl.hidden = true;
-        }
-      } catch (err) {
-        state.graphAvailable = false;
-        graphBuiltAtEl.hidden = true;
-        state.graphDir = "";
-        graphOpenBtnEl.hidden = true;
-        graphBuildBoxEl.hidden = false;
-      }
-    }
-
-    async function loadGraphBackends() {
-      let backends = [];
-      try {
-        const r = await fetch("/api/graph/backends");
-        backends = await r.json();
-      } catch (err) {
-        backends = [];
-      }
-      graphBackendSelectEl.innerHTML = "";
-      const auto = document.createElement("option");
-      auto.value = "auto";
-      auto.textContent = "Auto (best available)";
-      graphBackendSelectEl.appendChild(auto);
-      for (const b of backends) {
-        const opt = document.createElement("option");
-        opt.value = b.id;
-        let label = b.label;
-        if (b.experimental) label += " \xb7 experimental";
-        if (!b.available) label += " (unavailable)";
-        opt.textContent = label;
-        opt.disabled = !b.available;
-        graphBackendSelectEl.appendChild(opt);
-      }
-    }
-
-    graphBuildBtnEl.addEventListener("click", startGraphBuild);
-
-    graphOpenBtnEl.addEventListener("click", function () {
-      if (!state.graphDir) return;
-      openGraphView(state.graphDir, state.selectedPath || "", "focus");
-    });
-
-    function graphRelativeTime(iso) {
-      if (!iso) return "";
-      const then = new Date(iso).getTime();
-      if (isNaN(then)) return "";
-      const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-      if (secs < 60) return secs + "s ago";
-      const mins = Math.round(secs / 60);
-      if (mins < 60) return mins + "m ago";
-      const hrs = Math.round(mins / 60);
-      if (hrs < 24) return hrs + "h ago";
-      return Math.round(hrs / 24) + "d ago";
-    }
-
-    // ---- native graph view ------------------------------------------------
-    const VIS_NETWORK_CDN = "https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js";
-    let visNetworkPromise = null;
-    function loadVisNetwork() {
-      if (window.vis && window.vis.Network) return Promise.resolve();
-      if (visNetworkPromise) return visNetworkPromise;
-      visNetworkPromise = new Promise(function (resolve, reject) {
-        const s = document.createElement("script");
-        s.src = VIS_NETWORK_CDN;
-        s.onload = function () { resolve(); };
-        s.onerror = function () { reject(new Error("failed to load vis-network from CDN")); };
-        document.head.appendChild(s);
-      });
-      return visNetworkPromise;
-    }
-
-    const graphDataCache = new Map(); // dir -> {nodes, links}
-    async function fetchGraphData(dir) {
-      if (graphDataCache.has(dir)) return graphDataCache.get(dir);
-      const r = await fetch("/api/graph/data?dir=" + encodeURIComponent(dir));
-      if (!r.ok) throw new Error("graph.json fetch failed: " + r.status);
-      const doc = await r.json();
-      graphDataCache.set(dir, doc);
-      return doc;
-    }
-
-    // nodeColorFor maps file_type to a stable color so the same file type
-    // gets the same color across renders.
-    function nodeColorFor(fileType) {
-      switch (fileType) {
-        case "code": return "#7aa2f7";
-        case "document": return "#9ece6a";
-        case "paper": return "#e0af68";
-        case "image": return "#bb9af7";
-        case "concept": return "#f7768e";
-        case "rationale": return "#7dcfff";
-        default: return "#a9b1d6";
-      }
-    }
-
-    // focusSubgraph returns a {nodes, links} subset containing the nodes
-    // whose source_file matches focusPath plus their N-hop neighbours.
-    function focusSubgraph(doc, focusPath, hops) {
-      if (!focusPath) return doc;
-      const nodes = doc.nodes || [];
-      const links = doc.links || [];
-      const seedIds = new Set();
-      for (const n of nodes) {
-        if (n.source_file === focusPath) seedIds.add(n.id);
-      }
-      if (!seedIds.size) return doc; // file not in graph -- fall back to full
-      const adj = new Map();
-      for (const l of links) {
-        if (!adj.has(l.source)) adj.set(l.source, []);
-        if (!adj.has(l.target)) adj.set(l.target, []);
-        adj.get(l.source).push(l.target);
-        adj.get(l.target).push(l.source);
-      }
-      const keep = new Set(seedIds);
-      let frontier = Array.from(seedIds);
-      for (let h = 0; h < hops; h++) {
-        const next = [];
-        for (const id of frontier) {
-          const ns = adj.get(id) || [];
-          for (const nb of ns) {
-            if (!keep.has(nb)) {
-              keep.add(nb);
-              next.push(nb);
-            }
-          }
-        }
-        frontier = next;
-      }
-      return {
-        nodes: nodes.filter(function (n) { return keep.has(n.id); }),
-        links: links.filter(function (l) { return keep.has(l.source) && keep.has(l.target); }),
-      };
-    }
-
-    // openGraphView replaces the preview body with a native graph render.
-    // mode: "focus" (default -- current file + neighbours) | "full".
-    // Task 3 wires this into the router; for now it just renders.
-    async function openGraphView(dir, focusPath, mode) {
-      if (!dir) return;
-      const useMode = mode || "focus";
-      // Tear down any previous render.
-      previewBodyEl.innerHTML = "";
-      const host = document.createElement("div");
-      host.className = "native-graph-host";
-      const canvas = document.createElement("div");
-      canvas.className = "native-graph-canvas";
-      const bar = document.createElement("div");
-      bar.className = "native-graph-bar";
-      const label = document.createElement("span");
-      label.className = "label";
-      label.textContent = (useMode === "focus" ? "Focus" : "Full") +
-        " · " + (dir.split("/").filter(Boolean).pop() || dir);
-      bar.appendChild(label);
-      const focusBtn = document.createElement("button");
-      focusBtn.type = "button";
-      focusBtn.textContent = "Focus";
-      const fullBtn = document.createElement("button");
-      fullBtn.type = "button";
-      fullBtn.textContent = "Full";
-      (useMode === "focus" ? focusBtn : fullBtn).classList.add("active");
-      bar.appendChild(focusBtn);
-      bar.appendChild(fullBtn);
-      const loading = document.createElement("div");
-      loading.className = "native-graph-loading";
-      loading.textContent = "Loading graph…";
-      host.appendChild(canvas);
-      host.appendChild(bar);
-      host.appendChild(loading);
-      previewBodyEl.appendChild(host);
-
-      state.activeGraphDir = dir;
-      state.activeGraphFocus = focusPath || "";
-      state.activeGraphMode = useMode;
-      if (!state.restoringHistory) {
-        syncHistory("push");
-      }
-
-      let doc;
-      try {
-        await loadVisNetwork();
-        doc = await fetchGraphData(dir);
-      } catch (err) {
-        loading.textContent = "Failed to load graph: " + (err && err.message ? err.message : err);
-        return;
-      }
-      const sub = (useMode === "focus")
-        ? focusSubgraph(doc, focusPath || "", 1)
-        : doc;
-      const fellBackToFull = (useMode === "focus" && focusPath && sub === doc);
-      if (fellBackToFull) {
-        const note = document.createElement("span");
-        note.className = "label";
-        note.textContent = "(file not in graph — showing full)";
-        bar.appendChild(note);
-      }
-      const visNodes = (sub.nodes || []).map(function (n) {
-        return {
-          id: n.id,
-          label: n.label || n.id,
-          color: { background: nodeColorFor(n.file_type), border: "transparent" },
-          font: { color: "#cdd6f4", size: 12 },
-          shape: "dot",
-          size: 10,
-          title: n.source_file || n.label,
-          srcFile: n.source_file || "",
-        };
-      });
-      const visEdges = (sub.links || []).map(function (l, i) {
-        return { id: "e" + i, from: l.source, to: l.target,
-                 color: { color: "rgba(160,160,200,0.35)" }, width: 1 };
-      });
-      loading.remove();
-      const network = new window.vis.Network(canvas, {
-        nodes: new window.vis.DataSet(visNodes),
-        edges: new window.vis.DataSet(visEdges),
-      }, {
-        physics: { stabilization: { iterations: 80 } },
-        interaction: { hover: true },
-      });
-      network.on("click", function (params) {
-        if (!params || !params.nodes || !params.nodes.length) return;
-        const id = params.nodes[0];
-        const nodeData = (sub.nodes || []).find(function (n) { return n.id === id; });
-        if (!nodeData || !nodeData.source_file) return;
-        selectFile(nodeData.source_file, { historyMode: "push" });
-      });
-      focusBtn.addEventListener("click", function () {
-        openGraphView(dir, focusPath || state.selectedPath || "", "focus");
-      });
-      fullBtn.addEventListener("click", function () {
-        openGraphView(dir, focusPath || state.selectedPath || "", "full");
-      });
-      window.__graphView = { network, focusBtn, fullBtn, dir, focusPath, useMode };
-    }
-
-    async function loadGraphHistory() {
-      let entries = [];
-      try {
-        const r = await fetch("/api/graph/history");
-        entries = await r.json();
-      } catch (err) {
-        entries = [];
-      }
-      graphHistoryEl.innerHTML = "";
-      if (!entries || !entries.length) {
-        const e = document.createElement("div");
-        e.className = "graph-empty";
-        e.textContent = "No builds yet.";
-        graphHistoryEl.appendChild(e);
-        return;
-      }
-      for (const entry of entries) {
-        const row = document.createElement("div");
-        row.className = "graph-history-row";
-        row.title = entry.dir;
-        const name = entry.dir.split("/").filter(Boolean).pop() || entry.dir;
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = name;
-        const whenSpan = document.createElement("span");
-        whenSpan.className = "graph-history-when";
-        whenSpan.textContent = "built " + graphRelativeTime(entry.built_at);
-        row.appendChild(nameSpan);
-        row.appendChild(whenSpan);
-        row.addEventListener("click", function () {
-          loadDir(entry.dir, { historyMode: "push" });
-        });
-        graphHistoryEl.appendChild(row);
-      }
-    }
-
-    function phaseToPercent(phase) {
-      switch (phase) {
-        case "detect":  return 15;
-        case "extract": return 65;
-        case "cluster": return 85;
-        case "report":  return 95;
-        case "done":    return 100;
-        default:        return -1;
-      }
-    }
-
-    function formatElapsed(totalSecs) {
-      const m = Math.floor(totalSecs / 60);
-      const s = totalSecs % 60;
-      return m + ":" + (s < 10 ? "0" : "") + s;
-    }
-
-    async function startGraphBuild() {
-      graphBuildBtnEl.disabled = true;
-      const buildDir = state.cwd || "";
-      const buildFolderName = buildDir.split("/").filter(Boolean).pop() || buildDir || "(root)";
-      graphBuildStatusEl.hidden = false;
-      graphBuildStatusFolderEl.textContent = "Building " + buildFolderName;
-      graphBuildLogEl.hidden = false;
-      graphBuildLogEl.textContent = "Starting graphify…\n";
-      let resp;
-      try {
-        const backend = graphBackendSelectEl.value || "auto";
-        resp = await fetch("/api/graph/build?dir=" + encodeURIComponent(state.cwd || "") +
-                           "&backend=" + encodeURIComponent(backend), { method: "POST" });
-      } catch (err) {
-        graphBuildLogEl.textContent += "network error: " + err + "\n";
-        graphBuildBtnEl.disabled = false;
-        return;
-      }
-      if (!resp.ok) {
-        const msg = await resp.text();
-        graphBuildLogEl.textContent += "error: " + msg + "\n";
-        // Highlight the hint when the error is about the missing API key,
-        // so the "/graphify . in Claude Code" alternative stands out.
-        const hintEl = document.getElementById("graphBuildHint");
-        if (hintEl && /API_KEY/.test(msg)) {
-          hintEl.classList.add("warn");
-        }
-        graphBuildBtnEl.disabled = false;
-        return;
-      }
-      graphProgressEl.hidden = false;
-      graphProgressMetaEl.hidden = false;
-      graphProgressFillEl.classList.remove("error");
-      graphProgressFillEl.style.width = "0%";
-      graphProgressPhaseEl.textContent = "starting…";
-      graphProgressTimeEl.textContent = "0:00";
-      let progressPct = 0;
-      const buildStart = Date.now();
-      const elapsedTimer = setInterval(function () {
-        graphProgressTimeEl.textContent =
-          formatElapsed(Math.floor((Date.now() - buildStart) / 1000));
-      }, 1000);
-      const src = new EventSource("/api/graph/build/status");
-      src.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          if (data.phase === "closed") {
-            graphBuildLogEl.textContent += data.ok ? "done.\n" : "failed: " + data.message + "\n";
-            src.close();
-            graphBuildBtnEl.disabled = false;
-            clearInterval(elapsedTimer);
-            graphBuildStatusFolderEl.textContent =
-              (data.ok ? "Built " : "Build failed: ") + buildFolderName;
-            if (data.ok) {
-              graphProgressFillEl.style.width = "100%";
-              graphProgressPhaseEl.textContent = "done";
-              refreshGraphStatus().then(function () {
-                if (state.selectedPath) loadConceptsForFile(state.selectedPath);
-              });
-              loadGraphHistory();
-            } else {
-              graphProgressFillEl.classList.add("error");
-              graphProgressPhaseEl.textContent = "failed";
-            }
-            return;
-          }
-          const ts = data.at ? data.at.replace("T", " ").slice(11, 19) : "";
-          graphBuildLogEl.textContent +=
-            "[" + ts + "] " + (data.phase || "log") + ": " + (data.message || "") + "\n";
-          graphBuildLogEl.scrollTop = graphBuildLogEl.scrollHeight;
-          const pct = phaseToPercent(data.phase);
-          if (pct > progressPct) {
-            progressPct = pct;
-            graphProgressFillEl.style.width = progressPct + "%";
-          }
-          if (data.phase && data.phase !== "log") {
-            graphProgressPhaseEl.textContent = data.phase;
-          }
-        } catch (e) {
-          // ignore parse errors
-        }
-      };
-      src.onerror = () => {
-        clearInterval(elapsedTimer);
-        graphBuildLogEl.textContent += "stream closed.\n";
-        src.close();
-        graphBuildBtnEl.disabled = false;
-      };
-    }
-
-    async function loadConceptsForFile(absPath) {
-      graphLinksEl.innerHTML = "";
-      state.graphActiveNodeId = null;
-      if (!state.graphAvailable || !absPath) {
-        graphChipsEl.innerHTML = "";
-        graphChipsEl.appendChild(graphEmptyEl);
-        graphEmptyEl.textContent = state.graphAvailable
-          ? "Open a file to see extracted concepts."
-          : "";
-        return;
-      }
-      let nodes = [];
-      try {
-        const r = await fetch("/api/graph/file?dir=" + encodeURIComponent(state.cwd || "") +
-                              "&path=" + encodeURIComponent(absPath));
-        nodes = await r.json();
-      } catch (err) {
-        nodes = [];
-      }
-      state.graphConcepts = nodes;
-      graphChipsEl.innerHTML = "";
-      if (!nodes.length) {
-        const e = document.createElement("div");
-        e.className = "graph-empty";
-        e.textContent = "No concepts extracted from this file.";
-        graphChipsEl.appendChild(e);
-        return;
-      }
-      for (const n of nodes) {
-        const btn = document.createElement("button");
-        btn.className = "graph-chip";
-        btn.type = "button";
-        btn.dataset.id = n.id;
-        btn.dataset.fileType = n.file_type || "";
-        btn.textContent = n.label;
-        btn.addEventListener("click", () => activateConcept(n.id, btn));
-        graphChipsEl.appendChild(btn);
-      }
-    }
-
-    async function activateConcept(nodeId, chipEl) {
-      for (const c of graphChipsEl.querySelectorAll(".graph-chip")) {
-        c.classList.toggle("active", c === chipEl);
-      }
-      state.graphActiveNodeId = nodeId;
-      graphLinksEl.innerHTML = "";
-      let refs = [];
-      try {
-        const r = await fetch("/api/graph/concept?dir=" + encodeURIComponent(state.cwd || "") +
-                              "&id=" + encodeURIComponent(nodeId));
-        if (!r.ok) throw new Error(String(r.status));
-        refs = await r.json();
-      } catch (err) {
-        const e = document.createElement("div");
-        e.className = "graph-empty";
-        e.textContent = "Concept lookup failed.";
-        graphLinksEl.appendChild(e);
-        return;
-      }
-      if (!refs.length) {
-        const e = document.createElement("div");
-        e.className = "graph-empty";
-        e.textContent = "No other files contain this concept.";
-        graphLinksEl.appendChild(e);
-        return;
-      }
-      for (const ref of refs) {
-        const row = document.createElement("div");
-        row.className = "graph-link";
-        row.title = ref.path;
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = ref.path.split("/").pop();
-        const pathSpan = document.createElement("span");
-        pathSpan.className = "graph-link-path";
-        pathSpan.textContent = ref.path;
-        row.appendChild(nameSpan);
-        row.appendChild(pathSpan);
-        row.addEventListener("click", () => {
-          selectFile(ref.path, { historyMode: "push" });
-        });
-        graphLinksEl.appendChild(row);
-      }
-    }
+    const collapseSearchPanelEl = document.getElementById("collapseSearchPanel");
+    const revealSearchPanelEl = document.getElementById("revealSearchPanel");
 
     async function selectFile(path, options = {}) {
-      // navigating to a file leaves the graph view
-      state.activeGraphDir = "";
-      state.activeGraphFocus = "";
-      state.activeGraphMode = "";
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
       if (!state.cwd || !path.startsWith(state.cwd + "/")) {
@@ -3761,9 +2902,6 @@ const webAppHTML = `<!doctype html>
       if (options.historyMode) {
         syncHistory(options.historyMode);
       }
-      // graph rail update — runs in parallel with the rest, never blocks
-      // selection. Errors are swallowed by loadConceptsForFile itself.
-      loadConceptsForFile(path);
     }
 
     let usageGuideCache = null;
@@ -4061,14 +3199,6 @@ const webAppHTML = `<!doctype html>
     async function restoreRoute(route, historyMode = "") {
       state.restoringHistory = true;
       try {
-        if (route.graph) {
-          // First make sure the right folder is loaded in the file list.
-          if (route.dir && route.dir !== state.cwd) {
-            await loadDir(route.dir, { historyMode: "", keepSelection: true });
-          }
-          await openGraphView(route.graph, route.path || "", "focus");
-          return;
-        }
         const dir = route.dir || state.cwd || "";
         if (dir) {
           await loadDir(dir, { historyMode, clearSelection: !route.path });
@@ -4198,13 +3328,13 @@ const webAppHTML = `<!doctype html>
 
     collapseSidebarEl.onclick = () => setSidebarCollapsed(!state.sidebarCollapsed);
     revealSidebarEl.onclick = () => setSidebarCollapsed(false);
-    collapseGraphRailEl.onclick = function () {
-      state.graphRailCollapsed = true;
-      applyGraphRailCollapsed();
+    collapseSearchPanelEl.onclick = function () {
+      state.searchPanelCollapsed = true;
+      applySearchPanelCollapsed();
     };
-    revealGraphRailEl.onclick = function () {
-      state.graphRailCollapsed = false;
-      applyGraphRailCollapsed();
+    revealSearchPanelEl.onclick = function () {
+      state.searchPanelCollapsed = false;
+      applySearchPanelCollapsed();
     };
     previewModeButtonEl.onclick = () => setEditorMode("preview");
     editModeButtonEl.onclick = () => {
@@ -5310,13 +4440,10 @@ const webAppHTML = `<!doctype html>
     attachZoomToPreview();
 
     applySidebarLayout();
-    applyGraphRailCollapsed();
+    applySearchPanelCollapsed();
     updateSortButtons();
     updateEditorButtons();
     renderRecents();
-    refreshGraphStatus();
-    loadGraphBackends();
-    loadGraphHistory();
     // Refresh relative-time labels in the Recent sections every minute so
     // "2m ago" doesn't sit stale at 0s for hours.
     setInterval(() => { renderRecents(); }, 60 * 1000);
@@ -5327,257 +4454,106 @@ const webAppHTML = `<!doctype html>
 </body>
 </html>`
 
-type graphStatusResponse struct {
-	Available bool      `json:"available"`
-	NodeCount int       `json:"node_count"`
-	LoadedAt  time.Time `json:"loaded_at,omitempty"`
-	BuiltAt   time.Time `json:"built_at,omitempty"`
-	Dir       string    `json:"dir"`
-	Path      string    `json:"path"`
+const searchMaxSnippets = 3
+const searchSnippetLen = 60
+const searchMaxFileBytes = 2 * 1024 * 1024 // skip files larger than 2 MB
+
+type searchResult struct {
+	Path     string   `json:"path"`
+	Count    int      `json:"count"`
+	Snippets []string `json:"snippets"`
 }
 
-func (s *webServer) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
+// isProbablyText returns true if the byte slice looks like text content.
+// We declare "binary" when it contains a NUL byte in the prefix — the same
+// heuristic git uses.
+func isProbablyText(b []byte) bool {
+	limit := len(b)
+	if limit > 8000 {
+		limit = 8000
+	}
+	for i := 0; i < limit; i++ {
+		if b[i] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	if dir == "" {
 		dir = s.startDir
 	}
-	abs, _ := filepath.Abs(dir)
-	resp := graphStatusResponse{
-		Dir:  abs,
-		Path: filepath.Join(abs, "graphify-out", "graph.json"),
-	}
-	// built_at = the graph.json file's mtime — the moment graphify last
-	// wrote it. Distinct from loaded_at (when the server read it).
-	if info, err := os.Stat(resp.Path); err == nil {
-		resp.BuiltAt = info.ModTime()
-	}
-	if g := s.graphForDir(dir); g != nil {
-		resp.Available = true
-		resp.NodeCount = g.NodeCount()
-		resp.LoadedAt = g.LoadedAt()
-		s.recordBuild(dir)
-	}
-	s.writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *webServer) handleGraphFile(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		http.Error(w, "missing path", http.StatusBadRequest)
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing q", http.StatusBadRequest)
 		return
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-	g := s.graphForDir(r.URL.Query().Get("dir"))
-	if g == nil {
-		s.writeJSON(w, http.StatusOK, []Node{})
-		return
-	}
-	s.writeJSON(w, http.StatusOK, g.ConceptsInFile(abs))
-}
-
-func (s *webServer) handleGraphConcept(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "missing id", http.StatusBadRequest)
-		return
-	}
-	g := s.graphForDir(r.URL.Query().Get("dir"))
-	if g == nil {
-		http.Error(w, "no graph available", http.StatusNotFound)
-		return
-	}
-	g.mu.RLock()
-	_, exists := g.nodes[id]
-	g.mu.RUnlock()
-	if !exists {
-		http.Error(w, "node not found", http.StatusNotFound)
-		return
-	}
-	s.writeJSON(w, http.StatusOK, g.FilesForConcept(id))
-}
-
-func (s *webServer) handleGraphBuild(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	dir := r.URL.Query().Get("dir")
-	if dir == "" {
-		dir = s.startDir
-	}
-	// The build outlives this HTTP request (202 returns immediately, the
-	// build runs in a background goroutine). Binding it to r.Context()
-	// would cancel the subprocess the instant the handler returns.
-	sess, err := s.buildManager.Start(context.Background(), dir, r.URL.Query().Get("backend"))
-	if err != nil {
-		if strings.Contains(err.Error(), "already running") {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	s.writeJSON(w, http.StatusAccepted, map[string]string{"job_id": sess.ID()})
-}
-
-func (s *webServer) handleGraphBuildStatus(w http.ResponseWriter, r *http.Request) {
-	sess := s.buildManager.Current()
-	if sess == nil {
-		http.Error(w, "no build sessions", http.StatusNotFound)
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-
-	encoder := json.NewEncoder(w)
-	for ev := range sess.Events() {
-		_, _ = io.WriteString(w, "data: ")
-		_ = encoder.Encode(ev)
-		_, _ = io.WriteString(w, "\n")
-		flusher.Flush()
-	}
-
-	final := map[string]any{
-		"phase":   "closed",
-		"ok":      sess.OK(),
-		"message": "",
-	}
-	if e := sess.Err(); e != nil {
-		final["message"] = e.Error()
-	}
-	_, _ = io.WriteString(w, "data: ")
-	_ = encoder.Encode(final)
-	_, _ = io.WriteString(w, "\n")
-	flusher.Flush()
-
-	if sess.OK() {
-		s.invalidateGraph(sess.Root())
-		s.recordBuild(sess.Root())
-	}
-}
-
-// handleGraphBackends lists the build backends usable on this machine so
-// the UI can populate the backend dropdown.
-func (s *webServer) handleGraphBackends(w http.ResponseWriter, r *http.Request) {
-	s.writeJSON(w, http.StatusOK, detectBackends())
-}
-
-const graphHistoryFileName = ".mdviewer_graph_history.json"
-
-// graphHistoryEntry is one row of build history returned to the UI.
-type graphHistoryEntry struct {
-	Dir     string    `json:"dir"`
-	BuiltAt time.Time `json:"built_at"`
-}
-
-func (s *webServer) graphHistoryPath() string {
-	return filepath.Join(s.appRoot, graphHistoryFileName)
-}
-
-// loadGraphHistory reads the persisted list of built directories
-// (most-recent-first). Missing / unreadable file -> nil.
-func (s *webServer) loadGraphHistory() []string {
-	data, err := os.ReadFile(s.graphHistoryPath())
-	if err != nil {
-		return nil
-	}
-	var dirs []string
-	if err := json.Unmarshal(data, &dirs); err != nil {
-		return nil
-	}
-	return dirs
-}
-
-func (s *webServer) saveGraphHistory(dirs []string) {
-	data, err := json.MarshalIndent(dirs, "", "  ")
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(s.graphHistoryPath(), data, 0o644)
-}
-
-// recordBuild moves dir to the front of the build-history list
-// (de-duplicated, capped at 50). A no-op when dir is already the most
-// recent entry, so repeated /api/graph/status hits stay cheap.
-func (s *webServer) recordBuild(dir string) {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return
-	}
-	abs = filepath.Clean(abs)
-	s.historyMu.Lock()
-	defer s.historyMu.Unlock()
-	existing := s.loadGraphHistory()
-	if len(existing) > 0 && existing[0] == abs {
-		return
-	}
-	out := []string{abs}
-	for _, d := range existing {
-		if d != abs {
-			out = append(out, d)
-		}
-	}
-	if len(out) > 50 {
-		out = out[:50]
-	}
-	s.saveGraphHistory(out)
-}
-
-// handleGraphHistory returns the build history, freshest first. Entries
-// whose graph.json no longer exists are dropped and the file is rewritten
-// (self-healing).
-func (s *webServer) handleGraphHistory(w http.ResponseWriter, r *http.Request) {
-	s.historyMu.Lock()
-	defer s.historyMu.Unlock()
-	dirs := s.loadGraphHistory()
-	out := []graphHistoryEntry{}
-	kept := []string{}
-	for _, dir := range dirs {
-		info, err := os.Stat(filepath.Join(dir, "graphify-out", "graph.json"))
-		if err != nil {
-			continue
-		}
-		out = append(out, graphHistoryEntry{Dir: dir, BuiltAt: info.ModTime()})
-		kept = append(kept, dir)
-	}
-	if len(kept) != len(dirs) {
-		s.saveGraphHistory(kept)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].BuiltAt.After(out[j].BuiltAt) })
-	s.writeJSON(w, http.StatusOK, out)
-}
-
-// handleGraphData streams the raw graphify graph.json for the given dir.
-// The native graph view fetches this and renders it client-side.
-func (s *webServer) handleGraphData(w http.ResponseWriter, r *http.Request) {
-	dir := r.URL.Query().Get("dir")
-	if dir == "" {
-		dir = s.startDir
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		http.Error(w, "invalid dir", http.StatusBadRequest)
 		return
 	}
-	jsonPath := filepath.Join(abs, "graphify-out", "graph.json")
-	data, err := os.ReadFile(jsonPath)
+	entries, err := os.ReadDir(abs)
 	if err != nil {
-		http.Error(w, "no graph for "+abs, http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
+	needle := strings.ToLower(q)
+	out := []searchResult{}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Size() > searchMaxFileBytes {
+			continue
+		}
+		full := filepath.Join(abs, e.Name())
+		data, err := os.ReadFile(full)
+		if err != nil || !isProbablyText(data) {
+			continue
+		}
+		lower := strings.ToLower(string(data))
+		count := strings.Count(lower, needle)
+		if count == 0 {
+			continue
+		}
+		snippets := collectSnippets(string(data), lower, needle, searchMaxSnippets)
+		out = append(out, searchResult{Path: full, Count: count, Snippets: snippets})
+	}
+	// Most matches first.
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	s.writeJSON(w, http.StatusOK, out)
+}
+
+// collectSnippets returns up to maxCount short context strings around the
+// first matches of needle in haystackLower (which must be the lowercase
+// of haystack).
+func collectSnippets(haystack, haystackLower, needleLower string, maxCount int) []string {
+	out := []string{}
+	from := 0
+	for i := 0; i < maxCount; i++ {
+		idx := strings.Index(haystackLower[from:], needleLower)
+		if idx < 0 {
+			break
+		}
+		absIdx := from + idx
+		startCtx := absIdx - searchSnippetLen/2
+		if startCtx < 0 {
+			startCtx = 0
+		}
+		endCtx := absIdx + len(needleLower) + searchSnippetLen/2
+		if endCtx > len(haystack) {
+			endCtx = len(haystack)
+		}
+		snip := haystack[startCtx:endCtx]
+		// trim newlines for a clean one-line preview
+		snip = strings.ReplaceAll(snip, "\n", " ")
+		snip = strings.TrimSpace(snip)
+		out = append(out, snip)
+		from = absIdx + len(needleLower)
+	}
+	return out
 }
