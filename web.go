@@ -3090,8 +3090,57 @@ const webAppHTML = `<!doctype html>
       renderInFileResults(needle, hits);
     }
 
-    // runFolderSearch stub — Task 5 fills this in.
-    function runFolderSearch(needle) { /* Task 5 fills this in */ }
+    let searchFolderAbort = null;
+    async function runFolderSearch(needle) {
+      searchFolderHitsEl.innerHTML = "";
+      if (!needle) return;
+      if (searchFolderAbort) { try { searchFolderAbort.abort(); } catch (e) {} }
+      const ctrl = new AbortController();
+      searchFolderAbort = ctrl;
+      let results = [];
+      try {
+        const url = "/api/search?dir=" + encodeURIComponent(state.cwd || "") +
+                    "&q=" + encodeURIComponent(needle);
+        const r = await fetch(url, { signal: ctrl.signal });
+        if (!r.ok) throw new Error(String(r.status));
+        results = await r.json();
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        const e = document.createElement("div");
+        e.className = "search-empty";
+        e.textContent = "Search failed.";
+        searchFolderHitsEl.appendChild(e);
+        return;
+      }
+      // Hide the currently-open file from the cross-file list — its
+      // matches are already in the "In this file" section.
+      const filtered = results.filter(function (r) {
+        return r.path !== state.selectedPath;
+      });
+      if (!filtered.length) {
+        const e = document.createElement("div");
+        e.className = "search-empty";
+        e.textContent = "No matches in other files.";
+        searchFolderHitsEl.appendChild(e);
+        return;
+      }
+      for (const r of filtered) {
+        const row = document.createElement("div");
+        row.className = "search-file-row";
+        row.title = r.path;
+        const name = document.createElement("span");
+        name.textContent = r.path.split("/").pop();
+        const count = document.createElement("span");
+        count.className = "search-file-count";
+        count.textContent = r.count + (r.count === 1 ? " match" : " matches");
+        row.appendChild(name);
+        row.appendChild(count);
+        row.addEventListener("click", function () {
+          selectFile(r.path, { historyMode: "push" });
+        });
+        searchFolderHitsEl.appendChild(row);
+      }
+    }
 
     async function selectFile(path, options = {}) {
       state.selectedPath = path;
