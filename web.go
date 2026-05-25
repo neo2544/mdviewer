@@ -2488,7 +2488,10 @@ const webAppHTML = `<!doctype html>
       if (flag) {
         lines.push("Status: " + flag.charAt(0).toUpperCase() + flag.slice(1));
       }
-      lines.push("Updated: " + formatMetaTime(entry.mod_time || entry.modTime));
+      const modVal = entry.mod_time || entry.modTime;
+      const modTs = modVal ? new Date(modVal).getTime() : 0;
+      const modRel = modTs ? relativeTime(modTs) : "";
+      lines.push("Updated: " + formatMetaTime(modVal) + (modRel ? "  (" + modRel + ")" : ""));
       if (!entry.is_dir) {
         lines.push("Size: " + humanSize(entry.size));
       }
