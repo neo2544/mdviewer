@@ -1888,6 +1888,37 @@ const webAppHTML = `<!doctype html>
       background: var(--accent);
       color: var(--bg);
     }
+    .usage-guide {
+      background: color-mix(in oklab, var(--accent) 6%, var(--panel));
+      border: 1px dashed color-mix(in oklab, var(--accent) 45%, var(--line));
+      border-radius: 12px;
+      padding: 4px 18px 24px;
+    }
+    .usage-guide-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 0;
+      margin: 0 0 12px 0;
+      border-bottom: 1px solid color-mix(in oklab, var(--accent) 30%, var(--line));
+    }
+    .usage-guide-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+    .usage-guide-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    .usage-guide-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .usage-guide-body > :first-child { margin-top: 0; }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -3281,7 +3312,18 @@ const webAppHTML = `<!doctype html>
           if (!res.ok) throw new Error(await res.text());
           usageGuideCache = await res.text();
         }
-        previewBodyEl.innerHTML = marked.parse(usageGuideCache);
+        const rendered = marked.parse(usageGuideCache);
+        previewBodyEl.innerHTML =
+          '<div class="usage-guide">' +
+          '<div class="usage-guide-banner">' +
+          '<span class="usage-guide-icon">📘</span>' +
+          '<div class="usage-guide-text">' +
+          '<div class="usage-guide-title">Built-in usage guide</div>' +
+          '<div class="usage-guide-subtitle">Select a file from the left to open your content.</div>' +
+          '</div>' +
+          '</div>' +
+          '<div class="usage-guide-body">' + rendered + '</div>' +
+          '</div>';
         // Run mermaid (in case the guide ever uses it) and decorate links.
         try { await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") }); } catch (e) {}
         decorateRenderedMarkdown();
