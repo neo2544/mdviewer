@@ -25,6 +25,7 @@ vendor/
 
 # --- mdviewer runtime data ---
 .mdviewer_favorites.json
+.mdviewer_graph_history.json
 .mdviewer_history.json
 .mdviewer_state.json
 
@@ -47,3 +48,8 @@ Desktop.ini
 *.log
 *.tmp
 *.bak
+
+# --- graphify output ---
+# Knowledge-graph build artifacts produced by `graphify`; user-specific
+# and re-creatable. Keep `testdata/` for committed fixtures.
+graphify-out/

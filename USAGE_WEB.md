@@ -12,6 +12,7 @@
 | 🔍 빠른 열기 | `Cmd/Ctrl + K` |
 | 🧭 경로로 점프 | `Cmd/Ctrl + L` |
 | 💾 저장 (편집 모드) | `Cmd/Ctrl + S` |
+| 👀 숨김 파일 토글 | `Cmd/Ctrl + Shift + .` (Finder 스타일) |
 | 🎨 테마 전환 | 우측 상단 **Auto / Light / Dark** 버튼 |
 | 🖼️ 다이어그램 텍스트 복사 | mermaid 호버 → **Copy text** |
 | 🔤 다이어그램 부분 선택 | `Alt/Option` + 드래그 |
@@ -23,6 +24,7 @@
 - **사이드바**에서 디렉터리·파일을 클릭해 이동합니다. `..` 로 상위 폴더.
 - **Search files** 입력창 — 현재 디렉터리에서 즉시 필터링 🔎
 - **Jump to path** — 절대 경로, `~/...`, 파일 경로 모두 OK. `Enter` 로 점프 🚀
+- 👀 **숨김 파일 토글** — `Cmd/Ctrl + Shift + .` (Finder 단축키 그대로). 상태는 다음 세션에도 유지됩니다.
 
 > 💡 `Cmd/Ctrl + L` 로 Jump 입력창에 바로 포커스 (브라우저 주소창과 비슷한 패턴).
 
@@ -89,6 +91,10 @@
 
 - 📝 Markdown — 자동 렌더링
 - 🌄 이미지 (PNG/JPG/GIF/SVG) — 그대로 표시, 클릭하면 라이트박스
+- 🌐 **HTML / HTM** — sandbox 처리된 `iframe` 으로 렌더 (예: graphify 의 `graph.html`, 보고서, 단일 파일 데모)
+  - 인라인 JS는 동작하지만 호스트 페이지의 localStorage·쿠키엔 접근 불가 🔒
+  - 하단 노트의 *Open in new tab ↗* 로 진짜 환경에서도 열 수 있어요
+- 📄 텍스트/코드 (`.txt .go .py .js .ts .sh .yaml .json .toml .sql .log` 등) — 원문 표시
 - 🔄 우측 상단 **Refresh** — 디스크에서 다시 읽기
 
 ### 🎯 Mermaid 다이어그램 인터랙션
@@ -136,6 +142,7 @@
 | `Cmd/Ctrl + K` | Recent 팔레트 열기/닫기 |
 | `Cmd/Ctrl + L` | Jump to path 입력창 포커스 |
 | `Cmd/Ctrl + S` | 편집 모드에서 저장 |
+| `Cmd/Ctrl + Shift + .` | 숨김 파일(`.` 시작) 표시 토글 |
 | `Esc` | 팔레트/팝업/입력 취소 |
 | `Alt/Option + drag` | Mermaid 텍스트 선택 모드 |
 | `더블클릭` (favorite) | 별칭 편집 |

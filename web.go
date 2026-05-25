@@ -55,6 +55,8 @@ type saveFileRequest struct {
 func (s *webServer) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/icon.png", s.handleIcon)
+	mux.HandleFunc("/favicon.ico", s.handleIcon)
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
@@ -63,7 +65,18 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/resolve", s.handleResolve)
 	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/aliases", s.handleAliases)
+	mux.HandleFunc("/api/search", s.handleSearch)
 	return mux
+}
+
+// handleIcon serves the same M↓ template image embedded for the systray.
+// Browsers use it as the tab favicon (/favicon.ico → png ok in modern UAs)
+// and the apple-touch-icon. Black-with-alpha PNG; visibility in dark tabs
+// depends on the browser's tab strip colour, same as any single-tone icon.
+func (s *webServer) handleIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(menubarIconHiresPNG)
 }
 
 // handleAliases: GET returns the full alias map. POST upserts a single
@@ -213,6 +226,9 @@ func (s *webServer) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// show_hidden=1 includes dotfiles. Defaults to false (Finder-like).
+	showHidden := r.URL.Query().Get("show_hidden") == "1"
+
 	items, err := os.ReadDir(absDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -230,7 +246,7 @@ func (s *webServer) handleList(w http.ResponseWriter, r *http.Request) {
 
 	var dirs, files []webEntry
 	for _, item := range items {
-		if strings.HasPrefix(item.Name(), ".") {
+		if !showHidden && strings.HasPrefix(item.Name(), ".") {
 			continue
 		}
 		fullPath := filepath.Join(absDir, item.Name())
@@ -313,6 +329,9 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 		resp.Content = string(data)
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
 		resp.Kind = "image"
+		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
+	case ".html", ".htm":
+		resp.Kind = "html"
 		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
 	case ".txt", ".go", ".py", ".js", ".ts", ".sh", ".yaml", ".yml", ".json", ".toml", ".sql", ".log":
 		data, err := os.ReadFile(absPath)
@@ -505,6 +524,8 @@ const webAppHTML = `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mdviewer web preview</title>
+  <link rel="icon" type="image/png" href="/icon.png" />
+  <link rel="apple-touch-icon" href="/icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     /* Default = dark. Light tokens are applied either:
@@ -524,6 +545,7 @@ const webAppHTML = `<!doctype html>
       --sidebar-width: 320px;
       --splitter-width: 12px;
       --file-meta-width: 6.25rem;
+      --search-panel-width: 240px;
     }
     /* Light token set, factored so we can apply via either media query or
        an explicit data-theme attribute. */
@@ -566,14 +588,35 @@ const webAppHTML = `<!doctype html>
     }
     .app {
       display: grid;
-      grid-template-columns: var(--sidebar-width) var(--splitter-width) minmax(0, 1fr);
+      grid-template-columns:
+        var(--sidebar-width)
+        var(--splitter-width)
+        minmax(0, 1fr)
+        var(--splitter-width)
+        var(--search-panel-width);
       height: 100vh;
       gap: 0;
       padding: 18px;
       overflow: hidden;
     }
     .app.sidebar-collapsed {
-      grid-template-columns: 0px 0px minmax(0, 1fr);
+      grid-template-columns:
+        0px
+        0px
+        minmax(0, 1fr)
+        var(--splitter-width)
+        var(--search-panel-width);
+    }
+    .app.search-panel-collapsed {
+      grid-template-columns:
+        var(--sidebar-width)
+        var(--splitter-width)
+        minmax(0, 1fr)
+        0px
+        0px;
+    }
+    .app.sidebar-collapsed.search-panel-collapsed {
+      grid-template-columns: 0px 0px minmax(0, 1fr) 0px 0px;
     }
     .shell {
       background: color-mix(in oklab, var(--panel) 92%, black);
@@ -632,6 +675,24 @@ const webAppHTML = `<!doctype html>
     }
     .eyebrow { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .18em; }
     .title { margin-top: 8px; font-size: 22px; font-weight: 700; }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      color: var(--accent);
+    }
+    .brand-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      color: var(--text);
+    }
     .subtle { color: var(--muted); font-size: 13px; }
     #cwd {
       display: block;
@@ -890,6 +951,28 @@ const webAppHTML = `<!doctype html>
       padding: 0 8px;
     }
     .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+      background: none;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .section-toggle:hover .section-chevron { color: var(--accent); }
+    .section-toggle .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-chevron {
+      display: inline-block;
+      width: 12px;
+      color: var(--muted);
+      transition: transform 120ms ease, color 120ms ease;
+    }
+    .section.collapsed .section-chevron { transform: rotate(-90deg); }
+    .section.collapsed .section-list { display: none; }
     .section-actions {
       display: flex;
       gap: 4px;
@@ -1144,6 +1227,43 @@ const webAppHTML = `<!doctype html>
     .chip[data-kind="text"]::before { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 25%, transparent); }
     .chip[data-kind="image"]::before { background: var(--accent-2); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-2) 25%, transparent); }
     .chip[data-kind="mermaid"]::before { background: oklch(0.78 0.16 145); box-shadow: 0 0 0 2px oklch(0.78 0.16 145 / 0.25); }
+    .chip[data-kind="html"]::before { background: oklch(0.76 0.17 50); box-shadow: 0 0 0 2px oklch(0.76 0.17 50 / 0.25); }
+
+    /* Sandboxed HTML preview — fills the preview body bleed-to-edge */
+    .html-frame-wrap {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      background: var(--bg);
+    }
+    .html-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+      display: block;
+    }
+    .html-frame-note {
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--muted);
+      background: color-mix(in oklab, var(--panel) 90%, transparent);
+      border-top: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      letter-spacing: 0.02em;
+    }
+    .html-frame-note a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px dashed color-mix(in oklab, var(--accent) 40%, transparent);
+    }
+    .html-frame-note a:hover {
+      color: color-mix(in oklab, var(--accent) 85%, var(--text) 15%);
+    }
+    .preview-body:has(.html-frame-wrap) { padding: 0; position: relative; }
     .collapse-toggle {
       min-width: 40px;
       padding-inline: 0;
@@ -1159,6 +1279,20 @@ const webAppHTML = `<!doctype html>
     .app.sidebar-collapsed + .reveal-sidebar {
       display: inline-flex;
     }
+    .collapse-search-panel {
+      align-self: flex-end;
+    }
+    .reveal-search-panel {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 20;
+      display: none;
+    }
+    .app.search-panel-collapsed ~ .reveal-search-panel {
+      display: inline-flex;
+    }
+    .reveal-search-panel[hidden] { display: none; }
     .preview-body {
       overflow: auto;
       padding: 24px clamp(18px, 4vw, 42px) 32px;
@@ -1662,6 +1796,129 @@ const webAppHTML = `<!doctype html>
       .app.sidebar-collapsed .sidebar-shell { display: none; }
       .reveal-sidebar { display: inline-flex; }
     }
+    .search-panel {
+      margin-left: 14px;
+      padding: 14px 14px 18px;
+      background: color-mix(in oklab, var(--panel) 92%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .app.search-panel-collapsed .search-panel {
+      display: none;
+    }
+    .search-panel-body {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .search-input {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .search-summary {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .search-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .18em;
+      color: var(--muted);
+    }
+    .search-hit-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 35vh;
+      overflow-y: auto;
+    }
+    .search-hit {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .search-hit:hover { background: var(--panel-2); }
+    .search-hit .search-hit-needle {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .search-file-row {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .search-file-row:hover { background: var(--panel-2); }
+    .search-file-row .search-file-count {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .search-empty {
+      color: var(--muted);
+      font-size: 12px;
+      font-style: italic;
+    }
+    mark.search-mark {
+      background: color-mix(in oklab, var(--accent) 35%, transparent);
+      color: inherit;
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+    mark.search-mark.current {
+      background: var(--accent);
+      color: var(--bg);
+    }
+    .usage-guide {
+      background: color-mix(in oklab, var(--accent) 6%, var(--panel));
+      border: 1px dashed color-mix(in oklab, var(--accent) 45%, var(--line));
+      border-radius: 12px;
+      padding: 4px 18px 24px;
+    }
+    .usage-guide-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 0;
+      margin: 0 0 12px 0;
+      border-bottom: 1px solid color-mix(in oklab, var(--accent) 30%, var(--line));
+    }
+    .usage-guide-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+    .usage-guide-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    .usage-guide-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .usage-guide-body > :first-child { margin-top: 0; }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -1680,6 +1937,17 @@ const webAppHTML = `<!doctype html>
     <aside class="shell sidebar sidebar-shell">
       <div class="topbar sidebar-topbar">
         <div>
+          <div class="brand-row">
+            <svg class="brand-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"
+                 fill="none" stroke="currentColor" stroke-width="7"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="5" y="11" width="90" height="78" rx="10" />
+              <path d="M 21.5 27.5 L 21.5 72.5 M 21.5 27.5 L 37.2 56.2 L 52.9 27.5 L 52.9 72.5" />
+              <line x1="69.2" y1="33.4" x2="69.2" y2="72.5" />
+              <polyline points="64.1,55.9 69.2,72.5 74.3,55.9" />
+            </svg>
+            <span class="brand-name">MD Viewer</span>
+          </div>
           <div class="eyebrow">Local Preview</div>
           <div class="title">Markdown Browser</div>
           <div class="subtle" id="cwd"></div>
@@ -1699,35 +1967,44 @@ const webAppHTML = `<!doctype html>
         </div>
         <div id="files"></div>
       </div>
-      <div class="section">
+      <div class="section" data-section="recentFiles">
         <div class="section-head">
-          <div class="section-title">Recent files</div>
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">Recent files</span>
+          </button>
           <div class="section-actions">
             <button class="action" id="showAllRecentFiles" title="Show all recent files" hidden>Show all</button>
             <button class="action" id="clearRecentFiles" title="Clear recent files">Clear</button>
           </div>
         </div>
-        <div id="recentFiles"></div>
+        <div class="section-list" id="recentFiles"></div>
       </div>
-      <div class="section">
+      <div class="section" data-section="recentDirs">
         <div class="section-head">
-          <div class="section-title">Recent folders</div>
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">Recent folders</span>
+          </button>
           <div class="section-actions">
             <button class="action" id="showAllRecentDirs" title="Show all recent folders" hidden>Show all</button>
             <button class="action" id="clearRecentDirs" title="Clear recent folders">Clear</button>
           </div>
         </div>
-        <div id="recentDirs"></div>
+        <div class="section-list" id="recentDirs"></div>
       </div>
-      <div class="section">
+      <div class="section" data-section="favorites">
         <div class="section-head">
-          <div class="section-title">Favorites</div>
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">Favorites</span>
+          </button>
           <div class="section-actions">
             <button class="action" id="showAllFavorites" title="Show all favorites" hidden>Show all</button>
             <button class="action" id="toggleFavorite">Toggle current</button>
           </div>
         </div>
-        <div id="favorites"></div>
+        <div class="section-list" id="favorites"></div>
       </div>
     </aside>
     <div class="splitter" id="splitter" aria-hidden="true"></div>
@@ -1777,8 +2054,25 @@ const webAppHTML = `<!doctype html>
         <span id="scrollText">Preview 0%</span>
       </div>
     </main>
+    <div class="splitter" id="rightSplitter" aria-hidden="true"></div>
+    <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
+      <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
+      <div class="search-panel-body">
+        <input type="search" class="search-input" id="searchPanelInput" placeholder="Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
+        <div>
+          <div class="search-section-title">In this file</div>
+          <div class="search-summary" id="searchInFileSummary">Type to search.</div>
+          <div class="search-hit-list" id="searchInFileHits"></div>
+        </div>
+        <div>
+          <div class="search-section-title">Same folder</div>
+          <div class="search-hit-list" id="searchFolderHits"></div>
+        </div>
+      </div>
+    </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
+  <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show search panel" hidden>&#x1F50D; Search</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
   <div class="popup-modal" id="listPopup" hidden>
     <div class="popup-card">
@@ -1922,7 +2216,19 @@ const webAppHTML = `<!doctype html>
       editDirty: false,
       restoringHistory: false,
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
+      searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
+      searchPanelCollapsed: localStorage.getItem("mdviewer.searchPanelCollapsed") === "1",
+      // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
+      showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
+      searchQueryRight: "",   // distinct from the left-sidebar file-name search
+      searchInFileHits: [],   // array of <mark> elements in preview order
+      searchInFileFocus: -1,  // index of the currently emphasized hit
+      sectionCollapsed: {
+        recentFiles: localStorage.getItem("mdviewer.section.recentFiles.collapsed") === "1",
+        recentDirs:  localStorage.getItem("mdviewer.section.recentDirs.collapsed") === "1",
+        favorites:   localStorage.getItem("mdviewer.section.favorites.collapsed") === "1",
+      },
     };
 
     // Persist lastSeenAt on unload so the next session can use it for "recent" detection.
@@ -1952,6 +2258,7 @@ const webAppHTML = `<!doctype html>
     const saveButtonEl = document.getElementById("saveButton");
     const floatingTooltipEl = document.getElementById("floatingTooltip");
     const splitterEl = document.getElementById("splitter");
+    const rightSplitterEl = document.getElementById("rightSplitter");
     const collapseSidebarEl = document.getElementById("collapseSidebar");
     const revealSidebarEl = document.getElementById("revealSidebar");
 
@@ -1966,6 +2273,42 @@ const webAppHTML = `<!doctype html>
       collapseSidebarEl.title = state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
       localStorage.setItem("mdviewer.sidebarWidth", String(width));
       localStorage.setItem("mdviewer.sidebarCollapsed", state.sidebarCollapsed ? "1" : "0");
+    }
+
+    function applySectionLayout(name) {
+      const sec = document.querySelector('.section[data-section="' + name + '"]');
+      if (!sec) return;
+      const collapsed = !!(state.sectionCollapsed && state.sectionCollapsed[name]);
+      sec.classList.toggle("collapsed", collapsed);
+      const btn = sec.querySelector(".section-toggle");
+      if (btn) {
+        btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        btn.title = collapsed ? "Expand section" : "Collapse section";
+      }
+      try {
+        localStorage.setItem("mdviewer.section." + name + ".collapsed", collapsed ? "1" : "0");
+      } catch (e) {}
+    }
+
+    function applyAllSectionLayouts() {
+      applySectionLayout("recentFiles");
+      applySectionLayout("recentDirs");
+      applySectionLayout("favorites");
+    }
+
+    function toggleSection(name) {
+      if (!state.sectionCollapsed) state.sectionCollapsed = {};
+      state.sectionCollapsed[name] = !state.sectionCollapsed[name];
+      applySectionLayout(name);
+    }
+
+    function applySearchPanelLayout() {
+      const minWidth = 200;
+      const maxWidth = Math.max(minWidth, window.innerWidth - 360);
+      const width = Math.min(maxWidth, Math.max(minWidth, state.searchPanelWidth || 240));
+      state.searchPanelWidth = width;
+      document.documentElement.style.setProperty("--search-panel-width", width + "px");
+      localStorage.setItem("mdviewer.searchPanelWidth", String(width));
     }
 
     function slugify(text) {
@@ -2173,6 +2516,14 @@ const webAppHTML = `<!doctype html>
     function setSidebarCollapsed(collapsed) {
       state.sidebarCollapsed = collapsed;
       applySidebarLayout();
+    }
+
+    function applySearchPanelCollapsed() {
+      appShellEl.classList.toggle("search-panel-collapsed", state.searchPanelCollapsed);
+      revealSearchPanelEl.hidden = !state.searchPanelCollapsed;
+      try {
+        localStorage.setItem("mdviewer.searchPanelCollapsed", state.searchPanelCollapsed ? "1" : "0");
+      } catch (e) {}
     }
 
     function updateChangedPaths(dir, entries, options = {}) {
@@ -2452,7 +2803,10 @@ const webAppHTML = `<!doctype html>
     }
 
     async function loadDir(dir = "", options = {}) {
-      const query = dir ? "?dir=" + encodeURIComponent(dir) : "";
+      const params = new URLSearchParams();
+      if (dir) params.set("dir", dir);
+      if (state.showHidden) params.set("show_hidden", "1");
+      const query = params.toString() ? "?" + params.toString() : "";
       let data;
       try {
         data = await fetchJSON("/api/list" + query);
@@ -2703,6 +3057,200 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    const collapseSearchPanelEl = document.getElementById("collapseSearchPanel");
+    const revealSearchPanelEl = document.getElementById("revealSearchPanel");
+    const searchPanelInputEl = document.getElementById("searchPanelInput");
+    const searchInFileSummaryEl = document.getElementById("searchInFileSummary");
+    const searchInFileHitsEl = document.getElementById("searchInFileHits");
+    const searchFolderHitsEl = document.getElementById("searchFolderHits");
+
+    // clearInFileHighlights removes any <mark.search-mark> wrappers from
+    // previewBodyEl, restoring the text nodes.
+    function clearInFileHighlights() {
+      const marks = previewBodyEl.querySelectorAll("mark.search-mark");
+      for (const m of marks) {
+        const parent = m.parentNode;
+        if (!parent) continue;
+        parent.replaceChild(document.createTextNode(m.textContent || ""), m);
+        parent.normalize();
+      }
+      state.searchInFileHits = [];
+      state.searchInFileFocus = -1;
+    }
+
+    // walkTextNodes yields every text node descendant of root that has
+    // non-empty content and isn't inside a SCRIPT/STYLE/MARK element.
+    function walkTextNodes(root, visit) {
+      const SKIP = { SCRIPT: 1, STYLE: 1, MARK: 1 };
+      const stack = [root];
+      while (stack.length) {
+        const node = stack.pop();
+        for (const child of Array.from(node.childNodes)) {
+          if (child.nodeType === 1) {
+            if (!SKIP[child.tagName]) stack.push(child);
+          } else if (child.nodeType === 3) {
+            if (child.nodeValue && child.nodeValue.length) visit(child);
+          }
+        }
+      }
+    }
+
+    // highlightInFile wraps each occurrence of needle in previewBodyEl with
+    // <mark class="search-mark">. Case-insensitive. Returns the array of
+    // mark elements in document order.
+    function highlightInFile(needle) {
+      clearInFileHighlights();
+      if (!needle) return [];
+      const lower = needle.toLowerCase();
+      const len = needle.length;
+      const hits = [];
+      const targets = [];
+      walkTextNodes(previewBodyEl, function (t) { targets.push(t); });
+      for (const node of targets) {
+        const text = node.nodeValue || "";
+        const lo = text.toLowerCase();
+        let idx = lo.indexOf(lower);
+        if (idx < 0) continue;
+        const parent = node.parentNode;
+        if (!parent) continue;
+        let cursor = 0;
+        const frag = document.createDocumentFragment();
+        while (idx >= 0) {
+          if (idx > cursor) {
+            frag.appendChild(document.createTextNode(text.substring(cursor, idx)));
+          }
+          const mark = document.createElement("mark");
+          mark.className = "search-mark";
+          mark.textContent = text.substring(idx, idx + len);
+          frag.appendChild(mark);
+          hits.push(mark);
+          cursor = idx + len;
+          idx = lo.indexOf(lower, cursor);
+        }
+        if (cursor < text.length) {
+          frag.appendChild(document.createTextNode(text.substring(cursor)));
+        }
+        parent.replaceChild(frag, node);
+      }
+      state.searchInFileHits = hits;
+      state.searchInFileFocus = -1;
+      return hits;
+    }
+
+    // focusHit scrolls to the i-th in-file hit and emphasises it.
+    function focusHit(i) {
+      const hits = state.searchInFileHits;
+      if (!hits.length) return;
+      if (state.searchInFileFocus >= 0 && hits[state.searchInFileFocus]) {
+        hits[state.searchInFileFocus].classList.remove("current");
+      }
+      const clamped = Math.max(0, Math.min(i, hits.length - 1));
+      state.searchInFileFocus = clamped;
+      const mark = hits[clamped];
+      mark.classList.add("current");
+      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    // renderInFileResults updates the summary + clickable hit list in the
+    // right panel.
+    function renderInFileResults(needle, hits) {
+      searchInFileHitsEl.innerHTML = "";
+      if (!needle) {
+        searchInFileSummaryEl.textContent = "Type to search.";
+        return;
+      }
+      if (!hits.length) {
+        searchInFileSummaryEl.textContent = "No matches in this file.";
+        return;
+      }
+      searchInFileSummaryEl.textContent = hits.length + " match" + (hits.length === 1 ? "" : "es");
+      const maxList = 50;
+      const shown = hits.slice(0, maxList);
+      for (let i = 0; i < shown.length; i++) {
+        const mark = shown[i];
+        const ctxBefore = (mark.previousSibling && mark.previousSibling.nodeValue) || "";
+        const ctxAfter  = (mark.nextSibling && mark.nextSibling.nodeValue) || "";
+        const row = document.createElement("div");
+        row.className = "search-hit";
+        const pre = document.createElement("span");
+        pre.textContent = "..." + ctxBefore.slice(-30);
+        const hit = document.createElement("span");
+        hit.className = "search-hit-needle";
+        hit.textContent = mark.textContent;
+        const post = document.createElement("span");
+        post.textContent = ctxAfter.slice(0, 30) + "...";
+        row.appendChild(pre);
+        row.appendChild(hit);
+        row.appendChild(post);
+        row.addEventListener("click", function () { focusHit(i); });
+        searchInFileHitsEl.appendChild(row);
+      }
+      if (hits.length > maxList) {
+        const more = document.createElement("div");
+        more.className = "search-empty";
+        more.textContent = (hits.length - maxList) + " more matches not shown.";
+        searchInFileHitsEl.appendChild(more);
+      }
+    }
+
+    // runInFileSearch ties the two together.
+    function runInFileSearch(needle) {
+      const hits = highlightInFile(needle);
+      renderInFileResults(needle, hits);
+    }
+
+    let searchFolderAbort = null;
+    async function runFolderSearch(needle) {
+      searchFolderHitsEl.innerHTML = "";
+      if (!needle) return;
+      if (searchFolderAbort) { try { searchFolderAbort.abort(); } catch (e) {} }
+      const ctrl = new AbortController();
+      searchFolderAbort = ctrl;
+      let results = [];
+      try {
+        const url = "/api/search?dir=" + encodeURIComponent(state.cwd || "") +
+                    "&q=" + encodeURIComponent(needle);
+        const r = await fetch(url, { signal: ctrl.signal });
+        if (!r.ok) throw new Error(String(r.status));
+        results = await r.json();
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        const e = document.createElement("div");
+        e.className = "search-empty";
+        e.textContent = "Search failed.";
+        searchFolderHitsEl.appendChild(e);
+        return;
+      }
+      // Hide the currently-open file from the cross-file list — its
+      // matches are already in the "In this file" section.
+      const filtered = results.filter(function (r) {
+        return r.path !== state.selectedPath;
+      });
+      if (!filtered.length) {
+        const e = document.createElement("div");
+        e.className = "search-empty";
+        e.textContent = "No matches in other files.";
+        searchFolderHitsEl.appendChild(e);
+        return;
+      }
+      for (const r of filtered) {
+        const row = document.createElement("div");
+        row.className = "search-file-row";
+        row.title = r.path;
+        const name = document.createElement("span");
+        name.textContent = r.path.split("/").pop();
+        const count = document.createElement("span");
+        count.className = "search-file-count";
+        count.textContent = r.count + (r.count === 1 ? " match" : " matches");
+        row.appendChild(name);
+        row.appendChild(count);
+        row.addEventListener("click", function () {
+          selectFile(r.path, { historyMode: "push" });
+        });
+        searchFolderHitsEl.appendChild(row);
+      }
+    }
+
     async function selectFile(path, options = {}) {
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
@@ -2747,6 +3295,11 @@ const webAppHTML = `<!doctype html>
       if (options.historyMode) {
         syncHistory(options.historyMode);
       }
+      // re-run in-file search on the newly rendered preview, if a query
+      // is active.
+      if (state.searchQueryRight) {
+        runInFileSearch(state.searchQueryRight);
+      }
     }
 
     let usageGuideCache = null;
@@ -2759,7 +3312,18 @@ const webAppHTML = `<!doctype html>
           if (!res.ok) throw new Error(await res.text());
           usageGuideCache = await res.text();
         }
-        previewBodyEl.innerHTML = marked.parse(usageGuideCache);
+        const rendered = marked.parse(usageGuideCache);
+        previewBodyEl.innerHTML =
+          '<div class="usage-guide">' +
+          '<div class="usage-guide-banner">' +
+          '<span class="usage-guide-icon">📘</span>' +
+          '<div class="usage-guide-text">' +
+          '<div class="usage-guide-title">Built-in usage guide</div>' +
+          '<div class="usage-guide-subtitle">Select a file from the left to open your content.</div>' +
+          '</div>' +
+          '</div>' +
+          '<div class="usage-guide-body">' + rendered + '</div>' +
+          '</div>';
         // Run mermaid (in case the guide ever uses it) and decorate links.
         try { await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") }); } catch (e) {}
         decorateRenderedMarkdown();
@@ -2828,6 +3392,29 @@ const webAppHTML = `<!doctype html>
       }
       if (data.kind === "image") {
         previewBodyEl.innerHTML = '<img alt="" src="' + data.raw_url + '&t=' + Date.now() + '" />';
+        return;
+      }
+      if (data.kind === "html") {
+        // Render HTML files in a sandboxed iframe. allow-scripts only —
+        // no same-origin, so inline JS (vis-network, d3, etc.) works but
+        // cannot reach the host page's storage or DOM.
+        previewBodyEl.innerHTML = "";
+        const wrap = document.createElement("div");
+        wrap.className = "html-frame-wrap";
+        const frame = document.createElement("iframe");
+        frame.className = "html-frame";
+        frame.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms");
+        frame.setAttribute("loading", "lazy");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.title = data.name || "HTML preview";
+        frame.src = data.raw_url + "&t=" + Date.now();
+        wrap.appendChild(frame);
+        // Small footer chip indicating sandboxed mode + "open in new tab" escape hatch.
+        const note = document.createElement("div");
+        note.className = "html-frame-note";
+        note.innerHTML = '<span>Sandboxed preview</span> · <a href="' + data.raw_url + '" target="_blank" rel="noopener">Open in new tab ↗</a>';
+        wrap.appendChild(note);
+        previewBodyEl.appendChild(wrap);
         return;
       }
       if (data.kind === "text") {
@@ -3116,6 +3703,31 @@ const webAppHTML = `<!doctype html>
       splitterEl.addEventListener("pointercancel", onUp);
     });
 
+    rightSplitterEl.addEventListener("pointerdown", (event) => {
+      if (window.innerWidth <= 960 || state.searchPanelCollapsed) return;
+      rightSplitterEl.classList.add("dragging");
+      rightSplitterEl.setPointerCapture(event.pointerId);
+
+      const onMove = (moveEvent) => {
+        // The panel is on the right side, so dragging RIGHT shrinks it.
+        // width = distance from the right edge of the viewport to the cursor,
+        // minus the outer 18px padding.
+        state.searchPanelWidth = window.innerWidth - moveEvent.clientX - 18;
+        applySearchPanelLayout();
+      };
+
+      const onUp = () => {
+        rightSplitterEl.classList.remove("dragging");
+        rightSplitterEl.removeEventListener("pointermove", onMove);
+        rightSplitterEl.removeEventListener("pointerup", onUp);
+        rightSplitterEl.removeEventListener("pointercancel", onUp);
+      };
+
+      rightSplitterEl.addEventListener("pointermove", onMove);
+      rightSplitterEl.addEventListener("pointerup", onUp);
+      rightSplitterEl.addEventListener("pointercancel", onUp);
+    });
+
     previewBodyEl.addEventListener("click", async (event) => {
       const link = event.target.closest("a[data-internal-href]");
       if (!link) return;
@@ -3150,12 +3762,29 @@ const webAppHTML = `<!doctype html>
 
     collapseSidebarEl.onclick = () => setSidebarCollapsed(!state.sidebarCollapsed);
     revealSidebarEl.onclick = () => setSidebarCollapsed(false);
+    collapseSearchPanelEl.onclick = function () {
+      state.searchPanelCollapsed = true;
+      applySearchPanelCollapsed();
+    };
+    revealSearchPanelEl.onclick = function () {
+      state.searchPanelCollapsed = false;
+      applySearchPanelCollapsed();
+    };
     previewModeButtonEl.onclick = () => setEditorMode("preview");
     editModeButtonEl.onclick = () => {
       if (!canEditKind(state.selectedKind)) return;
       setEditorMode("edit");
     };
     saveButtonEl.onclick = () => saveCurrentFile();
+    let searchDebounce = null;
+    searchPanelInputEl.addEventListener("input", function () {
+      state.searchQueryRight = searchPanelInputEl.value || "";
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(function () {
+        runInFileSearch(state.searchQueryRight);
+        runFolderSearch(state.searchQueryRight);
+      }, 120);
+    });
     searchInputEl.addEventListener("input", (event) => {
       state.searchQuery = event.target.value || "";
       renderFiles(state.entries);
@@ -3588,6 +4217,18 @@ const webAppHTML = `<!doctype html>
         event.preventDefault();
         pathInputEl.focus();
         pathInputEl.select();
+        return;
+      }
+      // Cmd/Ctrl+Shift+. → Finder-style toggle for showing hidden (dot) files.
+      // Match by event.code so it works regardless of which character the
+      // Shift+. combo emits ('>' on US layouts, etc.).
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey &&
+          (event.code === "Period" || lowerKey === "." || lowerKey === ">")) {
+        event.preventDefault();
+        state.showHidden = !state.showHidden;
+        try { localStorage.setItem("mdviewer.showHidden", state.showHidden ? "1" : "0"); } catch (e) {}
+        statusTextEl.textContent = state.showHidden ? "Hidden files: shown" : "Hidden files: hidden";
+        loadDir(state.cwd, { keepSelection: true, silent: true });
         return;
       }
       const isSaveKey = (event.metaKey || event.ctrlKey) && lowerKey === "s";
@@ -4242,9 +4883,18 @@ const webAppHTML = `<!doctype html>
     attachZoomToPreview();
 
     applySidebarLayout();
+    applySearchPanelLayout();
+    applySearchPanelCollapsed();
     updateSortButtons();
     updateEditorButtons();
     renderRecents();
+    for (const btn of document.querySelectorAll('.section[data-section] .section-toggle')) {
+      const sec = btn.closest('.section');
+      const name = sec && sec.dataset.section;
+      if (!name) continue;
+      btn.addEventListener("click", function () { toggleSection(name); });
+    }
+    applyAllSectionLayouts();
     // Refresh relative-time labels in the Recent sections every minute so
     // "2m ago" doesn't sit stale at 0s for hours.
     setInterval(() => { renderRecents(); }, 60 * 1000);
@@ -4254,3 +4904,107 @@ const webAppHTML = `<!doctype html>
   </script>
 </body>
 </html>`
+
+const searchMaxSnippets = 3
+const searchSnippetLen = 60
+const searchMaxFileBytes = 2 * 1024 * 1024 // skip files larger than 2 MB
+
+type searchResult struct {
+	Path     string   `json:"path"`
+	Count    int      `json:"count"`
+	Snippets []string `json:"snippets"`
+}
+
+// isProbablyText returns true if the byte slice looks like text content.
+// We declare "binary" when it contains a NUL byte in the prefix — the same
+// heuristic git uses.
+func isProbablyText(b []byte) bool {
+	limit := len(b)
+	if limit > 8000 {
+		limit = 8000
+	}
+	for i := 0; i < limit; i++ {
+		if b[i] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing q", http.StatusBadRequest)
+		return
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid dir", http.StatusBadRequest)
+		return
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	needle := strings.ToLower(q)
+	out := []searchResult{}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Size() > searchMaxFileBytes {
+			continue
+		}
+		full := filepath.Join(abs, e.Name())
+		data, err := os.ReadFile(full)
+		if err != nil || !isProbablyText(data) {
+			continue
+		}
+		lower := strings.ToLower(string(data))
+		count := strings.Count(lower, needle)
+		if count == 0 {
+			continue
+		}
+		snippets := collectSnippets(string(data), lower, needle, searchMaxSnippets)
+		out = append(out, searchResult{Path: full, Count: count, Snippets: snippets})
+	}
+	// Most matches first.
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	s.writeJSON(w, http.StatusOK, out)
+}
+
+// collectSnippets returns up to maxCount short context strings around the
+// first matches of needle in haystackLower (which must be the lowercase
+// of haystack).
+func collectSnippets(haystack, haystackLower, needleLower string, maxCount int) []string {
+	out := []string{}
+	from := 0
+	for i := 0; i < maxCount; i++ {
+		idx := strings.Index(haystackLower[from:], needleLower)
+		if idx < 0 {
+			break
+		}
+		absIdx := from + idx
+		startCtx := absIdx - searchSnippetLen/2
+		if startCtx < 0 {
+			startCtx = 0
+		}
+		endCtx := absIdx + len(needleLower) + searchSnippetLen/2
+		if endCtx > len(haystack) {
+			endCtx = len(haystack)
+		}
+		snip := haystack[startCtx:endCtx]
+		// trim newlines for a clean one-line preview
+		snip = strings.ReplaceAll(snip, "\n", " ")
+		snip = strings.TrimSpace(snip)
+		out = append(out, snip)
+		from = absIdx + len(needleLower)
+	}
+	return out
+}
