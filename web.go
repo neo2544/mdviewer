@@ -2030,6 +2030,58 @@ const webAppHTML = `<!doctype html>
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .native-graph-host {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: var(--code);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .native-graph-canvas {
+      width: 100%;
+      height: 100%;
+    }
+    .native-graph-bar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      pointer-events: none;
+    }
+    .native-graph-bar > * { pointer-events: auto; }
+    .native-graph-bar .label {
+      font-size: 11px;
+      color: var(--muted);
+      background: color-mix(in oklab, var(--panel) 80%, transparent);
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .native-graph-bar button {
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .native-graph-bar button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .native-graph-loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -3230,7 +3282,7 @@ const webAppHTML = `<!doctype html>
 
     graphOpenBtnEl.addEventListener("click", function () {
       if (!state.graphDir) return;
-      selectFile(state.graphDir + "/graphify-out/graph.html", { historyMode: "push" });
+      openGraphView(state.graphDir, state.selectedPath || "", "focus");
     });
 
     function graphRelativeTime(iso) {
@@ -3244,6 +3296,162 @@ const webAppHTML = `<!doctype html>
       const hrs = Math.round(mins / 60);
       if (hrs < 24) return hrs + "h ago";
       return Math.round(hrs / 24) + "d ago";
+    }
+
+    // ---- native graph view ------------------------------------------------
+    const VIS_NETWORK_CDN = "https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js";
+    let visNetworkPromise = null;
+    function loadVisNetwork() {
+      if (window.vis && window.vis.Network) return Promise.resolve();
+      if (visNetworkPromise) return visNetworkPromise;
+      visNetworkPromise = new Promise(function (resolve, reject) {
+        const s = document.createElement("script");
+        s.src = VIS_NETWORK_CDN;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { reject(new Error("failed to load vis-network from CDN")); };
+        document.head.appendChild(s);
+      });
+      return visNetworkPromise;
+    }
+
+    const graphDataCache = new Map(); // dir -> {nodes, links}
+    async function fetchGraphData(dir) {
+      if (graphDataCache.has(dir)) return graphDataCache.get(dir);
+      const r = await fetch("/api/graph/data?dir=" + encodeURIComponent(dir));
+      if (!r.ok) throw new Error("graph.json fetch failed: " + r.status);
+      const doc = await r.json();
+      graphDataCache.set(dir, doc);
+      return doc;
+    }
+
+    // nodeColorFor maps file_type to a stable color so the same file type
+    // gets the same color across renders.
+    function nodeColorFor(fileType) {
+      switch (fileType) {
+        case "code": return "#7aa2f7";
+        case "document": return "#9ece6a";
+        case "paper": return "#e0af68";
+        case "image": return "#bb9af7";
+        case "concept": return "#f7768e";
+        case "rationale": return "#7dcfff";
+        default: return "#a9b1d6";
+      }
+    }
+
+    // focusSubgraph returns a {nodes, links} subset containing the nodes
+    // whose source_file matches focusPath plus their N-hop neighbours.
+    function focusSubgraph(doc, focusPath, hops) {
+      if (!focusPath) return doc;
+      const nodes = doc.nodes || [];
+      const links = doc.links || [];
+      const seedIds = new Set();
+      for (const n of nodes) {
+        if (n.source_file === focusPath) seedIds.add(n.id);
+      }
+      if (!seedIds.size) return doc; // file not in graph -- fall back to full
+      const adj = new Map();
+      for (const l of links) {
+        if (!adj.has(l.source)) adj.set(l.source, []);
+        if (!adj.has(l.target)) adj.set(l.target, []);
+        adj.get(l.source).push(l.target);
+        adj.get(l.target).push(l.source);
+      }
+      const keep = new Set(seedIds);
+      let frontier = Array.from(seedIds);
+      for (let h = 0; h < hops; h++) {
+        const next = [];
+        for (const id of frontier) {
+          const ns = adj.get(id) || [];
+          for (const nb of ns) {
+            if (!keep.has(nb)) {
+              keep.add(nb);
+              next.push(nb);
+            }
+          }
+        }
+        frontier = next;
+      }
+      return {
+        nodes: nodes.filter(function (n) { return keep.has(n.id); }),
+        links: links.filter(function (l) { return keep.has(l.source) && keep.has(l.target); }),
+      };
+    }
+
+    // openGraphView replaces the preview body with a native graph render.
+    // mode: "focus" (default -- current file + neighbours) | "full".
+    // Task 3 wires this into the router; for now it just renders.
+    async function openGraphView(dir, focusPath, mode) {
+      if (!dir) return;
+      const useMode = mode || "focus";
+      // Tear down any previous render.
+      previewBodyEl.innerHTML = "";
+      const host = document.createElement("div");
+      host.className = "native-graph-host";
+      const canvas = document.createElement("div");
+      canvas.className = "native-graph-canvas";
+      const bar = document.createElement("div");
+      bar.className = "native-graph-bar";
+      const label = document.createElement("span");
+      label.className = "label";
+      label.textContent = (useMode === "focus" ? "Focus" : "Full") +
+        " · " + (dir.split("/").filter(Boolean).pop() || dir);
+      bar.appendChild(label);
+      const focusBtn = document.createElement("button");
+      focusBtn.type = "button";
+      focusBtn.textContent = "Focus";
+      const fullBtn = document.createElement("button");
+      fullBtn.type = "button";
+      fullBtn.textContent = "Full";
+      (useMode === "focus" ? focusBtn : fullBtn).classList.add("active");
+      bar.appendChild(focusBtn);
+      bar.appendChild(fullBtn);
+      const loading = document.createElement("div");
+      loading.className = "native-graph-loading";
+      loading.textContent = "Loading graph…";
+      host.appendChild(canvas);
+      host.appendChild(bar);
+      host.appendChild(loading);
+      previewBodyEl.appendChild(host);
+
+      let doc;
+      try {
+        await loadVisNetwork();
+        doc = await fetchGraphData(dir);
+      } catch (err) {
+        loading.textContent = "Failed to load graph: " + (err && err.message ? err.message : err);
+        return;
+      }
+      const sub = (useMode === "focus")
+        ? focusSubgraph(doc, focusPath || "", 1)
+        : doc;
+      const visNodes = (sub.nodes || []).map(function (n) {
+        return {
+          id: n.id,
+          label: n.label || n.id,
+          color: { background: nodeColorFor(n.file_type), border: "transparent" },
+          font: { color: "#cdd6f4", size: 12 },
+          shape: "dot",
+          size: 10,
+          title: n.source_file || n.label,
+          srcFile: n.source_file || "",
+        };
+      });
+      const visEdges = (sub.links || []).map(function (l, i) {
+        return { id: "e" + i, from: l.source, to: l.target,
+                 color: { color: "rgba(160,160,200,0.35)" }, width: 1 };
+      });
+      loading.remove();
+      const network = new window.vis.Network(canvas, {
+        nodes: new window.vis.DataSet(visNodes),
+        edges: new window.vis.DataSet(visEdges),
+      }, {
+        physics: { stabilization: { iterations: 80 } },
+        interaction: { hover: true },
+      });
+      // Task 3 attaches the click -> selectFile handler. Stash the network
+      // and the toggle buttons on a window-scoped object so Task 3 can wire
+      // them without re-declaring the function.
+      window.__graphView = { network, focusBtn, fullBtn, dir, focusPath, useMode };
     }
 
     async function loadGraphHistory() {
