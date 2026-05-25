@@ -3440,6 +3440,13 @@ const webAppHTML = `<!doctype html>
       const sub = (useMode === "focus")
         ? focusSubgraph(doc, focusPath || "", 1)
         : doc;
+      const fellBackToFull = (useMode === "focus" && focusPath && sub === doc);
+      if (fellBackToFull) {
+        const note = document.createElement("span");
+        note.className = "label";
+        note.textContent = "(file not in graph — showing full)";
+        bar.appendChild(note);
+      }
       const visNodes = (sub.nodes || []).map(function (n) {
         return {
           id: n.id,
