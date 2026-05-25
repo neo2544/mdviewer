@@ -592,6 +592,7 @@ const webAppHTML = `<!doctype html>
         var(--sidebar-width)
         var(--splitter-width)
         minmax(0, 1fr)
+        var(--splitter-width)
         var(--search-panel-width);
       height: 100vh;
       gap: 0;
@@ -603,6 +604,7 @@ const webAppHTML = `<!doctype html>
         0px
         0px
         minmax(0, 1fr)
+        var(--splitter-width)
         var(--search-panel-width);
     }
     .app.search-panel-collapsed {
@@ -610,10 +612,11 @@ const webAppHTML = `<!doctype html>
         var(--sidebar-width)
         var(--splitter-width)
         minmax(0, 1fr)
+        0px
         0px;
     }
     .app.sidebar-collapsed.search-panel-collapsed {
-      grid-template-columns: 0px 0px minmax(0, 1fr) 0px;
+      grid-template-columns: 0px 0px minmax(0, 1fr) 0px 0px;
     }
     .shell {
       background: color-mix(in oklab, var(--panel) 92%, black);
@@ -1989,6 +1992,7 @@ const webAppHTML = `<!doctype html>
         <span id="scrollText">Preview 0%</span>
       </div>
     </main>
+    <div class="splitter" id="rightSplitter" aria-hidden="true"></div>
     <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
       <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
       <div class="search-panel-body">
@@ -2150,6 +2154,7 @@ const webAppHTML = `<!doctype html>
       editDirty: false,
       restoringHistory: false,
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
+      searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
       searchPanelCollapsed: localStorage.getItem("mdviewer.searchPanelCollapsed") === "1",
       // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
@@ -2186,6 +2191,7 @@ const webAppHTML = `<!doctype html>
     const saveButtonEl = document.getElementById("saveButton");
     const floatingTooltipEl = document.getElementById("floatingTooltip");
     const splitterEl = document.getElementById("splitter");
+    const rightSplitterEl = document.getElementById("rightSplitter");
     const collapseSidebarEl = document.getElementById("collapseSidebar");
     const revealSidebarEl = document.getElementById("revealSidebar");
 
@@ -2200,6 +2206,15 @@ const webAppHTML = `<!doctype html>
       collapseSidebarEl.title = state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
       localStorage.setItem("mdviewer.sidebarWidth", String(width));
       localStorage.setItem("mdviewer.sidebarCollapsed", state.sidebarCollapsed ? "1" : "0");
+    }
+
+    function applySearchPanelLayout() {
+      const minWidth = 200;
+      const maxWidth = Math.max(minWidth, window.innerWidth - 360);
+      const width = Math.min(maxWidth, Math.max(minWidth, state.searchPanelWidth || 240));
+      state.searchPanelWidth = width;
+      document.documentElement.style.setProperty("--search-panel-width", width + "px");
+      localStorage.setItem("mdviewer.searchPanelWidth", String(width));
     }
 
     function slugify(text) {
@@ -3583,6 +3598,31 @@ const webAppHTML = `<!doctype html>
       splitterEl.addEventListener("pointercancel", onUp);
     });
 
+    rightSplitterEl.addEventListener("pointerdown", (event) => {
+      if (window.innerWidth <= 960 || state.searchPanelCollapsed) return;
+      rightSplitterEl.classList.add("dragging");
+      rightSplitterEl.setPointerCapture(event.pointerId);
+
+      const onMove = (moveEvent) => {
+        // The panel is on the right side, so dragging RIGHT shrinks it.
+        // width = distance from the right edge of the viewport to the cursor,
+        // minus the outer 18px padding.
+        state.searchPanelWidth = window.innerWidth - moveEvent.clientX - 18;
+        applySearchPanelLayout();
+      };
+
+      const onUp = () => {
+        rightSplitterEl.classList.remove("dragging");
+        rightSplitterEl.removeEventListener("pointermove", onMove);
+        rightSplitterEl.removeEventListener("pointerup", onUp);
+        rightSplitterEl.removeEventListener("pointercancel", onUp);
+      };
+
+      rightSplitterEl.addEventListener("pointermove", onMove);
+      rightSplitterEl.addEventListener("pointerup", onUp);
+      rightSplitterEl.addEventListener("pointercancel", onUp);
+    });
+
     previewBodyEl.addEventListener("click", async (event) => {
       const link = event.target.closest("a[data-internal-href]");
       if (!link) return;
@@ -4738,6 +4778,7 @@ const webAppHTML = `<!doctype html>
     attachZoomToPreview();
 
     applySidebarLayout();
+    applySearchPanelLayout();
     applySearchPanelCollapsed();
     updateSortButtons();
     updateEditorButtons();
