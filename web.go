@@ -2395,6 +2395,9 @@ const webAppHTML = `<!doctype html>
       editDraft: "",
       editBaseModTime: "",
       editDirty: false,
+      activeGraphDir: "",
+      activeGraphFocus: "",
+      activeGraphMode: "",
       restoringHistory: false,
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
@@ -2889,6 +2892,7 @@ const webAppHTML = `<!doctype html>
 
     function currentRoute() {
       return {
+        graph: state.activeGraphDir || "",
         dir: state.cwd || "",
         path: state.selectedPath || "",
         hash: state.selectedHash || "",
@@ -2897,6 +2901,7 @@ const webAppHTML = `<!doctype html>
 
     function routeURL(route) {
       const params = new URLSearchParams();
+      if (route.graph) params.set("graph", route.graph);
       if (route.dir) params.set("dir", route.dir);
       if (route.path) params.set("path", route.path);
       if (route.hash) params.set("hash", route.hash);
@@ -2918,6 +2923,7 @@ const webAppHTML = `<!doctype html>
     function routeFromLocation() {
       const params = new URLSearchParams(location.search);
       return {
+        graph: params.get("graph") || "",
         dir: params.get("dir") || "",
         path: params.get("path") || "",
         hash: params.get("hash") || "",
@@ -2938,6 +2944,9 @@ const webAppHTML = `<!doctype html>
     }
 
     async function loadDir(dir = "", options = {}) {
+      state.activeGraphDir = "";
+      state.activeGraphFocus = "";
+      state.activeGraphMode = "";
       const params = new URLSearchParams();
       if (dir) params.set("dir", dir);
       if (state.showHidden) params.set("show_hidden", "1");
@@ -3413,6 +3422,13 @@ const webAppHTML = `<!doctype html>
       host.appendChild(loading);
       previewBodyEl.appendChild(host);
 
+      state.activeGraphDir = dir;
+      state.activeGraphFocus = focusPath || "";
+      state.activeGraphMode = useMode;
+      if (!state.restoringHistory) {
+        syncHistory("push");
+      }
+
       let doc;
       try {
         await loadVisNetwork();
@@ -3448,9 +3464,19 @@ const webAppHTML = `<!doctype html>
         physics: { stabilization: { iterations: 80 } },
         interaction: { hover: true },
       });
-      // Task 3 attaches the click -> selectFile handler. Stash the network
-      // and the toggle buttons on a window-scoped object so Task 3 can wire
-      // them without re-declaring the function.
+      network.on("click", function (params) {
+        if (!params || !params.nodes || !params.nodes.length) return;
+        const id = params.nodes[0];
+        const nodeData = (sub.nodes || []).find(function (n) { return n.id === id; });
+        if (!nodeData || !nodeData.source_file) return;
+        selectFile(nodeData.source_file, { historyMode: "push" });
+      });
+      focusBtn.addEventListener("click", function () {
+        openGraphView(dir, focusPath || state.selectedPath || "", "focus");
+      });
+      fullBtn.addEventListener("click", function () {
+        openGraphView(dir, focusPath || state.selectedPath || "", "full");
+      });
       window.__graphView = { network, focusBtn, fullBtn, dir, focusPath, useMode };
     }
 
@@ -3681,6 +3707,10 @@ const webAppHTML = `<!doctype html>
     }
 
     async function selectFile(path, options = {}) {
+      // navigating to a file leaves the graph view
+      state.activeGraphDir = "";
+      state.activeGraphFocus = "";
+      state.activeGraphMode = "";
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
       if (!state.cwd || !path.startsWith(state.cwd + "/")) {
@@ -4024,6 +4054,14 @@ const webAppHTML = `<!doctype html>
     async function restoreRoute(route, historyMode = "") {
       state.restoringHistory = true;
       try {
+        if (route.graph) {
+          // First make sure the right folder is loaded in the file list.
+          if (route.dir && route.dir !== state.cwd) {
+            await loadDir(route.dir, { historyMode: "", keepSelection: true });
+          }
+          await openGraphView(route.graph, route.path || "", "focus");
+          return;
+        }
         const dir = route.dir || state.cwd || "";
         if (dir) {
           await loadDir(dir, { historyMode, clearSelection: !route.path });
