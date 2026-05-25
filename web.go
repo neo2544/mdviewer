@@ -1785,6 +1785,84 @@ const webAppHTML = `<!doctype html>
     .app.search-panel-collapsed .search-panel {
       display: none;
     }
+    .search-panel-body {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .search-input {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .search-summary {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .search-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .18em;
+      color: var(--muted);
+    }
+    .search-hit-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 35vh;
+      overflow-y: auto;
+    }
+    .search-hit {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .search-hit:hover { background: var(--panel-2); }
+    .search-hit .search-hit-needle {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .search-file-row {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .search-file-row:hover { background: var(--panel-2); }
+    .search-file-row .search-file-count {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .search-empty {
+      color: var(--muted);
+      font-size: 12px;
+      font-style: italic;
+    }
+    mark.search-mark {
+      background: color-mix(in oklab, var(--accent) 35%, transparent);
+      color: inherit;
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+    mark.search-mark.current {
+      background: var(--accent);
+      color: var(--bg);
+    }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -1913,6 +1991,18 @@ const webAppHTML = `<!doctype html>
     </main>
     <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
       <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
+      <div class="search-panel-body">
+        <input type="search" class="search-input" id="searchPanelInput" placeholder="Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
+        <div>
+          <div class="search-section-title">In this file</div>
+          <div class="search-summary" id="searchInFileSummary">Type to search.</div>
+          <div class="search-hit-list" id="searchInFileHits"></div>
+        </div>
+        <div>
+          <div class="search-section-title">Same folder</div>
+          <div class="search-hit-list" id="searchFolderHits"></div>
+        </div>
+      </div>
     </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
@@ -2064,6 +2154,9 @@ const webAppHTML = `<!doctype html>
       searchPanelCollapsed: localStorage.getItem("mdviewer.searchPanelCollapsed") === "1",
       // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
       showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
+      searchQueryRight: "",   // distinct from the left-sidebar file-name search
+      searchInFileHits: [],   // array of <mark> elements in preview order
+      searchInFileFocus: -1,  // index of the currently emphasized hit
     };
 
     // Persist lastSeenAt on unload so the next session can use it for "recent" detection.
@@ -2857,6 +2950,10 @@ const webAppHTML = `<!doctype html>
 
     const collapseSearchPanelEl = document.getElementById("collapseSearchPanel");
     const revealSearchPanelEl = document.getElementById("revealSearchPanel");
+    const searchPanelInputEl = document.getElementById("searchPanelInput");
+    const searchInFileSummaryEl = document.getElementById("searchInFileSummary");
+    const searchInFileHitsEl = document.getElementById("searchInFileHits");
+    const searchFolderHitsEl = document.getElementById("searchFolderHits");
 
     async function selectFile(path, options = {}) {
       state.selectedPath = path;
