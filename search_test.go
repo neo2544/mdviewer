@@ -84,3 +84,21 @@ func TestSearchCaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+func TestGitToWebURL(t *testing.T) {
+	cases := map[string]string{
+		"git@github.com:neo/repo.git":       "https://github.com/neo/repo",
+		"git@github.com:neo/repo":           "https://github.com/neo/repo",
+		"ssh://git@github.com/neo/repo.git": "https://github.com/neo/repo",
+		"git://github.com/neo/repo.git":     "https://github.com/neo/repo",
+		"https://github.com/neo/repo.git":   "https://github.com/neo/repo",
+		"https://github.com/neo/repo":       "https://github.com/neo/repo",
+		"/local/path":                       "",
+		"":                                  "",
+	}
+	for in, want := range cases {
+		if got := gitToWebURL(in); got != want {
+			t.Errorf("gitToWebURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

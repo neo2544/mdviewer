@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -66,6 +68,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/aliases", s.handleAliases)
 	mux.HandleFunc("/api/search", s.handleSearch)
+	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
 	return mux
 }
 
@@ -516,6 +519,87 @@ func (s *webServer) handleToggleFavorite(w http.ResponseWriter, r *http.Request)
 		"favorites": favorites,
 		"favorited": found < 0,
 	})
+}
+
+type gitRemote struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	WebURL string `json:"web_url"`
+}
+
+// gitToWebURL converts a git remote URL (ssh / git+ssh / git:// / https) to
+// a browser-openable https URL. Returns "" when conversion fails so the UI
+// can hide the button for non-web remotes (e.g. local file paths).
+func gitToWebURL(u string) string {
+	u = strings.TrimSpace(u)
+	u = strings.TrimSuffix(u, ".git")
+	switch {
+	case strings.HasPrefix(u, "git@"):
+		// git@github.com:user/repo → https://github.com/user/repo
+		rest := strings.TrimPrefix(u, "git@")
+		i := strings.Index(rest, ":")
+		if i < 0 {
+			return ""
+		}
+		return "https://" + rest[:i] + "/" + rest[i+1:]
+	case strings.HasPrefix(u, "ssh://"):
+		// ssh://git@github.com/user/repo → https://github.com/user/repo
+		rest := strings.TrimPrefix(u, "ssh://")
+		rest = strings.TrimPrefix(rest, "git@")
+		return "https://" + rest
+	case strings.HasPrefix(u, "git://"):
+		return "https://" + strings.TrimPrefix(u, "git://")
+	case strings.HasPrefix(u, "http://"), strings.HasPrefix(u, "https://"):
+		return u
+	default:
+		return ""
+	}
+}
+
+// handleGitRemotes parses `git remote -v` for the given dir and returns a
+// deduplicated list with browser-openable URLs. Empty array when the dir is
+// not a git repository, git isn't on PATH, or the command fails.
+func (s *webServer) handleGitRemotes(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid dir", http.StatusBadRequest)
+		return
+	}
+	out := []gitRemote{}
+	// `.git` may be a directory (normal clone) or a file (worktree pointer).
+	if _, err := os.Stat(filepath.Join(abs, ".git")); err != nil {
+		s.writeJSON(w, http.StatusOK, out)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", abs, "remote", "-v")
+	raw, err := cmd.Output()
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, out)
+		return
+	}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		if seen[parts[0]] {
+			continue
+		}
+		seen[parts[0]] = true
+		out = append(out, gitRemote{
+			Name:   parts[0],
+			URL:    parts[1],
+			WebURL: gitToWebURL(parts[1]),
+		})
+	}
+	s.writeJSON(w, http.StatusOK, out)
 }
 
 const webAppHTML = `<!doctype html>
@@ -1919,6 +2003,16 @@ const webAppHTML = `<!doctype html>
       margin-top: 2px;
     }
     .usage-guide-body > :first-child { margin-top: 0; }
+    .git-remote-link {
+      display: inline-block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .git-remote-link:hover { text-decoration: underline; }
+    .git-remote-link[hidden] { display: none; }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -1951,6 +2045,7 @@ const webAppHTML = `<!doctype html>
           <div class="eyebrow">Local Preview</div>
           <div class="title">Markdown Browser</div>
           <div class="subtle" id="cwd"></div>
+          <a class="git-remote-link" id="gitRemoteLink" href="#" target="_blank" rel="noopener" hidden>↗ open remote</a>
           <div class="searchbox">
             <input class="search-input" id="searchInput" type="search" placeholder="Search files" spellcheck="false" />
           </div>
@@ -2244,6 +2339,7 @@ const webAppHTML = `<!doctype html>
     const sortNameEl = document.getElementById("sortName");
     const sortModEl = document.getElementById("sortMod");
     const cwdEl = document.getElementById("cwd");
+    const gitRemoteLinkEl = document.getElementById("gitRemoteLink");
     const previewTitleEl = document.getElementById("previewTitle");
     const previewMetaEl = document.getElementById("previewMeta");
     const previewBodyEl = document.getElementById("previewBody");
@@ -2829,6 +2925,7 @@ const webAppHTML = `<!doctype html>
         return;
       }
       state.cwd = data.cwd;
+      refreshGitRemote();
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
@@ -3507,6 +3604,26 @@ const webAppHTML = `<!doctype html>
     async function refreshCurrentDir() {
       if (!state.cwd) return;
       await loadDir(state.cwd, { keepSelection: true, silent: true });
+    }
+
+    async function refreshGitRemote() {
+      gitRemoteLinkEl.hidden = true;
+      if (!state.cwd) return;
+      var remotes = [];
+      try {
+        var r = await fetch("/api/git/remotes?dir=" + encodeURIComponent(state.cwd));
+        if (!r.ok) return;
+        remotes = await r.json();
+      } catch (e) { return; }
+      if (!Array.isArray(remotes) || !remotes.length) return;
+      // Prefer "origin" if present; otherwise first remote with a web URL.
+      var chosen = remotes.find(function (r) { return r.name === "origin" && r.web_url; });
+      if (!chosen) chosen = remotes.find(function (r) { return r.web_url; });
+      if (!chosen) return;
+      gitRemoteLinkEl.href = chosen.web_url;
+      gitRemoteLinkEl.title = chosen.name + ": " + chosen.url;
+      gitRemoteLinkEl.textContent = "↗ " + chosen.name + " on web";
+      gitRemoteLinkEl.hidden = false;
     }
 
     function updateCopyPathButton(path) {
@@ -4903,6 +5020,7 @@ const webAppHTML = `<!doctype html>
     updateSortButtons();
     updateEditorButtons();
     renderRecents();
+    refreshGitRemote();
     for (const btn of document.querySelectorAll('.section[data-section] .section-toggle')) {
       const sec = btn.closest('.section');
       const name = sec && sec.dataset.section;
