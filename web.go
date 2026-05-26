@@ -570,11 +570,10 @@ func (s *webServer) handleGitRemotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []gitRemote{}
-	// `.git` may be a directory (normal clone) or a file (worktree pointer).
-	if _, err := os.Stat(filepath.Join(abs, ".git")); err != nil {
-		s.writeJSON(w, http.StatusOK, out)
-		return
-	}
+	// Skip the `.git` existence check: `git remote -v` itself walks up
+	// parent directories to find the repo root, so subfolders of a
+	// repository work too. A non-git path returns exit-128 which we
+	// already swallow as "no remotes".
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", abs, "remote", "-v")
