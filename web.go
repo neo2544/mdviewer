@@ -3605,20 +3605,33 @@ const webAppHTML = `<!doctype html>
       await loadDir(state.cwd, { keepSelection: true, silent: true });
     }
 
+    // _gitRemoteCwd remembers the dir of the last successful resolve so the
+    // 2.5s loadDir poll doesn't re-fetch the remote on every tick.
+    var _gitRemoteCwd = null;
     async function refreshGitRemote() {
-      gitRemoteLinkEl.hidden = true;
-      if (!state.cwd) return;
+      if (!state.cwd) {
+        gitRemoteLinkEl.hidden = true;
+        _gitRemoteCwd = null;
+        return;
+      }
+      // Same folder as the previous resolve → keep the link as-is; no
+      // network call, no DOM churn, no flicker on the polling timer.
+      if (_gitRemoteCwd === state.cwd) return;
       var remotes = [];
       try {
         var r = await fetch("/api/git/remotes?dir=" + encodeURIComponent(state.cwd));
-        if (!r.ok) return;
+        if (!r.ok) return; // network error: keep current visible state
         remotes = await r.json();
       } catch (e) { return; }
-      if (!Array.isArray(remotes) || !remotes.length) return;
+      _gitRemoteCwd = state.cwd;
+      if (!Array.isArray(remotes) || !remotes.length) {
+        gitRemoteLinkEl.hidden = true;
+        return;
+      }
       // Prefer "origin" if present; otherwise first remote with a web URL.
       var chosen = remotes.find(function (r) { return r.name === "origin" && r.web_url; });
       if (!chosen) chosen = remotes.find(function (r) { return r.web_url; });
-      if (!chosen) return;
+      if (!chosen) { gitRemoteLinkEl.hidden = true; return; }
       gitRemoteLinkEl.href = chosen.web_url;
       gitRemoteLinkEl.title = chosen.name + ": " + chosen.url;
       gitRemoteLinkEl.textContent = "↗ " + chosen.name + " on web";
