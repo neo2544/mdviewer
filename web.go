@@ -1963,7 +1963,7 @@ const webAppHTML = `<!doctype html>
       <div class="pane">
         <div class="file-header">
           <button class="header-button active" id="sortName" data-direction="asc" type="button">Name</button>
-          <button class="header-button size-col" id="sortSize" data-direction="asc" type="button">Size</button>
+          <button class="header-button size-col" id="sortMod" data-direction="asc" type="button">Updated</button>
         </div>
         <div id="files"></div>
       </div>
@@ -2242,7 +2242,7 @@ const webAppHTML = `<!doctype html>
     const searchInputEl = document.getElementById("searchInput");
     const pathInputEl = document.getElementById("pathInput");
     const sortNameEl = document.getElementById("sortName");
-    const sortSizeEl = document.getElementById("sortSize");
+    const sortModEl = document.getElementById("sortMod");
     const cwdEl = document.getElementById("cwd");
     const previewTitleEl = document.getElementById("previewTitle");
     const previewMetaEl = document.getElementById("previewMeta");
@@ -2426,14 +2426,23 @@ const webAppHTML = `<!doctype html>
       return "/" + parts.slice(0, 2).join("/") + "/…/" + parts.slice(-2).join("/");
     }
 
+    function entryModTimestamp(entry) {
+      const v = entry && (entry.mod_time || entry.modTime);
+      if (!v) return 0;
+      const t = new Date(v).getTime();
+      return isNaN(t) ? 0 : t;
+    }
+
     function compareEntries(a, b) {
       if (a.name === "..") return -1;
       if (b.name === "..") return 1;
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
 
       let result = 0;
-      if (state.sortKey === "size") {
-        result = (a.size || 0) - (b.size || 0);
+      if (state.sortKey === "mod") {
+        const ta = entryModTimestamp(a);
+        const tb = entryModTimestamp(b);
+        result = ta - tb;
         if (result === 0) {
           result = a.name.localeCompare(b.name);
         }
@@ -2446,9 +2455,9 @@ const webAppHTML = `<!doctype html>
 
     function updateSortButtons() {
       sortNameEl.classList.toggle("active", state.sortKey === "name");
-      sortSizeEl.classList.toggle("active", state.sortKey === "size");
+      sortModEl.classList.toggle("active", state.sortKey === "mod");
       sortNameEl.dataset.direction = state.sortDirection;
-      sortSizeEl.dataset.direction = state.sortDirection;
+      sortModEl.dataset.direction = state.sortDirection;
     }
 
     function canEditKind(kind) {
@@ -2918,7 +2927,10 @@ const webAppHTML = `<!doctype html>
         }
         button.innerHTML = '<span class="file-name"></span><span class="file-meta"><span class="update-badge"></span><span class="file-size"></span></span>';
         button.querySelector(".file-name").innerHTML = highlightName(entry.name, state.searchQuery.trim());
-        button.querySelector(".file-size").textContent = entry.is_dir ? "" : humanSize(entry.size);
+        button.querySelector(".file-size").textContent = entry.is_dir ? "" : (function () {
+          const t = entryModTimestamp(entry);
+          return t ? relativeTime(t) : "";
+        })();
         button.onclick = () => entry.is_dir
           ? loadDir(entry.path, { historyMode: "push" })
           : selectFile(entry.path, { historyMode: "push" });
@@ -3802,11 +3814,11 @@ const webAppHTML = `<!doctype html>
       updateSortButtons();
       renderFiles(state.entries);
     });
-    sortSizeEl.addEventListener("click", () => {
-      if (state.sortKey === "size") {
+    sortModEl.addEventListener("click", () => {
+      if (state.sortKey === "mod") {
         state.sortDirection = state.sortDirection === "asc" ? "desc" : "asc";
       } else {
-        state.sortKey = "size";
+        state.sortKey = "mod";
         state.sortDirection = "desc";
       }
       updateSortButtons();
