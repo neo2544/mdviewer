@@ -3914,11 +3914,27 @@ const webAppHTML = `<!doctype html>
         _caretMirror.style.wordWrap = "break-word";
         _caretMirror.style.overflowWrap = "break-word";
         document.body.appendChild(_caretMirror);
+        // Only copy typography from the textarea. Width / padding / border
+        // are forced below so the mirror's CONTENT area matches the
+        // textarea's content area exactly — copying computed width drifted
+        // by the scrollbar gutter when the textarea overflowed vertically,
+        // which made long lines wrap one row later in the mirror than in
+        // the textarea, throwing every offsetTop off.
         const _mirrorProps = [
-          "boxSizing","width","borderTopWidth","borderRightWidth","borderBottomWidth","borderLeftWidth","borderStyle","paddingTop","paddingRight","paddingBottom","paddingLeft","fontStyle","fontVariant","fontWeight","fontStretch","fontSize","fontSizeAdjust","lineHeight","fontFamily","textAlign","textTransform","textIndent","textDecoration","letterSpacing","wordSpacing","tabSize","MozTabSize",
+          "fontStyle","fontVariant","fontWeight","fontStretch","fontSize","fontSizeAdjust","lineHeight","fontFamily","textAlign","textTransform","textIndent","textDecoration","letterSpacing","wordSpacing","tabSize","MozTabSize",
         ];
         function _syncMirrorStyles(cs) {
           for (const p of _mirrorProps) _caretMirror.style[p] = cs[p];
+          // Force the mirror's content area to exactly match the
+          // textarea's — clientWidth excludes the scrollbar, and we
+          // subtract padding because we'll set our own padding to 0.
+          const pl = parseFloat(cs.paddingLeft) || 0;
+          const pr = parseFloat(cs.paddingRight) || 0;
+          const contentWidth = Math.max(0, editorEl.clientWidth - pl - pr);
+          _caretMirror.style.boxSizing = "content-box";
+          _caretMirror.style.width = contentWidth + "px";
+          _caretMirror.style.padding = "0";
+          _caretMirror.style.border = "0";
         }
         function measureYAtOffset(offset) {
           const cs = getComputedStyle(editorEl);
