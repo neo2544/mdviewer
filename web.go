@@ -655,7 +655,7 @@ const webAppHTML = `<!doctype html>
       --shadow: 0 24px 80px color-mix(in oklab, black 58%, transparent);
       --sidebar-width: 320px;
       --splitter-width: 12px;
-      --file-meta-width: 6.25rem;
+      --file-meta-width: 4.5rem;
       --search-panel-width: 240px;
     }
     /* Light token set, factored so we can apply via either media query or
