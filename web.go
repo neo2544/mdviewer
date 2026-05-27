@@ -2436,7 +2436,7 @@ const webAppHTML = `<!doctype html>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke to delete it" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · ✎ draw · 🩹 erase one stroke · 🧹 clear all · ↶/↷ undo/redo · 💾 save PNG · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
   </div>
 
   <script type="module">
@@ -5361,8 +5361,31 @@ const webAppHTML = `<!doctype html>
       if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
       const vb = svg.viewBox && svg.viewBox.baseVal;
       const rect = svg.getBoundingClientRect();
-      const w = (vb && vb.width) || svg.clientWidth || rect.width || 1024;
-      const h = (vb && vb.height) || svg.clientHeight || rect.height || 768;
+      const baseW = (vb && vb.width) || svg.clientWidth || rect.width || 1024;
+      const baseH = (vb && vb.height) || svg.clientHeight || rect.height || 768;
+      let minX = (vb && vb.x) || 0;
+      let minY = (vb && vb.y) || 0;
+      let maxX = minX + baseW;
+      let maxY = minY + baseH;
+      // Strokes are allowed to extend past the original viewBox (overflow
+      // is set to visible in openLightbox). Expand the export viewBox to
+      // cover every annotation so nothing gets cropped in the PNG.
+      const liveMarks = svg.querySelectorAll(".lb-annotation");
+      for (const mark of liveMarks) {
+        let bb = null;
+        try { bb = mark.getBBox(); } catch (e) {}
+        if (!bb) continue;
+        if (bb.x < minX) minX = bb.x;
+        if (bb.y < minY) minY = bb.y;
+        if (bb.x + bb.width > maxX) maxX = bb.x + bb.width;
+        if (bb.y + bb.height > maxY) maxY = bb.y + bb.height;
+      }
+      // Small margin so strokes that just kiss the edge aren't shaved.
+      const margin = Math.max(8, Math.round(Math.min(baseW, baseH) * 0.01));
+      minX -= margin; minY -= margin; maxX += margin; maxY += margin;
+      const w = maxX - minX;
+      const h = maxY - minY;
+      clone.setAttribute("viewBox", minX + " " + minY + " " + w + " " + h);
       clone.setAttribute("width", String(w));
       clone.setAttribute("height", String(h));
       const xml = new XMLSerializer().serializeToString(clone);
