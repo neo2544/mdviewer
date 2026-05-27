@@ -1,7 +1,10 @@
-# mdviewer — TUI Markdown File Viewer
+# mdviewer — Web · Menubar · TUI Markdown Viewer
 
-파일 탐색 + Markdown 렌더링을 지원하는 터미널 앱입니다.  
-**bubbletea + lipgloss + glamour** (charmbracelet 생태계)로 만들어졌습니다.
+브라우저 기반 웹 뷰어 + macOS 메뉴바 자동 실행 + 터미널 TUI까지, 한 바이너리에서 세 가지 모드로 마크다운을 탐색·편집할 수 있는 뷰어입니다.
+
+- **Web (기본 권장)** — `http://127.0.0.1:8421/` — 사이드바 탐색, Edit/Split/Preview, Mermaid 라이트박스(주석/포스트잇/PNG 저장), 검색, 즐겨찾기, 테마 등
+- **Menubar** — 로그인 시 자동 시작, 메뉴바에서 클릭 한 번에 브라우저로 열기 + `.md` 더블클릭 연동
+- **TUI** — `bubbletea + glamour` 기반 터미널 모드
 
 ## 🚀 빠른 설치 (메뉴바 + 자동 시작 + `.md` 연동)
 
