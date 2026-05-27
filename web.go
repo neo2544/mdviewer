@@ -610,6 +610,9 @@ const webAppHTML = `<!doctype html>
   <link rel="icon" type="image/png" href="/icon.png" />
   <link rel="apple-touch-icon" href="/icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/common.min.js"></script>
+  <link id="hljs-theme-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+  <link id="hljs-theme-light" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css" disabled>
   <style>
     /* Default = dark. Light tokens are applied either:
        (a) when the system prefers light AND the user hasn't forced dark, or
@@ -3833,6 +3836,7 @@ const webAppHTML = `<!doctype html>
         } catch (e) {
           console.warn("usage guide mermaid.run failed:", e);
         }
+        try { highlightCodeBlocks(previewBodyEl); } catch (e) {}
         decorateRenderedMarkdown();
         try { attachZoomToPreview(); } catch (e) {}
         previewTitleEl.textContent = "Markdown Browser";
@@ -4203,6 +4207,15 @@ const webAppHTML = `<!doctype html>
       } catch (e) { /* annotation is best-effort */ }
     }
 
+    function highlightCodeBlocks(container) {
+      if (typeof hljs === "undefined") return;
+      // Skip mermaid (handled separately) and anything already painted.
+      const codes = container.querySelectorAll("pre code:not(.language-mermaid):not(.hljs)");
+      for (const code of codes) {
+        try { hljs.highlightElement(code); } catch (e) {}
+      }
+    }
+
     async function renderMarkdownInto(container, content, kind, options) {
       options = options || {};
       if (kind !== "markdown" && kind !== "text") {
@@ -4231,6 +4244,7 @@ const webAppHTML = `<!doctype html>
       } catch (e) {
         console.warn("mermaid.run in container failed:", e);
       }
+      try { highlightCodeBlocks(container); } catch (e) {}
       try { decorateRenderedMarkdown(); } catch (e) {}
       try { attachZoomToPreview(); } catch (e) {}
     }
@@ -4253,6 +4267,7 @@ const webAppHTML = `<!doctype html>
           code.parentElement.replaceWith(wrap);
         }
         await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") });
+        try { highlightCodeBlocks(previewBodyEl); } catch (e) {}
         decorateRenderedMarkdown();
         // Explicitly attach zoom/toolbar after mermaid finishes — the
         // MutationObserver path is unreliable for the toolbar because it
@@ -4852,6 +4867,14 @@ const webAppHTML = `<!doctype html>
       try { return localStorage.getItem("mdviewer.theme") || "auto"; }
       catch (e) { return "auto"; }
     }
+    function syncHljsTheme(theme) {
+      const dark = (theme === "dark") || (theme === "auto" &&
+        window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      const linkDark = document.getElementById("hljs-theme-dark");
+      const linkLight = document.getElementById("hljs-theme-light");
+      if (linkDark) linkDark.disabled = !dark;
+      if (linkLight) linkLight.disabled = dark;
+    }
     function applyTheme(theme) {
       try { localStorage.setItem("mdviewer.theme", theme); } catch (e) {}
       if (theme === "auto") {
@@ -4865,8 +4888,18 @@ const webAppHTML = `<!doctype html>
         themeToggleEl.title = "Theme: " + label + " (click to cycle)";
         themeToggleEl.setAttribute("aria-label", "Theme: " + label);
       }
+      syncHljsTheme(theme);
     }
     applyTheme(currentTheme());
+    // In auto mode the effective theme can flip when the OS toggles dark
+    // mode at runtime; keep the hljs stylesheet in step.
+    if (window.matchMedia) {
+      try {
+        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+          if (currentTheme() === "auto") syncHljsTheme("auto");
+        });
+      } catch (e) {}
+    }
     if (themeToggleEl) {
       themeToggleEl.onclick = () => {
         const cur = currentTheme();
