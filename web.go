@@ -1963,6 +1963,18 @@ const webAppHTML = `<!doctype html>
       gap: 8px;
       z-index: 2001;
     }
+    .lightbox-toolbar-bottom {
+      top: auto;
+      right: auto;
+      bottom: 56px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 10px;
+      background: color-mix(in oklab, var(--panel) 88%, black);
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      border-radius: 999px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
     .lightbox-toolbar button {
       width: 38px;
       height: 38px;
@@ -2408,9 +2420,13 @@ const webAppHTML = `<!doctype html>
       <button type="button" data-action="zoom-out" title="Zoom out">−</button>
       <button type="button" data-action="reset" title="Reset (Double-click)">⤢</button>
       <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+      <button type="button" data-action="annosave" id="lbAnnoSaveBtn" title="Save current view as PNG (with annotations)">💾</button>
+      <button type="button" data-action="close" title="Close (Esc)">✕</button>
+    </div>
+    <div class="lightbox-toolbar lightbox-toolbar-bottom">
       <button type="button" data-action="annodraw" id="lbAnnoDrawBtn" title="Toggle draw mode (left-drag draws)">✎</button>
-      <button type="button" class="draw-only" data-action="announdo" id="lbAnnoUndoBtn" title="Undo last stroke" hidden>↶</button>
-      <button type="button" class="draw-only" data-action="annoredo" id="lbAnnoRedoBtn" title="Redo last undone stroke" hidden>↷</button>
+      <button type="button" class="draw-only" data-action="announdo" id="lbAnnoUndoBtn" title="Undo last action (draw/erase/clear)" hidden>↶</button>
+      <button type="button" class="draw-only" data-action="annoredo" id="lbAnnoRedoBtn" title="Redo last undone action" hidden>↷</button>
       <label class="draw-only lb-anno-color-label" id="lbAnnoColorLabel" title="Stroke color" hidden>
         <input type="color" id="lbAnnoColor" value="#ff3b30" />
       </label>
@@ -2418,11 +2434,9 @@ const webAppHTML = `<!doctype html>
         <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke to delete it" hidden>🩹</button>
-      <button type="button" data-action="annoclear" title="Clear annotations">🧹</button>
-      <button type="button" data-action="annosave" id="lbAnnoSaveBtn" title="Save current view as PNG (with annotations)">💾</button>
-      <button type="button" data-action="close" title="Close (Esc)">✕</button>
+      <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · ✎ button: draw · 🩹 eraser: click stroke to delete · 💾 save PNG · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · ✎ draw · 🩹 erase one stroke · 🧹 clear all · ↶/↷ undo/redo · 💾 save PNG · Double-click: reset · Esc: close</div>
   </div>
 
   <script type="module">
@@ -4904,7 +4918,7 @@ const webAppHTML = `<!doctype html>
     const lightboxEl = document.getElementById("lightbox");
     const lightboxStageEl = document.getElementById("lightboxStage");
     const lightboxScaleEl = document.getElementById("lightboxScale");
-    const lightboxToolbarEl = lightboxEl.querySelector(".lightbox-toolbar");
+    const lightboxToolbarEls = lightboxEl.querySelectorAll(".lightbox-toolbar");
     const ZOOM_MIN = 0.2;
     const ZOOM_MAX = 12;
     const lbState = { scale: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0, dx: 0, dy: 0, didDrag: false };
@@ -5099,7 +5113,11 @@ const webAppHTML = `<!doctype html>
     var _lbDrawMode = false;
     var _lbDrawColor = "#ff3b30";
     var _lbDrawOpacity = 0.5;
-    var _lbAnnoUndoStack = []; // removed strokes available for redo
+    // _lbHistory and _lbRedoStack implement a command-pattern undo/redo:
+    // every draw, erase, and clear-all pushes an action; ↶ reverses the
+    // last action and shifts it onto _lbRedoStack; ↷ re-applies it.
+    var _lbHistory = [];
+    var _lbRedoStack = [];
     var _lbEraserMode = false;
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
@@ -5195,38 +5213,49 @@ const webAppHTML = `<!doctype html>
       return pt.matrixTransform(ctm.inverse());
     }
 
+    function recordAnnoAction(action) {
+      _lbHistory.push(action);
+      _lbRedoStack = [];
+    }
+
+    function applyAnnoAction(action, reverse) {
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const adding = (action.type === "add" && !reverse) || (action.type === "remove" && reverse);
+      if (adding) {
+        for (const s of action.strokes) svg.appendChild(s);
+      } else {
+        for (const s of action.strokes) s.remove();
+      }
+    }
+
     function clearAnnotations() {
       const svg = getAnnotationSVG();
       if (!svg) return;
-      const marks = svg.querySelectorAll(".lb-annotation");
+      const marks = Array.from(svg.querySelectorAll(".lb-annotation"));
+      if (!marks.length) return;
       for (const el of marks) el.remove();
       _lbAnnoActive = null;
-      _lbAnnoUndoStack = [];
+      recordAnnoAction({ type: "remove", strokes: marks });
     }
 
     function undoAnnotation() {
-      const svg = getAnnotationSVG();
-      if (!svg) return;
-      const marks = svg.querySelectorAll(".lb-annotation");
-      if (!marks.length) return;
-      const last = marks[marks.length - 1];
-      _lbAnnoUndoStack.push(last);
-      last.remove();
+      if (!_lbHistory.length) return;
+      const action = _lbHistory.pop();
+      applyAnnoAction(action, true);
+      _lbRedoStack.push(action);
     }
 
     function redoAnnotation() {
-      if (!_lbAnnoUndoStack.length) return;
-      const svg = getAnnotationSVG();
-      if (!svg) return;
-      const poly = _lbAnnoUndoStack.pop();
-      svg.appendChild(poly);
+      if (!_lbRedoStack.length) return;
+      const action = _lbRedoStack.pop();
+      applyAnnoAction(action, false);
+      _lbHistory.push(action);
     }
 
     function startAnnotationStroke(event) {
       const svg = getAnnotationSVG();
       if (!svg) return;
-      // New stroke invalidates the redo stack — same as every editor.
-      _lbAnnoUndoStack = [];
       const ns = "http://www.w3.org/2000/svg";
       const poly = document.createElementNS(ns, "polyline");
       poly.setAttribute("class", "lb-annotation");
@@ -5257,8 +5286,13 @@ const webAppHTML = `<!doctype html>
 
     function endAnnotationStroke(event) {
       if (!_lbAnnoActive) return;
-      const pts = (_lbAnnoActive.getAttribute("points") || "").trim().split(/\s+/);
-      if (pts.length < 2) _lbAnnoActive.remove();
+      const stroke = _lbAnnoActive;
+      const pts = (stroke.getAttribute("points") || "").trim().split(/\s+/);
+      if (pts.length < 2) {
+        stroke.remove();
+      } else {
+        recordAnnoAction({ type: "add", strokes: [stroke] });
+      }
       _lbAnnoActive = null;
       try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
     }
@@ -5394,6 +5428,8 @@ const webAppHTML = `<!doctype html>
       _lbAnnoActive = null;
       _lbDrawMode = false;
       _lbEraserMode = false;
+      _lbHistory = [];
+      _lbRedoStack = [];
       const drawBtn = document.getElementById("lbAnnoDrawBtn");
       if (drawBtn) drawBtn.classList.remove("active");
       const eraseBtn = document.getElementById("lbAnnoEraseBtn");
@@ -5444,8 +5480,8 @@ const webAppHTML = `<!doctype html>
         if (stroke) {
           event.preventDefault();
           event.stopPropagation();
-          _lbAnnoUndoStack.push(stroke);
           stroke.remove();
+          recordAnnoAction({ type: "remove", strokes: [stroke] });
           return;
         }
         // Eraser is on but the click missed a stroke — do nothing (don't
@@ -5528,7 +5564,7 @@ const webAppHTML = `<!doctype html>
       fitLightboxContent();
     });
 
-    lightboxToolbarEl.addEventListener("click", (event) => {
+    const handleToolbarClick = (event) => {
       const btn = event.target.closest("button[data-action]");
       if (!btn) return;
       const action = btn.dataset.action;
@@ -5544,7 +5580,8 @@ const webAppHTML = `<!doctype html>
       else if (action === "annoerase") toggleEraserMode();
       else if (action === "annoclear") clearAnnotations();
       else if (action === "annosave") saveLightboxImage();
-    });
+    };
+    for (const tb of lightboxToolbarEls) tb.addEventListener("click", handleToolbarClick);
 
     const lbAnnoColorInput = document.getElementById("lbAnnoColor");
     if (lbAnnoColorInput) {
