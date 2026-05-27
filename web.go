@@ -3519,8 +3519,8 @@ const webAppHTML = `<!doctype html>
           '</div>' +
           '<div class="usage-guide-body">' + rendered + '</div>' +
           '</div>';
-        // marked.parse emits <pre><code class="language-mermaid">…</code></pre>
-        // for fenced ```mermaid blocks — mermaid.run only sees nodes that
+        // marked.parse emits <pre><code class="language-mermaid">...</code></pre>
+        // for fenced mermaid blocks — mermaid.run only sees nodes that
         // already have class="mermaid", so we have to wrap them first
         // (same step renderPreview and renderMarkdownInto do).
         const mermaidBlocks = previewBodyEl.querySelectorAll("pre code.language-mermaid");
