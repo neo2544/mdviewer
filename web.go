@@ -850,20 +850,25 @@ const webAppHTML = `<!doctype html>
       margin: 0;
     }
     .git-remote-link {
-      display: inline-block;
-      margin-top: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+      font-size: 12px;
+      text-decoration: none;
     }
     .searchbox {
-      margin-top: 14px;
+      margin-top: 10px;
     }
     .search-input {
       width: 100%;
-      border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
       background: color-mix(in oklab, var(--panel-2) 86%, transparent);
       color: var(--text);
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 10px;
+      padding: 8px 12px;
       font: inherit;
+      font-size: 13px;
       outline: none;
     }
     .search-input::placeholder {
@@ -1102,7 +1107,13 @@ const webAppHTML = `<!doctype html>
       margin-bottom: 10px;
       padding: 0 8px;
     }
-    .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-title {
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
     .section-toggle {
       display: flex;
       align-items: center;
@@ -1116,7 +1127,7 @@ const webAppHTML = `<!doctype html>
       text-align: left;
     }
     .section-toggle:hover .section-chevron { color: var(--accent); }
-    .section-toggle .section-title { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+    .section-toggle .section-title { color: var(--accent); font-weight: 600; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
     .section-chevron {
       display: inline-block;
       width: 12px;
