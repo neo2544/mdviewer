@@ -2413,7 +2413,7 @@ const webAppHTML = `<!doctype html>
         <input type="color" id="lbAnnoColor" value="#ff3b30" />
       </label>
       <label class="draw-only lb-anno-opacity-label" id="lbAnnoOpacityLabel" title="Stroke opacity" hidden>
-        <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="1" />
+        <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
       <button type="button" data-action="annoclear" title="Clear annotations">🧹</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
@@ -5094,7 +5094,7 @@ const webAppHTML = `<!doctype html>
     var _lbAnnoStartedAt = 0;
     var _lbDrawMode = false;
     var _lbDrawColor = "#ff3b30";
-    var _lbDrawOpacity = 1.0;
+    var _lbDrawOpacity = 0.5;
     var _lbAnnoUndoStack = []; // removed strokes available for redo
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
@@ -5450,7 +5450,7 @@ const webAppHTML = `<!doctype html>
     if (lbAnnoOpacityInput) {
       lbAnnoOpacityInput.addEventListener("input", (event) => {
         const v = parseFloat(event.target.value);
-        _lbDrawOpacity = isNaN(v) ? 1.0 : v;
+        _lbDrawOpacity = isNaN(v) ? 0.5 : v;
       });
     }
 
