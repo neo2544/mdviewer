@@ -1437,6 +1437,14 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, var(--accent) 22%, transparent) !important;
       box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 55%, transparent) inset;
     }
+    /* Individual list items get a tighter pill so the bullet stays
+       visible and the highlight doesn't drown the surrounding text. */
+    .split-preview li.source-line-active {
+      background: color-mix(in oklab, var(--accent) 18%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 50%, transparent) inset;
+      border-radius: 4px;
+      padding-inline: 2px;
+    }
     @media (max-width: 760px) {
       .split-view { flex-direction: column; }
       .split-editor, .split-preview { flex: 1 1 auto; }
@@ -4129,19 +4137,45 @@ const webAppHTML = `<!doctype html>
             continue;
           }
           const idx = source.indexOf(tok.raw, cursor);
-          let line;
+          let line, charOffset;
           if (idx >= 0) {
             line = source.slice(0, idx).split("\n").length - 1;
+            charOffset = idx;
             cursor = idx + tok.raw.length;
           } else {
             line = source.slice(0, cursor).split("\n").length - 1;
+            charOffset = cursor;
           }
-          renderTokens.push({ token: tok, line });
+          renderTokens.push({ token: tok, line, charOffset });
+        }
+        // Recursive walker for list items — handles nested ul/ol too.
+        function annotateList(listEl, items, startCharOffset) {
+          if (!listEl || !items) return;
+          const liNodes = listEl.querySelectorAll(":scope > li");
+          let cur = startCharOffset;
+          for (let r = 0; r < items.length && r < liNodes.length; r++) {
+            const item = items[r];
+            if (!item || !item.raw) continue;
+            const itemIdx = source.indexOf(item.raw, cur);
+            if (itemIdx < 0) continue;
+            const itemLine = source.slice(0, itemIdx).split("\n").length - 1;
+            liNodes[r].setAttribute("data-source-line", String(itemLine));
+            // Look for a nested list token inside this item and recurse.
+            if (item.tokens) {
+              for (const sub of item.tokens) {
+                if (sub && sub.type === "list") {
+                  const nestedEl = liNodes[r].querySelector(":scope > ul, :scope > ol");
+                  if (nestedEl) annotateList(nestedEl, sub.items, itemIdx);
+                }
+              }
+            }
+            cur = itemIdx + item.raw.length;
+          }
         }
         const blocks = container.children;
         for (let i = 0; i < blocks.length && i < renderTokens.length; i++) {
           const block = blocks[i];
-          const { token, line } = renderTokens[i];
+          const { token, line, charOffset } = renderTokens[i];
           block.setAttribute("data-source-line", String(line));
           // Per-row stamping for tables: header sits on the block's start
           // line, the separator pipe row takes the next line, then data
@@ -4157,6 +4191,13 @@ const webAppHTML = `<!doctype html>
                 bodyRows[r].setAttribute("data-source-line", String(line + 2 + r));
               }
             }
+          }
+          // Per-item stamping for lists, including nested.
+          if (token.type === "list") {
+            const listEl = (block.tagName === "UL" || block.tagName === "OL")
+              ? block
+              : block.querySelector("ul, ol");
+            annotateList(listEl, token.items, charOffset);
           }
         }
       } catch (e) { /* annotation is best-effort */ }
