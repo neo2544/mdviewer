@@ -1722,6 +1722,100 @@ const webAppHTML = `<!doctype html>
     }
     .popup-edit:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); color: var(--text); }
 
+    /* ---- Mermaid Playground modal ---- */
+    .mermaid-lab-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      z-index: 1900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+    .mermaid-lab-modal[hidden] { display: none; }
+    .mermaid-lab-card {
+      width: min(1200px, 95vw);
+      height: min(820px, 90vh);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .mermaid-lab-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .mermaid-lab-title {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 14px;
+    }
+    .mermaid-lab-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mermaid-lab-body {
+      flex: 1 1 auto;
+      display: flex;
+      min-height: 0;
+    }
+    .mermaid-lab-pane {
+      flex: 1 1 50%;
+      min-width: 0;
+      overflow: auto;
+    }
+    .mermaid-lab-editor-pane {
+      border-right: 1px solid var(--line);
+      display: flex;
+    }
+    .mermaid-lab-editor {
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      outline: 0;
+      padding: 14px 16px;
+      background: var(--code);
+      color: var(--text);
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      resize: none;
+    }
+    .mermaid-lab-preview-pane {
+      padding: 18px;
+      background: var(--panel-2);
+    }
+    .mermaid-lab-preview-pane .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .mermaid-lab-preview-pane .mermaid-error {
+      color: oklch(0.6 0.2 25);
+      font-family: ui-monospace, monospace;
+      white-space: pre-wrap;
+      font-size: 12px;
+    }
+    .mermaid-lab-foot {
+      padding: 10px 16px 12px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+    }
+    @media (max-width: 720px) {
+      .mermaid-lab-body { flex-direction: column; }
+      .mermaid-lab-editor-pane { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+
     /* ---- Command palette (Cmd/Ctrl+K) ---- */
     .palette {
       position: fixed;
@@ -2188,6 +2282,9 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="refreshButton" type="button" title="Refresh" aria-label="Refresh">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
           </button>
+          <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground" aria-label="Mermaid Playground">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
+          </button>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
@@ -2239,6 +2336,25 @@ const webAppHTML = `<!doctype html>
       <input type="text" id="popupSearch" placeholder="Filter…" autocomplete="off" spellcheck="false" />
       <div id="popupResults" class="popup-results"></div>
       <div class="popup-foot subtle">Click to open · Esc to close</div>
+    </div>
+  </div>
+  <div class="mermaid-lab-modal" id="mermaidLabModal" hidden>
+    <div class="mermaid-lab-card">
+      <div class="mermaid-lab-head">
+        <div class="mermaid-lab-title">&#x1F9EA; Mermaid Playground</div>
+        <div class="mermaid-lab-head-actions">
+          <button type="button" class="action" id="mermaidLabClearBtn" title="Clear the editor">Clear</button>
+          <button type="button" class="action" id="mermaidLabCopyBtn" title="Copy text">Copy</button>
+          <button type="button" class="popup-close" id="mermaidLabCloseBtn" title="Close (Esc)">&#x2715;</button>
+        </div>
+      </div>
+      <div class="mermaid-lab-body">
+        <div class="mermaid-lab-pane mermaid-lab-editor-pane">
+          <textarea class="mermaid-lab-editor" id="mermaidLabEditor" spellcheck="false" placeholder="Paste or type mermaid source here&#10;e.g.&#10;&#10;flowchart LR&#10;  A --&gt; B"></textarea>
+        </div>
+        <div class="mermaid-lab-pane mermaid-lab-preview-pane" id="mermaidLabPreview"></div>
+      </div>
+      <div class="mermaid-lab-foot subtle">Live render &#x2014; Esc to close &#xB7; Click backdrop to dismiss</div>
     </div>
   </div>
   <div class="palette" id="palette" hidden>
@@ -2421,6 +2537,13 @@ const webAppHTML = `<!doctype html>
     const rightSplitterEl = document.getElementById("rightSplitter");
     const collapseSidebarEl = document.getElementById("collapseSidebar");
     const revealSidebarEl = document.getElementById("revealSidebar");
+    const mermaidLabModalEl = document.getElementById("mermaidLabModal");
+    const mermaidLabEditorEl = document.getElementById("mermaidLabEditor");
+    const mermaidLabPreviewEl = document.getElementById("mermaidLabPreview");
+    const mermaidLabBtnEl = document.getElementById("mermaidLabBtn");
+    const mermaidLabCloseBtnEl = document.getElementById("mermaidLabCloseBtn");
+    const mermaidLabClearBtnEl = document.getElementById("mermaidLabClearBtn");
+    const mermaidLabCopyBtnEl = document.getElementById("mermaidLabCopyBtn");
 
     function applySidebarLayout() {
       const minWidth = 140;
@@ -4175,6 +4298,79 @@ const webAppHTML = `<!doctype html>
       renderFiles(state.entries);
     });
 
+    // ---------- Mermaid Playground modal ----------
+    let mermaidLabRenderTimer = null;
+    let mermaidLabIdCounter = 0;
+
+    function openMermaidLab() {
+      mermaidLabModalEl.hidden = false;
+      setTimeout(function() { mermaidLabEditorEl.focus(); }, 0);
+      renderMermaidLab(mermaidLabEditorEl.value);
+    }
+
+    function closeMermaidLab() {
+      mermaidLabModalEl.hidden = true;
+      clearTimeout(mermaidLabRenderTimer);
+    }
+
+    async function renderMermaidLab(src) {
+      const text = (src || "").trim();
+      mermaidLabPreviewEl.innerHTML = "";
+      if (!text) {
+        const hint = document.createElement("div");
+        hint.className = "subtle";
+        hint.textContent = "Paste mermaid source on the left to see the rendered diagram here.";
+        mermaidLabPreviewEl.appendChild(hint);
+        return;
+      }
+      mermaidLabIdCounter += 1;
+      const id = "mermaidLabRender" + mermaidLabIdCounter;
+      try {
+        if (!window.mermaid || typeof window.mermaid.render !== "function") {
+          throw new Error("mermaid library not loaded");
+        }
+        const result = await window.mermaid.render(id, text);
+        const host = document.createElement("div");
+        host.className = "mermaid";
+        host.innerHTML = result.svg;
+        mermaidLabPreviewEl.appendChild(host);
+        if (typeof result.bindFunctions === "function") {
+          try { result.bindFunctions(mermaidLabPreviewEl); } catch (e) {}
+        }
+      } catch (err) {
+        const errBox = document.createElement("div");
+        errBox.className = "mermaid-error";
+        errBox.textContent = "Render failed:\n" + (err && err.message ? err.message : String(err));
+        mermaidLabPreviewEl.appendChild(errBox);
+      }
+    }
+
+    mermaidLabBtnEl.onclick = openMermaidLab;
+    mermaidLabCloseBtnEl.onclick = closeMermaidLab;
+    mermaidLabClearBtnEl.onclick = function() {
+      mermaidLabEditorEl.value = "";
+      renderMermaidLab("");
+      mermaidLabEditorEl.focus();
+    };
+    mermaidLabCopyBtnEl.onclick = async function() {
+      try {
+        await navigator.clipboard.writeText(mermaidLabEditorEl.value || "");
+        mermaidLabCopyBtnEl.textContent = "Copied!";
+        setTimeout(function() { mermaidLabCopyBtnEl.textContent = "Copy"; }, 1000);
+      } catch (e) {
+        mermaidLabCopyBtnEl.textContent = "Failed";
+        setTimeout(function() { mermaidLabCopyBtnEl.textContent = "Copy"; }, 1000);
+      }
+    };
+    mermaidLabEditorEl.addEventListener("input", function(event) {
+      const text = event.target.value;
+      clearTimeout(mermaidLabRenderTimer);
+      mermaidLabRenderTimer = setTimeout(function() { renderMermaidLab(text); }, 150);
+    });
+    mermaidLabModalEl.addEventListener("click", function(event) {
+      if (event.target === mermaidLabModalEl) closeMermaidLab();
+    });
+
     // ---------- Theme toggle (Auto → Light → Dark) ----------
     const themeToggleEl = document.getElementById("themeToggle");
     const THEME_ORDER = ["auto", "light", "dark"];
@@ -4591,6 +4787,11 @@ const webAppHTML = `<!doctype html>
       if ((event.metaKey || event.ctrlKey) && lowerKey === "k" && !event.shiftKey) {
         event.preventDefault();
         if (state.paletteOpen) closePalette(); else openPalette();
+        return;
+      }
+      // Esc closes the Mermaid Playground modal.
+      if (event.key === "Escape" && !mermaidLabModalEl.hidden) {
+        closeMermaidLab();
         return;
       }
       // Esc closes the "Show all" popup when focus is anywhere outside its input.
