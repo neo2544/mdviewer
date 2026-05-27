@@ -4696,11 +4696,23 @@ const webAppHTML = `<!doctype html>
       lightboxZoomAt(event.clientX, event.clientY, factor);
     }, { passive: false });
 
+    // selectstart guard — without Alt held, the lightbox is pan-only; we
+    // must beat the browser's default drag-to-select on SVG text so the
+    // mouse drag pans the diagram instead of highlighting glyphs.
+    lightboxEl.addEventListener("selectstart", (event) => {
+      if (event.altKey || state.altKey) return;
+      if (event.target && event.target.closest && event.target.closest(".lightbox-toolbar")) return;
+      event.preventDefault();
+    });
+
     lightboxEl.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".lightbox-toolbar")) return;
       // Alt/Option held → user wants to select text inside the diagram,
       // not pan the lightbox. Let the browser handle the selection.
       if (event.altKey || state.altKey) return;
+      // Stop the browser from beginning a text selection on the SVG
+      // text under the cursor — we own this gesture as a pan.
+      event.preventDefault();
       // Click on backdrop (outside the stage) closes; tracked via target match in pointerup.
       lbState.dragging = true;
       lbState.didDrag = false;
