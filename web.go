@@ -2384,6 +2384,9 @@ const webAppHTML = `<!doctype html>
     // regressions, so bump explicitly after verifying.
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.esm.min.mjs";
     mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose" });
+    // Expose for code that lives outside this module scope (e.g. the
+    // Mermaid Playground modal renderer accesses window.mermaid).
+    window.mermaid = mermaid;
 
     // --- Change-tracking persistence (P2) ---
     const TRACKING_STORAGE_KEY = "mdviewer.changeTracking.v1";
