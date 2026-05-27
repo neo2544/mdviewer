@@ -819,11 +819,11 @@ const webAppHTML = `<!doctype html>
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
     }
     .brand-mark {
-      width: 30px;
-      height: 30px;
+      width: 28px;
+      height: 28px;
       flex-shrink: 0;
       color: var(--accent);
     }
@@ -834,12 +834,24 @@ const webAppHTML = `<!doctype html>
       color: var(--text);
     }
     .subtle { color: var(--muted); font-size: 13px; }
-    #cwd {
-      display: block;
+    #cwd.path-chip {
+      display: inline-block;
       max-width: 100%;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      color: color-mix(in oklab, var(--text) 75%, var(--muted));
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      margin: 0;
+    }
+    .git-remote-link {
+      display: inline-block;
+      margin-top: 4px;
     }
     .searchbox {
       margin-top: 14px;
@@ -2504,9 +2516,7 @@ const webAppHTML = `<!doctype html>
             </svg>
             <span class="brand-name">MD Viewer</span>
           </div>
-          <div class="eyebrow">Local Preview</div>
-          <div class="title">Markdown Browser</div>
-          <div class="subtle" id="cwd"></div>
+          <div class="subtle path-chip" id="cwd"></div>
           <a class="git-remote-link" id="gitRemoteLink" href="#" target="_blank" rel="noopener" hidden>↗ open remote</a>
           <div class="searchbox">
             <input class="search-input" id="searchInput" type="search" placeholder="Search files" spellcheck="false" />
