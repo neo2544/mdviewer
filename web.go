@@ -4834,9 +4834,10 @@ const webAppHTML = `<!doctype html>
       // Alt/Option held → user wants to select text inside the diagram,
       // not pan the lightbox. Let the browser handle the selection.
       if (event.altKey || state.altKey) return;
-      // Stop the browser from beginning a text selection on the SVG
-      // text under the cursor — we own this gesture as a pan.
-      event.preventDefault();
+      // NOTE: do NOT preventDefault on pointerdown — that suppresses the
+      // synthesized mousedown→click→dblclick chain on some browsers and
+      // breaks the double-click-to-reset gesture. Text selection is
+      // already blocked by the `selectstart` handler above.
       // Click on backdrop (outside the stage) closes; tracked via target match in pointerup.
       lbState.dragging = true;
       lbState.didDrag = false;
