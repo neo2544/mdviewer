@@ -2002,6 +2002,15 @@ const webAppHTML = `<!doctype html>
       margin-top: 2px;
     }
     .usage-guide-body > :first-child { margin-top: 0; }
+    .usage-guide-git-link {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .usage-guide-git-link:hover { text-decoration: underline; }
+    .usage-guide-git-link[hidden] { display: none; }
     .git-remote-link {
       display: inline-block;
       margin-top: 4px;
@@ -3431,6 +3440,7 @@ const webAppHTML = `<!doctype html>
           '<div class="usage-guide-text">' +
           '<div class="usage-guide-title">Built-in usage guide</div>' +
           '<div class="usage-guide-subtitle">Select a file from the left to open your content.</div>' +
+          '<a class="usage-guide-git-link" id="welcomeGitLink" target="_blank" rel="noopener" hidden></a>' +
           '</div>' +
           '</div>' +
           '<div class="usage-guide-body">' + rendered + '</div>' +
@@ -3438,6 +3448,7 @@ const webAppHTML = `<!doctype html>
         // Run mermaid (in case the guide ever uses it) and decorate links.
         try { await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") }); } catch (e) {}
         decorateRenderedMarkdown();
+        applyGitRemoteEverywhere();
         previewTitleEl.textContent = "Markdown Browser";
         previewMetaEl.textContent = "Usage guide";
         kindChipEl.textContent = "Help";
@@ -3608,15 +3619,41 @@ const webAppHTML = `<!doctype html>
     // _gitRemoteCwd remembers the dir of the last successful resolve so the
     // 2.5s loadDir poll doesn't re-fetch the remote on every tick.
     var _gitRemoteCwd = null;
+    var _currentGitRemote = null; // {name,url,web_url} | null — last resolved
+
+    // applyGitRemoteEverywhere mirrors _currentGitRemote onto both the
+    // sidebar link and (when the welcome guide is rendered) the welcome
+    // banner link. Safe to call any time — missing elements are skipped.
+    function applyGitRemoteEverywhere() {
+      var chosen = _currentGitRemote;
+      var targets = [gitRemoteLinkEl, document.getElementById("welcomeGitLink")];
+      for (var i = 0; i < targets.length; i++) {
+        var el = targets[i];
+        if (!el) continue;
+        if (!chosen) {
+          el.hidden = true;
+          continue;
+        }
+        el.href = chosen.web_url;
+        el.title = chosen.name + ": " + chosen.url;
+        el.textContent = "↗ " + chosen.name + " on web";
+        el.hidden = false;
+      }
+    }
+
     async function refreshGitRemote() {
       if (!state.cwd) {
-        gitRemoteLinkEl.hidden = true;
+        _currentGitRemote = null;
         _gitRemoteCwd = null;
+        applyGitRemoteEverywhere();
         return;
       }
-      // Same folder as the previous resolve → keep the link as-is; no
-      // network call, no DOM churn, no flicker on the polling timer.
-      if (_gitRemoteCwd === state.cwd) return;
+      // Same folder as the previous resolve → just re-apply (covers the
+      // welcome banner being freshly rendered) without a network call.
+      if (_gitRemoteCwd === state.cwd) {
+        applyGitRemoteEverywhere();
+        return;
+      }
       var remotes = [];
       try {
         var r = await fetch("/api/git/remotes?dir=" + encodeURIComponent(state.cwd));
@@ -3624,18 +3661,13 @@ const webAppHTML = `<!doctype html>
         remotes = await r.json();
       } catch (e) { return; }
       _gitRemoteCwd = state.cwd;
-      if (!Array.isArray(remotes) || !remotes.length) {
-        gitRemoteLinkEl.hidden = true;
-        return;
+      var chosen = null;
+      if (Array.isArray(remotes) && remotes.length) {
+        chosen = remotes.find(function (r) { return r.name === "origin" && r.web_url; });
+        if (!chosen) chosen = remotes.find(function (r) { return r.web_url; });
       }
-      // Prefer "origin" if present; otherwise first remote with a web URL.
-      var chosen = remotes.find(function (r) { return r.name === "origin" && r.web_url; });
-      if (!chosen) chosen = remotes.find(function (r) { return r.web_url; });
-      if (!chosen) { gitRemoteLinkEl.hidden = true; return; }
-      gitRemoteLinkEl.href = chosen.web_url;
-      gitRemoteLinkEl.title = chosen.name + ": " + chosen.url;
-      gitRemoteLinkEl.textContent = "↗ " + chosen.name + " on web";
-      gitRemoteLinkEl.hidden = false;
+      _currentGitRemote = chosen || null;
+      applyGitRemoteEverywhere();
     }
 
     function updateCopyPathButton(path) {
