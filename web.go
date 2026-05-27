@@ -3952,48 +3952,11 @@ const webAppHTML = `<!doctype html>
           for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
           return pos;
         }
-        function offsetOfLineEnd(line) {
-          const lines = editorEl.value.split("\n");
-          if (line >= lines.length) return editorEl.value.length;
-          let pos = 0;
-          for (let i = 0; i < line; i++) pos += lines[i].length + 1;
-          return pos + lines[line].length;
-        }
-
-        // Drive the editor highlight from a [startLine, endLine] inclusive
-        // source-line range — the same range the active preview block
-        // covers. The band spans the topmost visual row of startLine to
-        // the bottom of endLine's last visual row, so multi-line blocks
-        // light up as a single chunk on both sides.
-        function updateEditorBandForRange(startLine, endLine) {
-          if (!editorHighlightEl) return;
-          const cs = getComputedStyle(editorEl);
-          const lineHeight = parseFloat(cs.lineHeight) || 22;
-          const borderTop = parseFloat(cs.borderTopWidth) || 0;
-          const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
-          const paddingLeft = parseFloat(cs.paddingLeft) || 0;
-          const paddingRight = parseFloat(cs.paddingRight) || 0;
-
-          const yStart = measureYAtOffset(offsetOfLineStart(startLine));
-          const yEnd = measureYAtOffset(offsetOfLineEnd(endLine));
-          const topRel = yStart - editorEl.scrollTop;
-          const bottomRel = yEnd - editorEl.scrollTop + lineHeight;
-          const innerHeight = editorEl.clientHeight;
-          if (bottomRel < 0 || topRel > innerHeight) {
-            editorHighlightEl.hidden = true;
-            return;
-          }
-          editorHighlightEl.hidden = false;
-          editorHighlightEl.style.top = (borderTop + topRel) + "px";
-          editorHighlightEl.style.left = (borderLeft + paddingLeft) + "px";
-          editorHighlightEl.style.width = (editorEl.clientWidth - paddingLeft - paddingRight) + "px";
-          editorHighlightEl.style.height = (bottomRel - topRel) + "px";
-        }
-
         function updateEditorLineHighlight() {
-          // Caret-only fallback path (preview empty, or no block markers).
-          // Keeps the band visible while the user is typing a brand-new
-          // file before the first re-render has stamped any markers.
+          // Single-line band under the caret. Stays the same height
+          // regardless of how large the block is on the preview side, so
+          // huge blocks (mermaid, tables, long code fences) never produce
+          // a viewport-sized smear that hides where the user is editing.
           if (!editorHighlightEl) return;
           const cs = getComputedStyle(editorEl);
           const lineHeight = parseFloat(cs.lineHeight) || 22;
@@ -4015,42 +3978,28 @@ const webAppHTML = `<!doctype html>
         }
 
         function syncCursorHighlight() {
-          if (!splitPrevEl) { updateEditorLineHighlight(); return; }
+          // Editor side always shows the single line under the caret so the
+          // user can always see exactly where they're typing — even when
+          // the caret sits inside a 50-line mermaid block or table that
+          // would otherwise produce a band the height of the viewport.
+          updateEditorLineHighlight();
+          if (!splitPrevEl) return;
           const line = caretLine();
-          // Walk the preview's data-source-line markers and pick the
-          // block whose start line is the largest <= caret line; the
-          // NEXT marker's start line - 1 becomes our block's end line.
+          // Preview side shows the WHOLE block that contains the caret —
+          // walk the data-source-line markers and take the largest <= line.
           const nodes = splitPrevEl.querySelectorAll("[data-source-line]");
           let activeBlock = null;
-          let activeStart = 0;
-          let activeEnd = -1;
           for (const n of nodes) {
             const l = parseInt(n.getAttribute("data-source-line"), 10);
             if (isNaN(l)) continue;
-            if (l <= line) {
-              activeBlock = n;
-              activeStart = l;
-              activeEnd = -1; // unknown until we see the next marker
-            } else {
-              if (activeBlock && activeEnd === -1) activeEnd = l - 1;
-              break;
-            }
+            if (l <= line) activeBlock = n;
+            else break;
           }
-          if (activeBlock && activeEnd === -1) {
-            // Last block — runs to the end of the document.
-            activeEnd = editorEl.value.split("\n").length - 1;
-          }
-          // Clear all preview highlights, then apply to the active block.
           const prev = splitPrevEl.querySelectorAll(".source-line-active");
           for (const p of prev) p.classList.remove("source-line-active");
           if (activeBlock) {
             activeBlock.classList.add("source-line-active");
             scrollPreviewBlockToCenter(activeBlock);
-            updateEditorBandForRange(activeStart, activeEnd);
-          } else {
-            // No matching block (e.g., caret above the first stamped
-            // block): fall back to single-caret-line band.
-            updateEditorLineHighlight();
           }
         }
         // Hook the standard cursor-movement events: keyup catches arrow
