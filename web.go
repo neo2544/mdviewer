@@ -1399,7 +1399,18 @@ const webAppHTML = `<!doctype html>
       flex: 1 1 50%;
       min-width: 240px;
       display: flex;
+      position: relative;
     }
+    .editor-line-highlight {
+      position: absolute;
+      pointer-events: none;
+      z-index: 2;
+      background: color-mix(in oklab, var(--accent) 14%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent) inset;
+      border-radius: 4px;
+      transition: top 0.1s ease;
+    }
+    .editor-line-highlight[hidden] { display: none; }
     .split-editor textarea.editor {
       flex: 1 1 auto;
       width: 100%;
@@ -3842,11 +3853,15 @@ const webAppHTML = `<!doctype html>
       if (state.editorMode === "split" && canEditKind(activeData.kind)) {
         previewBodyEl.innerHTML =
           '<div class="split-view">' +
-          '<div class="split-editor"><textarea class="editor" spellcheck="false"></textarea></div>' +
+          '<div class="split-editor">' +
+            '<div class="editor-line-highlight" hidden></div>' +
+            '<textarea class="editor" spellcheck="false"></textarea>' +
+          '</div>' +
           '<div class="split-preview"></div>' +
           '</div>';
         const editorEl = previewBodyEl.querySelector(".editor");
         const splitPrevEl = previewBodyEl.querySelector(".split-preview");
+        const editorHighlightEl = previewBodyEl.querySelector(".editor-line-highlight");
         editorEl.value = state.editDraft || activeData.content || "";
         // initial render of the right pane
         await renderMarkdownInto(splitPrevEl, editorEl.value, activeData.kind, { trackSourceLines: true });
@@ -3883,7 +3898,34 @@ const webAppHTML = `<!doctype html>
           splitPrevEl.scrollTop = Math.max(0, target);
           requestAnimationFrame(() => { splitSyncSource = null; });
         }
+        function updateEditorLineHighlight() {
+          if (!editorHighlightEl) return;
+          const cs = getComputedStyle(editorEl);
+          const lineHeight = parseFloat(cs.lineHeight) || 18;
+          const paddingTop = parseFloat(cs.paddingTop) || 0;
+          const paddingLeft = parseFloat(cs.paddingLeft) || 0;
+          const paddingRight = parseFloat(cs.paddingRight) || 0;
+          const borderTop = parseFloat(cs.borderTopWidth) || 0;
+          const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+          const lineIdx = caretLine();
+          const lineTopAbs = lineIdx * lineHeight;
+          const yInContent = lineTopAbs - editorEl.scrollTop;
+          // Visible content area is roughly [0, clientHeight - paddingTop -
+          // paddingBottom]. Hide the highlight band when the caret line
+          // scrolls outside that range so it doesn't smear over the padding.
+          if (yInContent < 0 || yInContent > editorEl.clientHeight - lineHeight) {
+            editorHighlightEl.hidden = true;
+            return;
+          }
+          editorHighlightEl.hidden = false;
+          editorHighlightEl.style.top = (borderTop + paddingTop + yInContent) + "px";
+          editorHighlightEl.style.left = (borderLeft + paddingLeft) + "px";
+          editorHighlightEl.style.width = (editorEl.clientWidth - paddingLeft - paddingRight) + "px";
+          editorHighlightEl.style.height = lineHeight + "px";
+        }
+
         function syncCursorHighlight() {
+          updateEditorLineHighlight();
           if (!splitPrevEl) return;
           const line = caretLine();
           const el = findBlockForLine(line);
@@ -3937,8 +3979,13 @@ const webAppHTML = `<!doctype html>
           requestAnimationFrame(() => { splitSyncSource = null; });
         }
         editorEl.addEventListener("scroll", () => {
+          updateEditorLineHighlight();
           syncScrollFrom(editorEl, splitPrevEl);
         });
+        // The textarea may resize when the splitter is dragged; keep the
+        // highlight band sized to match.
+        const resizeObs = new ResizeObserver(() => updateEditorLineHighlight());
+        resizeObs.observe(editorEl);
         splitPrevEl.addEventListener("scroll", () => {
           syncScrollFrom(splitPrevEl, editorEl);
         });
