@@ -3572,6 +3572,31 @@ const webAppHTML = `<!doctype html>
             renderMarkdownInto(splitPrevEl, event.target.value, activeData.kind);
           }, 150);
         });
+
+        // --- Proportional scroll sync between the two panes -------------
+        // Map each pane's scroll position to a 0..1 ratio of its own
+        // scrollable range, then apply the same ratio to the other pane.
+        // A reentrancy flag breaks the otherwise-infinite scroll→sync→
+        // scroll feedback loop.
+        let splitSyncSource = null;
+        function syncScrollFrom(src, dst) {
+          if (splitSyncSource && splitSyncSource !== src) return;
+          splitSyncSource = src;
+          const srcMax = src.scrollHeight - src.clientHeight;
+          if (srcMax <= 0) { splitSyncSource = null; return; }
+          const ratio = src.scrollTop / srcMax;
+          const dstMax = dst.scrollHeight - dst.clientHeight;
+          if (dstMax > 0) dst.scrollTop = ratio * dstMax;
+          // Release the source guard on the next frame so the programmatic
+          // scroll's own "scroll" event (which will fire) is ignored.
+          requestAnimationFrame(() => { splitSyncSource = null; });
+        }
+        editorEl.addEventListener("scroll", () => {
+          syncScrollFrom(editorEl, splitPrevEl);
+        });
+        splitPrevEl.addEventListener("scroll", () => {
+          syncScrollFrom(splitPrevEl, editorEl);
+        });
         return;
       }
 
