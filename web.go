@@ -4785,6 +4785,7 @@ const webAppHTML = `<!doctype html>
         lbState.x = (vw - _lbBaselineW * lbState.scale) / 2;
         lbState.y = (vh - _lbBaselineH * lbState.scale) / 2;
         applyLightboxTransform();
+        syncAnnotationViewBox();
         return;
       }
       // Make sure we know the natural dimensions before sizing.
@@ -4806,6 +4807,7 @@ const webAppHTML = `<!doctype html>
         applyLightboxTransform();
         _lbBaselineW = natW;
         _lbBaselineH = natH;
+        syncAnnotationViewBox();
       };
       if (natW > 0 && natH > 0) {
         finish();
@@ -4853,8 +4855,29 @@ const webAppHTML = `<!doctype html>
       ov.style.height = "100%";
       ov.style.overflow = "visible";
       ov.style.pointerEvents = "none";
+      // .lightbox-stage > * has `background: white` (so images/diagrams
+      // get the white card look). The overlay must be transparent so the
+      // diagram below it is visible. Also kill the card box-shadow/radius.
+      ov.style.background = "transparent";
+      ov.style.boxShadow = "none";
+      ov.style.borderRadius = "0";
       ov.setAttribute("xmlns", ns);
+      // preserveAspectRatio "none" so the user-space coords map directly
+      // to the rendered box (the overlay viewBox is set to match the
+      // diagram natural dims after fit — see syncAnnotationViewBox).
+      ov.setAttribute("preserveAspectRatio", "none");
       return ov;
+    }
+
+    // syncAnnotationViewBox aligns the overlay's user-space with the
+    // diagram's natural dimensions so polyline coords stored in those
+    // units render at the right visual position regardless of zoom level.
+    function syncAnnotationViewBox() {
+      const overlay = document.getElementById("lightboxAnnotations");
+      if (!overlay) return;
+      if (_lbBaselineW > 0 && _lbBaselineH > 0) {
+        overlay.setAttribute("viewBox", "0 0 " + _lbBaselineW + " " + _lbBaselineH);
+      }
     }
 
     function clearAnnotations() {
