@@ -3613,11 +3613,13 @@ const webAppHTML = `<!doctype html>
         function syncScrollFrom(src, dst) {
           if (splitSyncSource && splitSyncSource !== src) return;
           splitSyncSource = src;
-          const srcMax = src.scrollHeight - src.clientHeight;
-          if (srcMax <= 0) { splitSyncSource = null; return; }
-          const ratio = src.scrollTop / srcMax;
-          const dstMax = dst.scrollHeight - dst.clientHeight;
-          if (dstMax > 0) dst.scrollTop = ratio * dstMax;
+          // Anchor by TOP of the visible area, not by scrollable-range
+          // ratio. This keeps the top line(s) aligned between panes —
+          // the bottom may drift when the two have different total
+          // heights, which the user accepted as a trade-off.
+          if (src.scrollHeight <= 0) { splitSyncSource = null; return; }
+          const ratio = src.scrollTop / src.scrollHeight;
+          dst.scrollTop = ratio * dst.scrollHeight;
           // Release the source guard on the next frame so the programmatic
           // scroll's own "scroll" event (which will fire) is ignored.
           requestAnimationFrame(() => { splitSyncSource = null; });
@@ -4209,9 +4211,15 @@ const webAppHTML = `<!doctype html>
       };
     }
 
-    document.getElementById("refreshButton").onclick = () => state.selectedPath
-      ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })
-      : loadDir(state.cwd, { historyMode: "replace" });
+    document.getElementById("refreshButton").onclick = () => {
+      // selectFile's dirty guard exempts same-path navigations, so a
+      // refresh (same path → reload from disk) would silently clobber
+      // the editor draft. Prompt explicitly here.
+      if (!confirmDiscardDirty()) return;
+      return state.selectedPath
+        ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })
+        : loadDir(state.cwd, { historyMode: "replace" });
+    };
     document.getElementById("toggleFavorite").onclick = toggleFavorite;
     // Clear is now inside the "Show all" popup (popupClear button) —
     // wired below in openListPopup based on state.popupKind.
