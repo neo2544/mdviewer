@@ -5144,6 +5144,7 @@ const webAppHTML = `<!doctype html>
     var _lbPostitMode = false;
     var _lbPostitDrag = null; // { g, kind: "move"|"resize", startX, startY, before, didMove }
     var _lbActivePostitEditor = null;
+    var _lbEraseDrag = null; // { erased: [el, ...] } while pointer is held in eraser mode
     const POSTIT_W = 160;
     const POSTIT_PAD = 10;
     const POSTIT_FONT = 14;
@@ -5791,16 +5792,18 @@ const webAppHTML = `<!doctype html>
       // not pan the lightbox. Let the browser handle the selection.
       if (event.altKey || state.altKey) return;
       if (_lbEraserMode && event.button === 0) {
+        // Start an erase-drag session. Strokes touched here AND during
+        // the subsequent pointermove are all bundled into one undo
+        // action, so a single ↶ restores everything wiped in the drag.
+        _lbEraseDrag = { erased: [] };
         const stroke = event.target.closest && event.target.closest(".lb-annotation");
         if (stroke) {
-          event.preventDefault();
-          event.stopPropagation();
           stroke.remove();
-          recordAnnoAction({ type: "remove", strokes: [stroke] });
-          return;
+          _lbEraseDrag.erased.push(stroke);
         }
-        // Eraser is on but the click missed a stroke — do nothing (don't
-        // start a draw stroke or pan).
+        try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (_lbPostitMode && event.button === 0) {
@@ -5880,6 +5883,22 @@ const webAppHTML = `<!doctype html>
 
     lightboxEl.addEventListener("pointermove", (event) => {
       if (_lbAnnoActive) { continueAnnotationStroke(event); return; }
+      if (_lbEraseDrag) {
+        // Walk every element under the pointer (elementsFromPoint, not
+        // elementFromPoint) so a stroke buried beneath a hovered overlay
+        // can still be wiped.
+        const els = document.elementsFromPoint ? document.elementsFromPoint(event.clientX, event.clientY) : [document.elementFromPoint(event.clientX, event.clientY)];
+        for (const el of els) {
+          if (!el) continue;
+          const stroke = el.closest && el.closest(".lb-annotation");
+          if (stroke && _lbEraseDrag.erased.indexOf(stroke) === -1) {
+            stroke.remove();
+            _lbEraseDrag.erased.push(stroke);
+          }
+        }
+        event.preventDefault();
+        return;
+      }
       if (_lbPostitDrag) {
         const svg = getAnnotationSVG();
         if (!svg) return;
@@ -5923,6 +5942,15 @@ const webAppHTML = `<!doctype html>
     var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
       if (_lbAnnoActive) { endAnnotationStroke(event); return; }
+      if (_lbEraseDrag) {
+        const erased = _lbEraseDrag.erased;
+        _lbEraseDrag = null;
+        try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+        if (erased.length > 0) {
+          recordAnnoAction({ type: "remove", strokes: erased });
+        }
+        return;
+      }
       if (_lbPostitDrag) {
         const d = _lbPostitDrag;
         _lbPostitDrag = null;
