@@ -2237,7 +2237,7 @@ const webAppHTML = `<!doctype html>
       <button type="button" data-action="zoom-in" title="Zoom in">+</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
   </div>
 
   <script type="module">
