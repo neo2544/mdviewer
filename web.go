@@ -2244,9 +2244,10 @@ const webAppHTML = `<!doctype html>
       <button type="button" data-action="zoom-out" title="Zoom out">−</button>
       <button type="button" data-action="reset" title="Reset (Double-click)">⤢</button>
       <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+      <button type="button" data-action="annoclear" title="Clear annotations">🧹</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Right-drag: annotate · Double-click: reset · Esc: close</div>
   </div>
 
   <script type="module">
@@ -4736,6 +4737,8 @@ const webAppHTML = `<!doctype html>
     // reset jump to the wrong scale.
     var _lbBaselineW = 0;
     var _lbBaselineH = 0;
+    var _lbAnnoActive = null;
+    var _lbAnnoStartedAt = 0;
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
@@ -4805,9 +4808,74 @@ const webAppHTML = `<!doctype html>
       });
     }
 
+    function createAnnotationOverlay() {
+      const ns = "http://www.w3.org/2000/svg";
+      const ov = document.createElementNS(ns, "svg");
+      ov.id = "lightboxAnnotations";
+      ov.style.position = "absolute";
+      ov.style.left = "0";
+      ov.style.top = "0";
+      ov.style.width = "100%";
+      ov.style.height = "100%";
+      ov.style.overflow = "visible";
+      ov.style.pointerEvents = "none";
+      ov.setAttribute("xmlns", ns);
+      return ov;
+    }
+
+    function clearAnnotations() {
+      const overlay = document.getElementById("lightboxAnnotations");
+      if (!overlay) return;
+      overlay.innerHTML = "";
+      _lbAnnoActive = null;
+    }
+
+    function screenToStageLocal(clientX, clientY) {
+      return {
+        x: (clientX - lbState.x) / lbState.scale,
+        y: (clientY - lbState.y) / lbState.scale,
+      };
+    }
+
+    function startAnnotationStroke(event) {
+      const overlay = document.getElementById("lightboxAnnotations");
+      if (!overlay) return;
+      const ns = "http://www.w3.org/2000/svg";
+      const poly = document.createElementNS(ns, "polyline");
+      poly.setAttribute("fill", "none");
+      poly.setAttribute("stroke", "#ff3b30");
+      poly.setAttribute("stroke-width", String(3 / Math.max(0.25, lbState.scale)));
+      poly.setAttribute("stroke-linecap", "round");
+      poly.setAttribute("stroke-linejoin", "round");
+      poly.setAttribute("vector-effect", "non-scaling-stroke");
+      const p = screenToStageLocal(event.clientX, event.clientY);
+      poly.setAttribute("points", p.x + "," + p.y);
+      overlay.appendChild(poly);
+      _lbAnnoActive = poly;
+      _lbAnnoStartedAt = Date.now();
+      try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
+    }
+
+    function continueAnnotationStroke(event) {
+      if (!_lbAnnoActive) return;
+      const p = screenToStageLocal(event.clientX, event.clientY);
+      const cur = _lbAnnoActive.getAttribute("points") || "";
+      _lbAnnoActive.setAttribute("points", cur + " " + p.x + "," + p.y);
+    }
+
+    function endAnnotationStroke(event) {
+      if (!_lbAnnoActive) return;
+      const pts = (_lbAnnoActive.getAttribute("points") || "").trim().split(/\s+/);
+      if (pts.length < 2) _lbAnnoActive.remove();
+      _lbAnnoActive = null;
+      try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+    }
+
     function openLightbox(node) {
       lightboxStageEl.innerHTML = "";
+      _lbAnnoActive = null;
       lightboxStageEl.appendChild(node);
+      lightboxStageEl.appendChild(createAnnotationOverlay());
       lightboxEl.hidden = false;
       document.body.classList.add("lightbox-open");
       // Strip Mermaid's max-width / inline sizing so the SVG can lay out
@@ -4830,6 +4898,7 @@ const webAppHTML = `<!doctype html>
     }
 
     function closeLightbox() {
+      _lbAnnoActive = null;
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
       document.body.classList.remove("lightbox-open");
@@ -4863,8 +4932,18 @@ const webAppHTML = `<!doctype html>
       event.preventDefault();
     });
 
+    lightboxEl.addEventListener("contextmenu", (event) => {
+      if (lightboxEl.hidden) return;
+      event.preventDefault();
+    });
+
     lightboxEl.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".lightbox-toolbar")) return;
+      if (event.button === 2) {
+        event.preventDefault();
+        startAnnotationStroke(event);
+        return;
+      }
       // Alt/Option held → user wants to select text inside the diagram,
       // not pan the lightbox. Let the browser handle the selection.
       if (event.altKey || state.altKey) return;
@@ -4884,6 +4963,7 @@ const webAppHTML = `<!doctype html>
     });
 
     lightboxEl.addEventListener("pointermove", (event) => {
+      if (_lbAnnoActive) { continueAnnotationStroke(event); return; }
       if (!lbState.dragging) return;
       // Same guard as the inline pan handler — abort if Alt comes down mid-drag.
       if (event.altKey || state.altKey) {
@@ -4906,6 +4986,7 @@ const webAppHTML = `<!doctype html>
     // refuse to emit a dblclick event after the second quick click.
     var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
+      if (_lbAnnoActive) { endAnnotationStroke(event); return; }
       const wasDrag = lbState.didDrag;
       lbState.dragging = false;
       lightboxEl.classList.remove("dragging");
@@ -4947,6 +5028,7 @@ const webAppHTML = `<!doctype html>
       else if (action === "zoom-in") lightboxZoomAt(cx, cy, 1.25);
       else if (action === "zoom-out") lightboxZoomAt(cx, cy, 1 / 1.25);
       else if (action === "reset") fitLightboxContent();
+      else if (action === "annoclear") clearAnnotations();
     });
 
     document.addEventListener("keydown", (event) => {
