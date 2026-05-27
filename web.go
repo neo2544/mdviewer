@@ -1387,6 +1387,35 @@ const webAppHTML = `<!doctype html>
       min-height: 100%;
       display: flex;
     }
+    .split-view {
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+    }
+    .split-editor {
+      flex: 1 1 50%;
+      min-width: 240px;
+      display: flex;
+    }
+    .split-editor textarea.editor {
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      resize: none;
+    }
+    .split-preview {
+      flex: 1 1 50%;
+      min-width: 0;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    @media (max-width: 760px) {
+      .split-view { flex-direction: column; }
+      .split-editor, .split-preview { flex: 1 1 auto; }
+    }
     .editor {
       width: 100%;
       min-height: 100%;
@@ -2129,6 +2158,10 @@ const webAppHTML = `<!doctype html>
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
               <span>Edit</span>
             </button>
+            <button class="seg-btn" id="splitModeButton" type="button" role="tab" aria-selected="false">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 6h6M4 10h6M4 14h6M4 18h6M14 6h6M14 10h6M14 14h6M14 18h6"/></svg>
+              <span>Split</span>
+            </button>
           </div>
           <button class="action" id="saveButton" type="button" title="Save (⌘S)">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
@@ -2359,6 +2392,7 @@ const webAppHTML = `<!doctype html>
     const copyPathIconEl = copyPathBtnEl.querySelector(".path-copy-icon");
     const previewModeButtonEl = document.getElementById("previewModeButton");
     const editModeButtonEl = document.getElementById("editModeButton");
+    const splitModeButtonEl = document.getElementById("splitModeButton");
     const saveButtonEl = document.getElementById("saveButton");
     const floatingTooltipEl = document.getElementById("floatingTooltip");
     const splitterEl = document.getElementById("splitter");
@@ -2571,19 +2605,27 @@ const webAppHTML = `<!doctype html>
     function updateEditorButtons() {
       const editable = canEditKind(state.selectedKind);
       const previewActive = state.editorMode === "preview";
-      const editActive = state.editorMode === "edit";
+      const editActive    = state.editorMode === "edit";
+      const splitActive   = state.editorMode === "split";
       previewModeButtonEl.classList.toggle("active", previewActive);
-      editModeButtonEl.classList.toggle("active", editActive);
+      editModeButtonEl   .classList.toggle("active", editActive);
+      splitModeButtonEl  .classList.toggle("active", splitActive);
       previewModeButtonEl.setAttribute("aria-selected", previewActive ? "true" : "false");
-      editModeButtonEl.setAttribute("aria-selected", editActive ? "true" : "false");
-      editModeButtonEl.disabled = !editable || !state.selectedPath;
+      editModeButtonEl   .setAttribute("aria-selected", editActive    ? "true" : "false");
+      splitModeButtonEl  .setAttribute("aria-selected", splitActive   ? "true" : "false");
+      editModeButtonEl .disabled = !editable || !state.selectedPath;
+      splitModeButtonEl.disabled = !editable || !state.selectedPath;
       const canSave = editable && state.selectedPath && state.editDirty;
       saveButtonEl.disabled = !canSave;
       saveButtonEl.classList.toggle("is-primary", !!canSave);
     }
 
     function setEditorMode(mode) {
-      state.editorMode = mode === "edit" ? "edit" : "preview";
+      if (mode === "edit" || mode === "split") {
+        state.editorMode = mode;
+      } else {
+        state.editorMode = "preview";
+      }
       updateEditorButtons();
       if (state.selectedPath) {
         renderCurrentView();
@@ -3480,7 +3522,59 @@ const webAppHTML = `<!doctype html>
         return;
       }
 
+      if (state.editorMode === "split" && canEditKind(activeData.kind)) {
+        previewBodyEl.innerHTML =
+          '<div class="split-view">' +
+          '<div class="split-editor"><textarea class="editor" spellcheck="false"></textarea></div>' +
+          '<div class="split-preview"></div>' +
+          '</div>';
+        const editorEl = previewBodyEl.querySelector(".editor");
+        const splitPrevEl = previewBodyEl.querySelector(".split-preview");
+        editorEl.value = state.editDraft || activeData.content || "";
+        // initial render of the right pane
+        await renderMarkdownInto(splitPrevEl, editorEl.value, activeData.kind);
+        editorEl.focus({ preventScroll: true });
+        editorEl.setSelectionRange(editorEl.value.length, editorEl.value.length);
+        let splitRenderTimer = null;
+        editorEl.addEventListener("input", (event) => {
+          state.editDraft = event.target.value;
+          state.editDirty = state.editDraft !== state.selectedContent;
+          updateEditorButtons();
+          statusTextEl.textContent = state.editDirty ? "Unsaved changes" : "Editing";
+          clearTimeout(splitRenderTimer);
+          splitRenderTimer = setTimeout(() => {
+            renderMarkdownInto(splitPrevEl, event.target.value, activeData.kind);
+          }, 150);
+        });
+        return;
+      }
+
       await renderPreview(activeData);
+    }
+
+    async function renderMarkdownInto(container, content, kind) {
+      if (kind !== "markdown" && kind !== "text") {
+        container.textContent = content || "";
+        return;
+      }
+      container.innerHTML = marked.parse(content || "");
+      // mermaid fenced code blocks: wrap and run
+      const blocks = container.querySelectorAll("pre code.language-mermaid");
+      for (const code of blocks) {
+        const wrap = document.createElement("div");
+        wrap.className = "mermaid-wrap";
+        const host = document.createElement("div");
+        host.className = "mermaid";
+        host.textContent = code.textContent;
+        wrap.appendChild(host);
+        code.parentElement.replaceWith(wrap);
+      }
+      try { await mermaid.run({ nodes: container.querySelectorAll(".mermaid") }); } catch (e) {}
+      // Best-effort: link decoration and zoom attachment if those functions
+      // are available. They walk the document — passing the container helps
+      // localise but they may not accept a container arg. Try-catch is fine.
+      try { decorateRenderedMarkdown(); } catch (e) {}
+      try { attachZoomToPreview(); } catch (e) {}
     }
 
     async function renderPreview(data) {
@@ -3945,6 +4039,10 @@ const webAppHTML = `<!doctype html>
     editModeButtonEl.onclick = () => {
       if (!canEditKind(state.selectedKind)) return;
       setEditorMode("edit");
+    };
+    splitModeButtonEl.onclick = () => {
+      if (!canEditKind(state.selectedKind)) return;
+      setEditorMode("split");
     };
     saveButtonEl.onclick = () => saveCurrentFile();
     let searchDebounce = null;
