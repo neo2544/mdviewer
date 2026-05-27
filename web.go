@@ -1569,8 +1569,14 @@ const webAppHTML = `<!doctype html>
       border-right: 1px solid color-mix(in oklab, var(--line) 25%, transparent);
       width: 1%;
       white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     }
-    .preview-body .hljs-ln-code { padding-left: 12px !important; }
+    .preview-body .hljs-ln-code {
+      padding-left: 12px !important;
+      white-space: pre;
+      tab-size: 4;
+      -moz-tab-size: 4;
+    }
     /* Standalone code-file preview (.c/.java/.py/etc.) takes the whole
        viewport — let it fill the body and wrap nicely. */
     .preview-body > .code-wrap.code-file {
@@ -4429,6 +4435,25 @@ const webAppHTML = `<!doctype html>
       return EXT_TO_LANG[ext] || null;
     }
 
+    function applyLineNumbersManual(code) {
+      // Plugin-less line numbering: split innerHTML on \n and rebuild
+      // as a 2-column <table>. hljs spans that don't straddle newlines
+      // (the common case) keep their highlight; multi-line tokens
+      // (block comments, multi-line strings) lose color on rows 2+ —
+      // a known trade-off for not pulling in another dep.
+      const html = code.innerHTML;
+      const lines = html.split("\n");
+      const rows = new Array(lines.length);
+      for (let i = 0; i < lines.length; i++) {
+        const lineHtml = lines[i].length ? lines[i] : "&#8203;"; // ZWSP keeps row height
+        rows[i] = '<tr>' +
+          '<td class="hljs-ln-line hljs-ln-numbers" data-line-number="' + (i + 1) + '">' + (i + 1) + '</td>' +
+          '<td class="hljs-ln-line hljs-ln-code">' + lineHtml + '</td>' +
+          '</tr>';
+      }
+      code.innerHTML = '<table class="hljs-ln"><tbody>' + rows.join("") + '</tbody></table>';
+    }
+
     function renderCodeFile(data) {
       previewBodyEl.innerHTML = "";
       const wrap = document.createElement("div");
@@ -4443,18 +4468,31 @@ const webAppHTML = `<!doctype html>
       previewBodyEl.appendChild(wrap);
       if (typeof hljs !== "undefined") {
         try { hljs.highlightElement(code); } catch (e) {}
-        // Line numbers via the plugin, defer one frame so the highlight
-        // pass has settled before the plugin rebuilds the DOM into a
-        // table.
-        if (hljs.lineNumbersBlock) {
-          requestAnimationFrame(() => {
-            try { hljs.lineNumbersBlock(code, { singleLine: true }); } catch (e) {}
-          });
-        }
       }
-      // Add copy button + language tag via the shared decorator. Skip
-      // its own wrapping step (already wrapped) by hooking the existing
-      // function — it detects the parent's .code-wrap class.
+      // Prefer the plugin (correctly preserves spans across multi-line
+      // tokens), but always succeed with a manual fallback if the
+      // plugin didn't load or failed.
+      let pluginApplied = false;
+      if (typeof hljs !== "undefined" && typeof hljs.lineNumbersBlock === "function") {
+        try {
+          hljs.lineNumbersBlock(code, { singleLine: true });
+          pluginApplied = true;
+        } catch (e) {}
+      }
+      if (!pluginApplied) {
+        // Plugin uses setTimeout internally to rebuild — give it one
+        // microtask to finish before checking. If after that frame the
+        // table didn't appear, run our manual fallback.
+        requestAnimationFrame(() => {
+          if (!code.querySelector("table.hljs-ln")) applyLineNumbersManual(code);
+        });
+      } else {
+        // Even when the plugin claims success it might fail silently on
+        // some browsers; double-check after one frame.
+        requestAnimationFrame(() => {
+          if (!code.querySelector("table.hljs-ln")) applyLineNumbersManual(code);
+        });
+      }
       try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
     }
 
