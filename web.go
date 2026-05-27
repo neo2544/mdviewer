@@ -4875,13 +4875,32 @@ const webAppHTML = `<!doctype html>
       applyLightboxTransform();
     });
 
+    // _lastLbTap is the timestamp of the previous non-drag pointerup. We
+    // synthesize our own double-tap detection because some browsers
+    // (Safari with pointer capture, Chrome with selectstart blocked)
+    // refuse to emit a `dblclick` event after the second quick click.
+    var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
+      const wasDrag = lbState.didDrag;
       lbState.dragging = false;
       lightboxEl.classList.remove("dragging");
       try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
       // Only close via the ✕ button or the Esc key — clicking the
       // backdrop is reserved for pan/zoom interactions so the user
       // doesn't accidentally close the view mid-inspection.
+      if (wasDrag) { _lastLbTap = 0; return; }
+      if (event.altKey || state.altKey) { _lastLbTap = 0; return; }
+      if (event.target && event.target.closest && event.target.closest(".lightbox-toolbar")) {
+        _lastLbTap = 0;
+        return;
+      }
+      const now = Date.now();
+      if (now - _lastLbTap < 400) {
+        _lastLbTap = 0;
+        fitLightboxContent();
+        return;
+      }
+      _lastLbTap = now;
     });
 
     lightboxStageEl.addEventListener("dblclick", (event) => {
