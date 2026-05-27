@@ -1506,7 +1506,7 @@ const webAppHTML = `<!doctype html>
       padding: 14px 16px;
       border-radius: 10px;
       background: var(--code);
-      border: 1px solid color-mix(in oklab, var(--line) 35%, transparent);
+      border: 0;
     }
     .preview-body pre code {
       font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", "Fira Code", Menlo, monospace;
