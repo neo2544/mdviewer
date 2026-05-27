@@ -1882,6 +1882,11 @@ const webAppHTML = `<!doctype html>
     .lightbox-toolbar button:hover {
       background: color-mix(in oklab, var(--accent) 35%, var(--panel));
     }
+    .lightbox-toolbar button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .lightbox.draw-mode .lightbox-stage { cursor: crosshair; }
     .lightbox-scale {
       position: fixed;
       top: 22px;
@@ -2244,10 +2249,11 @@ const webAppHTML = `<!doctype html>
       <button type="button" data-action="zoom-out" title="Zoom out">−</button>
       <button type="button" data-action="reset" title="Reset (Double-click)">⤢</button>
       <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+      <button type="button" data-action="annodraw" id="lbAnnoDrawBtn" title="Toggle draw mode (left-drag draws)">✎</button>
       <button type="button" data-action="annoclear" title="Clear annotations">🧹</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Right-drag: annotate · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · ✎ button: draw · Double-click: reset · Esc: close</div>
   </div>
 
   <script type="module">
@@ -3620,10 +3626,12 @@ const webAppHTML = `<!doctype html>
         wrap.appendChild(host);
         code.parentElement.replaceWith(wrap);
       }
-      try { await mermaid.run({ nodes: container.querySelectorAll(".mermaid") }); } catch (e) {}
-      // Best-effort: link decoration and zoom attachment if those functions
-      // are available. They walk the document — passing the container helps
-      // localise but they may not accept a container arg. Try-catch is fine.
+      await new Promise((r) => requestAnimationFrame(r));
+      try {
+        await mermaid.run({ nodes: container.querySelectorAll(".mermaid") });
+      } catch (e) {
+        console.warn("mermaid.run in container failed:", e);
+      }
       try { decorateRenderedMarkdown(); } catch (e) {}
       try { attachZoomToPreview(); } catch (e) {}
     }
@@ -4764,6 +4772,7 @@ const webAppHTML = `<!doctype html>
     var _lbBaselineH = 0;
     var _lbAnnoActive = null;
     var _lbAnnoStartedAt = 0;
+    var _lbDrawMode = false;
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
@@ -4896,6 +4905,13 @@ const webAppHTML = `<!doctype html>
       try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
     }
 
+    function toggleDrawMode() {
+      _lbDrawMode = !_lbDrawMode;
+      const btn = document.getElementById("lbAnnoDrawBtn");
+      if (btn) btn.classList.toggle("active", _lbDrawMode);
+      lightboxEl.classList.toggle("draw-mode", _lbDrawMode);
+    }
+
     function openLightbox(node) {
       lightboxStageEl.innerHTML = "";
       _lbAnnoActive = null;
@@ -4924,6 +4940,10 @@ const webAppHTML = `<!doctype html>
 
     function closeLightbox() {
       _lbAnnoActive = null;
+      _lbDrawMode = false;
+      const drawBtn = document.getElementById("lbAnnoDrawBtn");
+      if (drawBtn) drawBtn.classList.remove("active");
+      lightboxEl.classList.remove("draw-mode");
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
       document.body.classList.remove("lightbox-open");
@@ -4957,21 +4977,16 @@ const webAppHTML = `<!doctype html>
       event.preventDefault();
     });
 
-    lightboxEl.addEventListener("contextmenu", (event) => {
-      if (lightboxEl.hidden) return;
-      event.preventDefault();
-    });
-
     lightboxEl.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".lightbox-toolbar")) return;
-      if (event.button === 2) {
+      // Alt/Option held → user wants to select text inside the diagram,
+      // not pan the lightbox. Let the browser handle the selection.
+      if (event.altKey || state.altKey) return;
+      if (_lbDrawMode && event.button === 0) {
         event.preventDefault();
         startAnnotationStroke(event);
         return;
       }
-      // Alt/Option held → user wants to select text inside the diagram,
-      // not pan the lightbox. Let the browser handle the selection.
-      if (event.altKey || state.altKey) return;
       // NOTE: do NOT preventDefault on pointerdown — that suppresses the
       // synthesized mousedown→click→dblclick chain on some browsers and
       // breaks the double-click-to-reset gesture. Text selection is
@@ -5053,6 +5068,7 @@ const webAppHTML = `<!doctype html>
       else if (action === "zoom-in") lightboxZoomAt(cx, cy, 1.25);
       else if (action === "zoom-out") lightboxZoomAt(cx, cy, 1 / 1.25);
       else if (action === "reset") fitLightboxContent();
+      else if (action === "annodraw") toggleDrawMode();
       else if (action === "annoclear") clearAnnotations();
     });
 
