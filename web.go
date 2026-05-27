@@ -665,10 +665,6 @@ const webAppHTML = `<!doctype html>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/julia.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/crystal.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/coffeescript.min.js"></script>
-  <!-- Adds <table.hljs-ln> line-number gutters to any code element it
-       runs on; keeps hljs spans intact even when a token straddles a
-       newline (so multi-line strings/comments stay highlighted). -->
-  <script src="https://cdn.jsdelivr.net/npm/highlightjs-line-numbers.js@2.8.0/dist/highlightjs-line-numbers.min.js"></script>
   <link id="hljs-theme-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
   <link id="hljs-theme-light" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css" disabled>
   <style>
@@ -2704,7 +2700,7 @@ const webAppHTML = `<!doctype html>
     // fixes and new diagram types (Venn, Ishikawa). 11.14/11.15 may bring
     // regressions, so bump explicitly after verifying.
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose" });
+    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
     // Expose for code that lives outside this module scope (e.g. the
     // Mermaid Playground modal renderer accesses window.mermaid).
     window.mermaid = mermaid;
@@ -4469,30 +4465,11 @@ const webAppHTML = `<!doctype html>
       if (typeof hljs !== "undefined") {
         try { hljs.highlightElement(code); } catch (e) {}
       }
-      // Prefer the plugin (correctly preserves spans across multi-line
-      // tokens), but always succeed with a manual fallback if the
-      // plugin didn't load or failed.
-      let pluginApplied = false;
-      if (typeof hljs !== "undefined" && typeof hljs.lineNumbersBlock === "function") {
-        try {
-          hljs.lineNumbersBlock(code, { singleLine: true });
-          pluginApplied = true;
-        } catch (e) {}
-      }
-      if (!pluginApplied) {
-        // Plugin uses setTimeout internally to rebuild — give it one
-        // microtask to finish before checking. If after that frame the
-        // table didn't appear, run our manual fallback.
-        requestAnimationFrame(() => {
-          if (!code.querySelector("table.hljs-ln")) applyLineNumbersManual(code);
-        });
-      } else {
-        // Even when the plugin claims success it might fail silently on
-        // some browsers; double-check after one frame.
-        requestAnimationFrame(() => {
-          if (!code.querySelector("table.hljs-ln")) applyLineNumbersManual(code);
-        });
-      }
+      // Always use the manual line-numbering — the plugin requires a
+      // ::before CSS rule we don't ship and its async rebuild was
+      // racing our checks, which produced the double-numbered output
+      // the user reported.
+      applyLineNumbersManual(code);
       try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
     }
 
