@@ -1465,6 +1465,46 @@ const webAppHTML = `<!doctype html>
       border-left: 3px solid color-mix(in oklab, var(--accent) 40%, transparent);
       color: color-mix(in oklab, var(--text) 78%, var(--muted));
     }
+    /* Markdown tables — give them an explicit grid so they stop looking
+       like loose runs of text. Header row picks up the accent tint;
+       body rows zebra-stripe for legibility. */
+    .preview-body table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: max-content;
+      max-width: 100%;
+      margin: 10px 0;
+      border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+      border-radius: 10px;
+      overflow: hidden;
+      font-size: 0.95em;
+    }
+    .preview-body table th,
+    .preview-body table td {
+      padding: 8px 12px;
+      border-right: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+      text-align: left;
+      vertical-align: top;
+    }
+    .preview-body table th:last-child,
+    .preview-body table td:last-child { border-right: none; }
+    .preview-body table tr:last-child td { border-bottom: none; }
+    .preview-body table thead th {
+      background: color-mix(in oklab, var(--accent) 18%, var(--panel));
+      color: var(--text);
+      font-weight: 600;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+    }
+    .preview-body table tbody tr:nth-child(odd) {
+      background: color-mix(in oklab, var(--panel) 92%, transparent);
+    }
+    .preview-body table tbody tr:nth-child(even) {
+      background: color-mix(in oklab, var(--panel) 80%, var(--code));
+    }
+    .preview-body table tbody tr:hover {
+      background: color-mix(in oklab, var(--accent) 12%, var(--panel));
+    }
     .mermaid {
       overflow: auto;
       padding: 12px;
