@@ -4647,14 +4647,6 @@ const webAppHTML = `<!doctype html>
       if (!target) return;
       if (target.kind === "svg") {
         const svg = target.el;
-        // Idempotency guard: this function rewrites the SVG viewBox to a
-        // tight crop, which changes the CTM for subsequent measurements.
-        // Running it more than once produces inconsistent crops. Once we
-        // have a cached natural size, reuse it — every fit/reset uses the
-        // same baseline.
-        if (svg.dataset.lbNaturalW && svg.dataset.lbNaturalH) {
-          return;
-        }
         let bb = null;
         // Strategy 1: union of visible leaf-element pixel bboxes
         //   (most reliable — ignores invisible Mermaid scaffolding).
