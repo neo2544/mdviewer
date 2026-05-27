@@ -3519,9 +3519,28 @@ const webAppHTML = `<!doctype html>
           '</div>' +
           '<div class="usage-guide-body">' + rendered + '</div>' +
           '</div>';
-        // Run mermaid (in case the guide ever uses it) and decorate links.
-        try { await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") }); } catch (e) {}
+        // marked.parse emits <pre><code class="language-mermaid">…</code></pre>
+        // for fenced ```mermaid blocks — mermaid.run only sees nodes that
+        // already have class="mermaid", so we have to wrap them first
+        // (same step renderPreview and renderMarkdownInto do).
+        const mermaidBlocks = previewBodyEl.querySelectorAll("pre code.language-mermaid");
+        for (const code of mermaidBlocks) {
+          const wrap = document.createElement("div");
+          wrap.className = "mermaid-wrap";
+          const host = document.createElement("div");
+          host.className = "mermaid";
+          host.textContent = code.textContent;
+          wrap.appendChild(host);
+          code.parentElement.replaceWith(wrap);
+        }
+        await new Promise((r) => requestAnimationFrame(r));
+        try {
+          await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") });
+        } catch (e) {
+          console.warn("usage guide mermaid.run failed:", e);
+        }
         decorateRenderedMarkdown();
+        try { attachZoomToPreview(); } catch (e) {}
         previewTitleEl.textContent = "Markdown Browser";
         previewMetaEl.textContent = "Usage guide";
         kindChipEl.textContent = "Help";
