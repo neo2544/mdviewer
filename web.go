@@ -5143,6 +5143,7 @@ const webAppHTML = `<!doctype html>
     var _lbEraserMode = false;
     var _lbPostitMode = false;
     var _lbPostitDrag = null; // { g, kind: "move"|"resize", startX, startY, before, didMove }
+    var _lbActivePostitEditor = null;
     const POSTIT_W = 160;
     const POSTIT_PAD = 10;
     const POSTIT_FONT = 14;
@@ -5536,6 +5537,9 @@ const webAppHTML = `<!doctype html>
       const tl = pt.matrixTransform(ctm);
       pt.x = w; pt.y = h;
       const br = pt.matrixTransform(ctm);
+      // If another editor is already open, force-cancel it before opening
+      // a new one (don't leave two editors stacked).
+      if (_lbActivePostitEditor && _lbActivePostitEditor._cancel) _lbActivePostitEditor._cancel();
       const editor = document.createElement("textarea");
       editor.className = "lb-postit-editor";
       const before = g.getAttribute("data-text") || "";
@@ -5547,17 +5551,20 @@ const webAppHTML = `<!doctype html>
       document.body.appendChild(editor);
       editor.focus();
       editor.select();
+      _lbActivePostitEditor = editor;
       let done = false;
       const commit = (cancelled) => {
         if (done) return;
         done = true;
         const newText = cancelled ? null : editor.value;
         if (editor.parentNode) editor.parentNode.removeChild(editor);
+        if (_lbActivePostitEditor === editor) _lbActivePostitEditor = null;
         if (newText !== null && newText !== before) {
           setPostitText(g, newText);
           recordAnnoAction({ type: "text", target: g, before, after: newText });
         }
       };
+      editor._cancel = () => commit(true);
       editor.addEventListener("blur", () => commit(false));
       editor.addEventListener("keydown", (e) => {
         if (e.key === "Escape") { e.preventDefault(); commit(true); }
@@ -5709,6 +5716,8 @@ const webAppHTML = `<!doctype html>
 
     function closeLightboxNow() {
       _lbAnnoActive = null;
+      if (_lbActivePostitEditor && _lbActivePostitEditor._cancel) _lbActivePostitEditor._cancel();
+      _lbActivePostitEditor = null;
       _lbDrawMode = false;
       _lbEraserMode = false;
       _lbPostitMode = false;
@@ -5781,6 +5790,13 @@ const webAppHTML = `<!doctype html>
           const g = delHandle.closest(".lb-postit");
           event.preventDefault();
           event.stopPropagation();
+          // Force-close any open editor RIGHT NOW so the deletion lands in
+          // a single frame. Without this the textarea's natural blur runs
+          // first (committing text + removing the editor), and the user
+          // sees the post-it disappear one beat later.
+          if (_lbActivePostitEditor && _lbActivePostitEditor._cancel) {
+            _lbActivePostitEditor._cancel();
+          }
           g.remove();
           recordAnnoAction({ type: "remove", strokes: [g] });
           return;
