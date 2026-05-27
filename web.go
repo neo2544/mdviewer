@@ -4729,12 +4729,29 @@ const webAppHTML = `<!doctype html>
       lightboxScaleEl.textContent = Math.round(lbState.scale * 100) + "%";
     }
 
+    // Baseline natural dims captured at the first successful fit.
+    // Reset (double-click) reuses these — captureLightboxNatural rewrites
+    // the SVG viewBox, so a re-measurement runs in a warped frame and
+    // produces a different result, which was making the post-zoom-out
+    // reset jump to the wrong scale.
+    var _lbBaselineW = 0;
+    var _lbBaselineH = 0;
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
+      const target = findScalableTarget(child);
+      if (_lbBaselineW > 0 && _lbBaselineH > 0) {
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const cap = target && target.kind === "svg" ? 12 : 2;
+        const fit = Math.min(cap, Math.min(vw * 0.92 / _lbBaselineW, vh * 0.86 / _lbBaselineH));
+        lbState.scale = fit > 0 ? fit : 1;
+        lbState.x = (vw - _lbBaselineW * lbState.scale) / 2;
+        lbState.y = (vh - _lbBaselineH * lbState.scale) / 2;
+        applyLightboxTransform();
+        return;
+      }
       // Make sure we know the natural dimensions before sizing.
       captureLightboxNatural();
-      const target = findScalableTarget(child);
       let natW = 0, natH = 0;
       if (target) {
         natW = parseFloat(target.el.dataset.lbNaturalW) || 0;
@@ -4750,6 +4767,8 @@ const webAppHTML = `<!doctype html>
         lbState.x = (vw - natW * lbState.scale) / 2;
         lbState.y = (vh - natH * lbState.scale) / 2;
         applyLightboxTransform();
+        _lbBaselineW = natW;
+        _lbBaselineH = natH;
       };
       if (natW > 0 && natH > 0) {
         finish();
@@ -4777,6 +4796,8 @@ const webAppHTML = `<!doctype html>
           lbState.scale = fitVal > 0 ? fitVal : 1;
           lbState.x = (vw - w * lbState.scale) / 2;
           lbState.y = (vh - h * lbState.scale) / 2;
+          _lbBaselineW = w;
+          _lbBaselineH = h;
           // No scalable target → fall back to CSS transform scale on the stage.
           lightboxStageEl.style.transform = "translate(" + lbState.x + "px, " + lbState.y + "px) scale(" + lbState.scale + ")";
           lightboxScaleEl.textContent = Math.round(lbState.scale * 100) + "%";
@@ -4812,6 +4833,10 @@ const webAppHTML = `<!doctype html>
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
       document.body.classList.remove("lightbox-open");
+      // Reset the cached baseline so the NEXT opened diagram re-measures
+      // from scratch (different content size).
+      _lbBaselineW = 0;
+      _lbBaselineH = 0;
     }
 
     function lightboxZoomAt(clientX, clientY, factor) {
