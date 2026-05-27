@@ -2454,7 +2454,7 @@ const webAppHTML = `<!doctype html>
       <label class="draw-only lb-anno-opacity-label" id="lbAnnoOpacityLabel" title="Stroke opacity" hidden>
         <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
-      <button type="button" class="draw-only" data-action="annopostit" id="lbAnnoPostitBtn" title="Post-it — click empty space to place a note, click a note to edit" hidden>📝</button>
+      <button type="button" class="draw-only" data-action="annopostit" id="lbAnnoPostitBtn" title="Add a post-it note (each click drops one; drag to move, grip to resize, × to delete)" hidden>📝</button>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke / post-it to delete" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
@@ -5393,14 +5393,34 @@ const webAppHTML = `<!doctype html>
       syncAnnotationInteractive();
     }
 
-    function togglePostitMode() {
-      if (!_lbDrawMode) return; // postit button is hidden outside draw mode
-      _lbPostitMode = !_lbPostitMode;
-      if (_lbPostitMode && _lbEraserMode) toggleEraserMode();
+    function enterPostitMode() {
+      if (_lbPostitMode) return;
+      _lbPostitMode = true;
+      if (_lbEraserMode) toggleEraserMode();
       const btn = document.getElementById("lbAnnoPostitBtn");
-      if (btn) btn.classList.toggle("active", _lbPostitMode);
-      lightboxEl.classList.toggle("postit-mode", _lbPostitMode);
+      if (btn) btn.classList.add("active");
+      lightboxEl.classList.add("postit-mode");
       syncAnnotationInteractive();
+    }
+
+    // The 📝 toolbar button is an "add new post-it" action — each press
+    // drops a fresh note at the center of the visible area and opens its
+    // editor. Empty-space clicks no longer create notes; manipulation
+    // mode (handles + drag/resize/delete on existing notes) is enabled
+    // automatically.
+    function addNewPostit() {
+      if (!_lbDrawMode) return;
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      enterPostitMode();
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      const p = screenToSVGUserSpace(svg, cx, cy);
+      const x = p.x - POSTIT_W / 2;
+      const y = p.y - (POSTIT_PAD * 2 + POSTIT_LH) / 2;
+      const g = createPostit(svg, x, y, "");
+      recordAnnoAction({ type: "add", strokes: [g] });
+      openPostitEditor(g);
     }
 
     function setPostitSize(g, w, h) {
@@ -5834,14 +5854,9 @@ const webAppHTML = `<!doctype html>
           try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
           return;
         }
-        const svg = getAnnotationSVG();
-        if (!svg) return;
-        const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
-        const g = createPostit(svg, p.x, p.y, "");
-        recordAnnoAction({ type: "add", strokes: [g] });
-        event.preventDefault();
-        event.stopPropagation();
-        openPostitEditor(g);
+        // Empty-space clicks in post-it mode do nothing — to add another
+        // note the user presses the 📝 toolbar button. This avoids stray
+        // notes when panning or mis-clicking.
         return;
       }
       if (_lbDrawMode && event.button === 0) {
@@ -5967,7 +5982,7 @@ const webAppHTML = `<!doctype html>
       else if (action === "announdo") undoAnnotation();
       else if (action === "annoredo") redoAnnotation();
       else if (action === "annoerase") toggleEraserMode();
-      else if (action === "annopostit") togglePostitMode();
+      else if (action === "annopostit") addNewPostit();
       else if (action === "annoclear") clearAnnotations();
       else if (action === "annosave") saveLightboxImage();
     };
