@@ -3969,16 +3969,23 @@ const webAppHTML = `<!doctype html>
           const lineHeight = parseFloat(cs.lineHeight) || 22;
           const borderTop = parseFloat(cs.borderTopWidth) || 0;
           const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+          const paddingTop = parseFloat(cs.paddingTop) || 0;
+          const paddingBottom = parseFloat(cs.paddingBottom) || 0;
           const paddingLeft = parseFloat(cs.paddingLeft) || 0;
           const paddingRight = parseFloat(cs.paddingRight) || 0;
+          // measureYAtOffset is taken in the textarea's CONTENT coordinate
+          // space (the mirror has padding/border = 0). To place the band
+          // over the same row inside .split-editor we must offset by the
+          // textarea's border AND padding-top.
           const yTop = measureYAtOffset(editorEl.selectionStart || 0);
           const topRel = yTop - editorEl.scrollTop;
-          if (topRel + lineHeight < 0 || topRel > editorEl.clientHeight) {
+          const innerHeight = editorEl.clientHeight - paddingTop - paddingBottom;
+          if (topRel + lineHeight < 0 || topRel > innerHeight) {
             editorHighlightEl.hidden = true;
             return;
           }
           editorHighlightEl.hidden = false;
-          editorHighlightEl.style.top = (borderTop + topRel) + "px";
+          editorHighlightEl.style.top = (borderTop + paddingTop + topRel) + "px";
           editorHighlightEl.style.left = (borderLeft + paddingLeft) + "px";
           editorHighlightEl.style.width = (editorEl.clientWidth - paddingLeft - paddingRight) + "px";
           editorHighlightEl.style.height = lineHeight + "px";
