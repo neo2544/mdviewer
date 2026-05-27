@@ -1993,6 +1993,23 @@ const webAppHTML = `<!doctype html>
     .lightbox-toolbar .draw-only[hidden] { display: none !important; }
     .lightbox.eraser-mode .lb-annotation { cursor: pointer; }
     .lightbox.eraser-mode .lb-annotation:hover { stroke-width: 6 !important; filter: drop-shadow(0 0 4px rgba(255,255,255,0.6)); }
+    .lightbox.postit-mode .lightbox-stage { cursor: crosshair; }
+    .lightbox.postit-mode .lb-postit { cursor: text; }
+    .lb-postit-editor {
+      position: fixed;
+      background: #fff59d;
+      color: #2b2b2b;
+      border: 1px solid #fbc02d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 18px;
+      resize: none;
+      outline: none;
+      z-index: 2100;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    }
     .lightbox-toolbar .lb-anno-color-label {
       display: grid;
       place-items: center;
@@ -2433,7 +2450,8 @@ const webAppHTML = `<!doctype html>
       <label class="draw-only lb-anno-opacity-label" id="lbAnnoOpacityLabel" title="Stroke opacity" hidden>
         <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
-      <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke to delete it" hidden>🩹</button>
+      <button type="button" class="draw-only" data-action="annopostit" id="lbAnnoPostitBtn" title="Post-it — click empty space to place a note, click a note to edit" hidden>📝</button>
+      <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke / post-it to delete" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
     <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
@@ -5119,6 +5137,11 @@ const webAppHTML = `<!doctype html>
     var _lbHistory = [];
     var _lbRedoStack = [];
     var _lbEraserMode = false;
+    var _lbPostitMode = false;
+    const POSTIT_W = 160;
+    const POSTIT_PAD = 10;
+    const POSTIT_FONT = 14;
+    const POSTIT_LH = 18;
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
@@ -5309,7 +5332,9 @@ const webAppHTML = `<!doctype html>
       const svg = getAnnotationSVG();
       if (!svg) return;
       const marks = svg.querySelectorAll(".lb-annotation");
-      for (const el of marks) el.style.pointerEvents = interactive ? "stroke" : "none";
+      // Polylines have fill:none so "all" only fires on the stroke;
+      // post-it groups need "all" so the rect+text behave like one target.
+      for (const el of marks) el.style.pointerEvents = interactive ? "all" : "none";
     }
 
     function toggleDrawMode() {
@@ -5318,24 +5343,131 @@ const webAppHTML = `<!doctype html>
       if (btn) btn.classList.toggle("active", _lbDrawMode);
       lightboxEl.classList.toggle("draw-mode", _lbDrawMode);
       setDrawControlsVisible(_lbDrawMode);
-      // Leaving draw mode also cancels eraser; entering draw mode disables
-      // eraser too — the two gestures conflict on a single pointer.
-      if (_lbEraserMode) {
-        _lbEraserMode = false;
-        const eb = document.getElementById("lbAnnoEraseBtn");
-        if (eb) eb.classList.remove("active");
-        lightboxEl.classList.remove("eraser-mode");
+      // Leaving draw mode cancels every secondary tool — they only make
+      // sense while drawing is active.
+      if (!_lbDrawMode) {
+        if (_lbEraserMode) {
+          _lbEraserMode = false;
+          const eb = document.getElementById("lbAnnoEraseBtn");
+          if (eb) eb.classList.remove("active");
+          lightboxEl.classList.remove("eraser-mode");
+        }
+        if (_lbPostitMode) {
+          _lbPostitMode = false;
+          const pb = document.getElementById("lbAnnoPostitBtn");
+          if (pb) pb.classList.remove("active");
+          lightboxEl.classList.remove("postit-mode");
+        }
         setAnnotationStrokesInteractive(false);
       }
+    }
+
+    function syncAnnotationInteractive() {
+      setAnnotationStrokesInteractive(_lbEraserMode || _lbPostitMode);
     }
 
     function toggleEraserMode() {
       if (!_lbDrawMode) return; // eraser button is hidden outside draw mode
       _lbEraserMode = !_lbEraserMode;
+      if (_lbEraserMode && _lbPostitMode) togglePostitMode();
       const btn = document.getElementById("lbAnnoEraseBtn");
       if (btn) btn.classList.toggle("active", _lbEraserMode);
       lightboxEl.classList.toggle("eraser-mode", _lbEraserMode);
-      setAnnotationStrokesInteractive(_lbEraserMode);
+      syncAnnotationInteractive();
+    }
+
+    function togglePostitMode() {
+      if (!_lbDrawMode) return; // postit button is hidden outside draw mode
+      _lbPostitMode = !_lbPostitMode;
+      if (_lbPostitMode && _lbEraserMode) toggleEraserMode();
+      const btn = document.getElementById("lbAnnoPostitBtn");
+      if (btn) btn.classList.toggle("active", _lbPostitMode);
+      lightboxEl.classList.toggle("postit-mode", _lbPostitMode);
+      syncAnnotationInteractive();
+    }
+
+    function setPostitText(g, text) {
+      const textEl = g.querySelector("text");
+      const rect = g.querySelector("rect");
+      while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
+      const raw = (text == null ? "" : String(text));
+      const lines = raw.length ? raw.split("\n") : [""];
+      const ns = "http://www.w3.org/2000/svg";
+      for (let i = 0; i < lines.length; i++) {
+        const tspan = document.createElementNS(ns, "tspan");
+        tspan.setAttribute("x", String(POSTIT_PAD));
+        tspan.setAttribute("dy", i === 0 ? "0" : String(POSTIT_LH));
+        // Empty line still needs SOME content or the dy is ignored — use a
+        // zero-width space so layout advances.
+        tspan.textContent = lines[i].length ? lines[i] : "​";
+        textEl.appendChild(tspan);
+      }
+      rect.setAttribute("width", String(POSTIT_W));
+      rect.setAttribute("height", String(POSTIT_PAD * 2 + lines.length * POSTIT_LH));
+      g.setAttribute("data-text", raw);
+    }
+
+    function createPostit(svg, x, y, text) {
+      const ns = "http://www.w3.org/2000/svg";
+      const g = document.createElementNS(ns, "g");
+      g.setAttribute("class", "lb-annotation lb-postit");
+      g.setAttribute("transform", "translate(" + x + "," + y + ")");
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("rx", "6");
+      rect.setAttribute("fill", "#fff59d");
+      rect.setAttribute("stroke", "#fbc02d");
+      rect.setAttribute("stroke-width", "1");
+      rect.setAttribute("vector-effect", "non-scaling-stroke");
+      g.appendChild(rect);
+      const textEl = document.createElementNS(ns, "text");
+      textEl.setAttribute("x", String(POSTIT_PAD));
+      textEl.setAttribute("y", String(POSTIT_PAD + POSTIT_FONT));
+      textEl.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
+      textEl.setAttribute("font-size", String(POSTIT_FONT));
+      textEl.setAttribute("fill", "#2b2b2b");
+      g.appendChild(textEl);
+      setPostitText(g, text || "");
+      g.style.pointerEvents = (_lbEraserMode || _lbPostitMode) ? "all" : "none";
+      svg.appendChild(g);
+      return g;
+    }
+
+    function openPostitEditor(g) {
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const rect = g.querySelector("rect");
+      const ctm = g.getScreenCTM();
+      if (!ctm) return;
+      const w = parseFloat(rect.getAttribute("width")) || POSTIT_W;
+      const h = parseFloat(rect.getAttribute("height")) || (POSTIT_PAD * 2 + POSTIT_LH);
+      const pt = svg.createSVGPoint();
+      pt.x = 0; pt.y = 0;
+      const tl = pt.matrixTransform(ctm);
+      pt.x = w; pt.y = h;
+      const br = pt.matrixTransform(ctm);
+      const editor = document.createElement("textarea");
+      editor.className = "lb-postit-editor";
+      editor.value = g.getAttribute("data-text") || "";
+      editor.style.left = tl.x + "px";
+      editor.style.top = tl.y + "px";
+      editor.style.width = Math.max(40, br.x - tl.x) + "px";
+      editor.style.height = Math.max(28, br.y - tl.y) + "px";
+      document.body.appendChild(editor);
+      editor.focus();
+      editor.select();
+      let done = false;
+      const commit = (cancelled) => {
+        if (done) return;
+        done = true;
+        const newText = cancelled ? null : editor.value;
+        if (editor.parentNode) editor.parentNode.removeChild(editor);
+        if (newText !== null) setPostitText(g, newText);
+      };
+      editor.addEventListener("blur", () => commit(false));
+      editor.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.preventDefault(); commit(true); }
+        else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(false); }
+      });
     }
 
     function saveLightboxImage() {
@@ -5370,15 +5502,21 @@ const webAppHTML = `<!doctype html>
       // Strokes are allowed to extend past the original viewBox (overflow
       // is set to visible in openLightbox). Expand the export viewBox to
       // cover every annotation so nothing gets cropped in the PNG.
+      // Use getBoundingClientRect + screen→user-space so groups with
+      // transforms (post-its) are measured in the right coordinate space.
       const liveMarks = svg.querySelectorAll(".lb-annotation");
       for (const mark of liveMarks) {
-        let bb = null;
-        try { bb = mark.getBBox(); } catch (e) {}
-        if (!bb) continue;
-        if (bb.x < minX) minX = bb.x;
-        if (bb.y < minY) minY = bb.y;
-        if (bb.x + bb.width > maxX) maxX = bb.x + bb.width;
-        if (bb.y + bb.height > maxY) maxY = bb.y + bb.height;
+        let r = null;
+        try { r = mark.getBoundingClientRect(); } catch (e) {}
+        if (!r || (!r.width && !r.height)) continue;
+        const tl = screenToSVGUserSpace(svg, r.left, r.top);
+        const br2 = screenToSVGUserSpace(svg, r.right, r.bottom);
+        const x1 = Math.min(tl.x, br2.x), y1 = Math.min(tl.y, br2.y);
+        const x2 = Math.max(tl.x, br2.x), y2 = Math.max(tl.y, br2.y);
+        if (x1 < minX) minX = x1;
+        if (y1 < minY) minY = y1;
+        if (x2 > maxX) maxX = x2;
+        if (y2 > maxY) maxY = y2;
       }
       // Small margin so strokes that just kiss the edge aren't shaved.
       const margin = Math.max(8, Math.round(Math.min(baseW, baseH) * 0.01));
@@ -5451,14 +5589,18 @@ const webAppHTML = `<!doctype html>
       _lbAnnoActive = null;
       _lbDrawMode = false;
       _lbEraserMode = false;
+      _lbPostitMode = false;
       _lbHistory = [];
       _lbRedoStack = [];
       const drawBtn = document.getElementById("lbAnnoDrawBtn");
       if (drawBtn) drawBtn.classList.remove("active");
       const eraseBtn = document.getElementById("lbAnnoEraseBtn");
       if (eraseBtn) eraseBtn.classList.remove("active");
+      const postitBtn = document.getElementById("lbAnnoPostitBtn");
+      if (postitBtn) postitBtn.classList.remove("active");
       lightboxEl.classList.remove("draw-mode");
       lightboxEl.classList.remove("eraser-mode");
+      lightboxEl.classList.remove("postit-mode");
       setDrawControlsVisible(false);
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
@@ -5509,6 +5651,24 @@ const webAppHTML = `<!doctype html>
         }
         // Eraser is on but the click missed a stroke — do nothing (don't
         // start a draw stroke or pan).
+        return;
+      }
+      if (_lbPostitMode && event.button === 0) {
+        const existing = event.target.closest && event.target.closest(".lb-postit");
+        if (existing) {
+          event.preventDefault();
+          event.stopPropagation();
+          openPostitEditor(existing);
+          return;
+        }
+        const svg = getAnnotationSVG();
+        if (!svg) return;
+        const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
+        const g = createPostit(svg, p.x, p.y, "");
+        recordAnnoAction({ type: "add", strokes: [g] });
+        event.preventDefault();
+        event.stopPropagation();
+        openPostitEditor(g);
         return;
       }
       if (_lbDrawMode && event.button === 0) {
@@ -5601,6 +5761,7 @@ const webAppHTML = `<!doctype html>
       else if (action === "announdo") undoAnnotation();
       else if (action === "annoredo") redoAnnotation();
       else if (action === "annoerase") toggleEraserMode();
+      else if (action === "annopostit") togglePostitMode();
       else if (action === "annoclear") clearAnnotations();
       else if (action === "annosave") saveLightboxImage();
     };
