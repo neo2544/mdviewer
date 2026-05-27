@@ -1412,6 +1412,11 @@ const webAppHTML = `<!doctype html>
       overflow-y: auto;
       padding-right: 4px;
     }
+    .split-preview [data-source-line] { transition: background 0.18s ease; border-radius: 6px; }
+    .split-preview .source-line-active {
+      background: color-mix(in oklab, var(--accent) 14%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent) inset;
+    }
     @media (max-width: 760px) {
       .split-view { flex-direction: column; }
       .split-editor, .split-preview { flex: 1 1 auto; }
@@ -3804,9 +3809,60 @@ const webAppHTML = `<!doctype html>
         const splitPrevEl = previewBodyEl.querySelector(".split-preview");
         editorEl.value = state.editDraft || activeData.content || "";
         // initial render of the right pane
-        await renderMarkdownInto(splitPrevEl, editorEl.value, activeData.kind);
+        await renderMarkdownInto(splitPrevEl, editorEl.value, activeData.kind, { trackSourceLines: true });
         editorEl.focus({ preventScroll: true });
         editorEl.setSelectionRange(editorEl.value.length, editorEl.value.length);
+
+        // ---- Cursor-driven highlight & follow scroll -------------------
+        // Compute the editor caret's line and add .source-line-active to
+        // the matching block in the preview. The block is scrolled so its
+        // mid-height sits roughly at the preview's mid-height.
+        function caretLine() {
+          const pos = editorEl.selectionStart || 0;
+          return editorEl.value.slice(0, pos).split("\n").length - 1;
+        }
+        function findBlockForLine(line) {
+          const nodes = splitPrevEl.querySelectorAll("[data-source-line]");
+          let last = null;
+          for (const n of nodes) {
+            const l = parseInt(n.getAttribute("data-source-line"), 10);
+            if (isNaN(l)) continue;
+            if (l <= line) last = n;
+            else break;
+          }
+          return last;
+        }
+        function scrollPreviewBlockToCenter(el) {
+          const cRect = splitPrevEl.getBoundingClientRect();
+          const eRect = el.getBoundingClientRect();
+          const elTopRel = eRect.top - cRect.top + splitPrevEl.scrollTop;
+          const target = elTopRel - splitPrevEl.clientHeight / 2 + eRect.height / 2;
+          // Suppress the proportional scroll-sync handler so it doesn't
+          // bounce the editor in response to this programmatic move.
+          splitSyncSource = splitPrevEl;
+          splitPrevEl.scrollTop = Math.max(0, target);
+          requestAnimationFrame(() => { splitSyncSource = null; });
+        }
+        function syncCursorHighlight() {
+          if (!splitPrevEl) return;
+          const line = caretLine();
+          const el = findBlockForLine(line);
+          const prev = splitPrevEl.querySelectorAll(".source-line-active");
+          for (const p of prev) p.classList.remove("source-line-active");
+          if (el) {
+            el.classList.add("source-line-active");
+            scrollPreviewBlockToCenter(el);
+          }
+        }
+        // Hook the standard cursor-movement events: keyup catches arrow
+        // keys / Enter; mouseup catches click placement; focus catches
+        // returning to the editor.
+        editorEl.addEventListener("keyup", syncCursorHighlight);
+        editorEl.addEventListener("mouseup", syncCursorHighlight);
+        editorEl.addEventListener("focus", syncCursorHighlight);
+        // Initial sync once the layout settles.
+        requestAnimationFrame(syncCursorHighlight);
+
         let splitRenderTimer = null;
         editorEl.addEventListener("input", (event) => {
           state.editDraft = event.target.value;
@@ -3814,8 +3870,9 @@ const webAppHTML = `<!doctype html>
           updateEditorButtons();
           statusTextEl.textContent = state.editDirty ? "Unsaved changes" : "Editing";
           clearTimeout(splitRenderTimer);
-          splitRenderTimer = setTimeout(() => {
-            renderMarkdownInto(splitPrevEl, event.target.value, activeData.kind);
+          splitRenderTimer = setTimeout(async () => {
+            await renderMarkdownInto(splitPrevEl, event.target.value, activeData.kind, { trackSourceLines: true });
+            syncCursorHighlight();
           }, 150);
         });
 
@@ -3851,12 +3908,46 @@ const webAppHTML = `<!doctype html>
       await renderPreview(activeData);
     }
 
-    async function renderMarkdownInto(container, content, kind) {
+    function annotateSourceLines(container, source) {
+      // Map top-level marked tokens (non-space) back to source line numbers
+      // and stamp the matching top-level rendered children. Best-effort:
+      // marked's token order matches its render output for normal block
+      // tokens, which is good enough for the split-view cursor follow.
+      try {
+        const tokens = marked.lexer(source || "");
+        const lines = [];
+        let cursor = 0;
+        for (const tok of tokens) {
+          if (!tok.raw) continue;
+          if (tok.type === "space") {
+            cursor += tok.raw.length;
+            continue;
+          }
+          const idx = source.indexOf(tok.raw, cursor);
+          let line;
+          if (idx >= 0) {
+            line = source.slice(0, idx).split("\n").length - 1;
+            cursor = idx + tok.raw.length;
+          } else {
+            line = source.slice(0, cursor).split("\n").length - 1;
+          }
+          lines.push(line);
+        }
+        const blocks = container.children;
+        for (let i = 0; i < blocks.length && i < lines.length; i++) {
+          blocks[i].setAttribute("data-source-line", String(lines[i]));
+        }
+      } catch (e) { /* annotation is best-effort */ }
+    }
+
+    async function renderMarkdownInto(container, content, kind, options) {
+      options = options || {};
       if (kind !== "markdown" && kind !== "text") {
         container.textContent = content || "";
         return;
       }
       container.innerHTML = marked.parse(content || "");
+      if (options.trackSourceLines) annotateSourceLines(container, content || "");
       // mermaid fenced code blocks: wrap and run
       const blocks = container.querySelectorAll("pre code.language-mermaid");
       for (const code of blocks) {
@@ -3866,6 +3957,9 @@ const webAppHTML = `<!doctype html>
         host.className = "mermaid";
         host.textContent = code.textContent;
         wrap.appendChild(host);
+        // Preserve the source-line marker the wrapper now stands in for.
+        const srcLine = code.parentElement.getAttribute("data-source-line");
+        if (srcLine !== null) wrap.setAttribute("data-source-line", srcLine);
         code.parentElement.replaceWith(wrap);
       }
       await new Promise((r) => requestAnimationFrame(r));
