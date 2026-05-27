@@ -1978,6 +1978,41 @@ const webAppHTML = `<!doctype html>
       padding: 0;
       box-shadow: 0 8px 24px rgba(0,0,0,0.35);
     }
+    .lightbox-toolbar .draw-only[hidden] { display: none !important; }
+    .lightbox-toolbar .lb-anno-color-label {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      background: color-mix(in oklab, var(--panel) 92%, black);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      cursor: pointer;
+      overflow: hidden;
+    }
+    .lightbox-toolbar .lb-anno-color-label input[type="color"] {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+    .lightbox-toolbar .lb-anno-opacity-label {
+      display: grid;
+      place-items: center;
+      height: 38px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      background: color-mix(in oklab, var(--panel) 92%, black);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .lightbox-toolbar .lb-anno-opacity-label input[type="range"] {
+      width: 84px;
+      cursor: pointer;
+    }
     .lightbox-toolbar button:hover {
       background: color-mix(in oklab, var(--accent) 35%, var(--panel));
     }
@@ -2372,6 +2407,14 @@ const webAppHTML = `<!doctype html>
       <button type="button" data-action="reset" title="Reset (Double-click)">⤢</button>
       <button type="button" data-action="zoom-in" title="Zoom in">+</button>
       <button type="button" data-action="annodraw" id="lbAnnoDrawBtn" title="Toggle draw mode (left-drag draws)">✎</button>
+      <button type="button" class="draw-only" data-action="announdo" id="lbAnnoUndoBtn" title="Undo last stroke" hidden>↶</button>
+      <button type="button" class="draw-only" data-action="annoredo" id="lbAnnoRedoBtn" title="Redo last undone stroke" hidden>↷</button>
+      <label class="draw-only lb-anno-color-label" id="lbAnnoColorLabel" title="Stroke color" hidden>
+        <input type="color" id="lbAnnoColor" value="#ff3b30" />
+      </label>
+      <label class="draw-only lb-anno-opacity-label" id="lbAnnoOpacityLabel" title="Stroke opacity" hidden>
+        <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="1" />
+      </label>
       <button type="button" data-action="annoclear" title="Clear annotations">🧹</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
     </div>
@@ -2786,6 +2829,7 @@ const webAppHTML = `<!doctype html>
     }
 
     function describeEntryMeta(entry) {
+      if (entry.name === "..") return entry.path;
       const flag = state.fileFlags[entry.path] || "";
       const lines = [];
       // Filename first so a truncated row in the list still reveals its
@@ -4116,13 +4160,13 @@ const webAppHTML = `<!doctype html>
     filesEl.addEventListener("pointerover", (event) => {
       const row = event.target.closest(".file[data-meta]");
       if (!row) return;
-      showTooltip(row.dataset.meta, event.clientX, event.clientY);
+      showTooltip(row.dataset.meta, event.clientX, event.clientY, { singleLine: !row.dataset.meta.includes("\n") });
     });
 
     filesEl.addEventListener("pointermove", (event) => {
       const row = event.target.closest(".file[data-meta]");
       if (!row || !floatingTooltipEl.classList.contains("visible")) return;
-      showTooltip(row.dataset.meta, event.clientX, event.clientY);
+      showTooltip(row.dataset.meta, event.clientX, event.clientY, { singleLine: !row.dataset.meta.includes("\n") });
     });
 
     filesEl.addEventListener("pointerout", (event) => {
@@ -5049,6 +5093,9 @@ const webAppHTML = `<!doctype html>
     var _lbAnnoActive = null;
     var _lbAnnoStartedAt = 0;
     var _lbDrawMode = false;
+    var _lbDrawColor = "#ff3b30";
+    var _lbDrawOpacity = 1.0;
+    var _lbAnnoUndoStack = []; // removed strokes available for redo
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
@@ -5149,16 +5196,38 @@ const webAppHTML = `<!doctype html>
       const marks = svg.querySelectorAll(".lb-annotation");
       for (const el of marks) el.remove();
       _lbAnnoActive = null;
+      _lbAnnoUndoStack = [];
+    }
+
+    function undoAnnotation() {
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const marks = svg.querySelectorAll(".lb-annotation");
+      if (!marks.length) return;
+      const last = marks[marks.length - 1];
+      _lbAnnoUndoStack.push(last);
+      last.remove();
+    }
+
+    function redoAnnotation() {
+      if (!_lbAnnoUndoStack.length) return;
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const poly = _lbAnnoUndoStack.pop();
+      svg.appendChild(poly);
     }
 
     function startAnnotationStroke(event) {
       const svg = getAnnotationSVG();
       if (!svg) return;
+      // New stroke invalidates the redo stack — same as every editor.
+      _lbAnnoUndoStack = [];
       const ns = "http://www.w3.org/2000/svg";
       const poly = document.createElementNS(ns, "polyline");
       poly.setAttribute("class", "lb-annotation");
       poly.setAttribute("fill", "none");
-      poly.setAttribute("stroke", "#ff3b30");
+      poly.setAttribute("stroke", _lbDrawColor);
+      poly.setAttribute("stroke-opacity", String(_lbDrawOpacity));
       poly.setAttribute("stroke-width", "3");
       poly.setAttribute("stroke-linecap", "round");
       poly.setAttribute("stroke-linejoin", "round");
@@ -5188,11 +5257,20 @@ const webAppHTML = `<!doctype html>
       try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
     }
 
+    function setDrawControlsVisible(visible) {
+      const els = document.querySelectorAll(".lightbox-toolbar .draw-only");
+      for (const el of els) {
+        if (visible) el.removeAttribute("hidden");
+        else el.setAttribute("hidden", "");
+      }
+    }
+
     function toggleDrawMode() {
       _lbDrawMode = !_lbDrawMode;
       const btn = document.getElementById("lbAnnoDrawBtn");
       if (btn) btn.classList.toggle("active", _lbDrawMode);
       lightboxEl.classList.toggle("draw-mode", _lbDrawMode);
+      setDrawControlsVisible(_lbDrawMode);
     }
 
     function openLightbox(node) {
@@ -5231,6 +5309,7 @@ const webAppHTML = `<!doctype html>
       const drawBtn = document.getElementById("lbAnnoDrawBtn");
       if (drawBtn) drawBtn.classList.remove("active");
       lightboxEl.classList.remove("draw-mode");
+      setDrawControlsVisible(false);
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
       document.body.classList.remove("lightbox-open");
@@ -5356,8 +5435,24 @@ const webAppHTML = `<!doctype html>
       else if (action === "zoom-out") lightboxZoomAt(cx, cy, 1 / 1.25);
       else if (action === "reset") fitLightboxContent();
       else if (action === "annodraw") toggleDrawMode();
+      else if (action === "announdo") undoAnnotation();
+      else if (action === "annoredo") redoAnnotation();
       else if (action === "annoclear") clearAnnotations();
     });
+
+    const lbAnnoColorInput = document.getElementById("lbAnnoColor");
+    if (lbAnnoColorInput) {
+      lbAnnoColorInput.addEventListener("input", (event) => {
+        _lbDrawColor = event.target.value || "#ff3b30";
+      });
+    }
+    const lbAnnoOpacityInput = document.getElementById("lbAnnoOpacity");
+    if (lbAnnoOpacityInput) {
+      lbAnnoOpacityInput.addEventListener("input", (event) => {
+        const v = parseFloat(event.target.value);
+        _lbDrawOpacity = isNaN(v) ? 1.0 : v;
+      });
+    }
 
     document.addEventListener("keydown", (event) => {
       if (lightboxEl.hidden) return;
