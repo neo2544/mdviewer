@@ -4647,24 +4647,13 @@ const webAppHTML = `<!doctype html>
       if (!target) return;
       if (target.kind === "svg") {
         const svg = target.el;
-        // Idempotency guard: captureLightboxNatural rewrites the viewBox to
-        // a tight crop in PIXEL coords, which warps the CTM for subsequent
-        // calls. Cache the ORIGINAL viewBox on first run and restore it
-        // before every measurement so each fit starts from the same frame.
-        if (svg.dataset.lbOriginalViewBox === undefined) {
-          svg.dataset.lbOriginalViewBox = svg.getAttribute("viewBox") || "";
-          svg.dataset.lbOriginalPreserve = svg.getAttribute("preserveAspectRatio") || "";
-        } else {
-          if (svg.dataset.lbOriginalViewBox) {
-            svg.setAttribute("viewBox", svg.dataset.lbOriginalViewBox);
-          } else {
-            svg.removeAttribute("viewBox");
-          }
-          if (svg.dataset.lbOriginalPreserve) {
-            svg.setAttribute("preserveAspectRatio", svg.dataset.lbOriginalPreserve);
-          } else {
-            svg.removeAttribute("preserveAspectRatio");
-          }
+        // Idempotency guard: this function rewrites the SVG viewBox to a
+        // tight crop, which changes the CTM for subsequent measurements.
+        // Running it more than once produces inconsistent crops. Once we
+        // have a cached natural size, reuse it — every fit/reset uses the
+        // same baseline.
+        if (svg.dataset.lbNaturalW && svg.dataset.lbNaturalH) {
+          return;
         }
         let bb = null;
         // Strategy 1: union of visible leaf-element pixel bboxes
