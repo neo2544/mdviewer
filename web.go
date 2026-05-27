@@ -4923,6 +4923,10 @@ const webAppHTML = `<!doctype html>
     });
 
     lightboxStageEl.addEventListener("dblclick", (event) => {
+      // Alt/Option held: this gesture belongs to the text-selection flow
+      // (user is double-clicking a word in the diagram to select it).
+      // Skip the reset and let the browser handle the word selection.
+      if (event.altKey || state.altKey) return;
       event.preventDefault();
       fitLightboxContent();
     });
