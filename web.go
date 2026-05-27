@@ -2961,6 +2961,11 @@ const webAppHTML = `<!doctype html>
     }
 
     async function loadDir(dir = "", options = {}) {
+      // Silent polls + keepSelection (auto-refresh of the file list) must
+      // not pop a confirm. Only user-initiated folder navigation that
+      // would clear the current file selection triggers the guard.
+      const userNav = !options.silent && options.keepSelection !== true;
+      if (userNav && !confirmDiscardDirty()) return;
       const params = new URLSearchParams();
       if (dir) params.set("dir", dir);
       if (state.showHidden) params.set("show_hidden", "1");
@@ -3413,7 +3418,18 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    // confirmDiscardDirty returns true when it's safe to navigate away
+    // (no dirty draft, or the user confirmed losing changes).
+    function confirmDiscardDirty() {
+      if (!state.editDirty) return true;
+      return window.confirm(
+        "저장되지 않은 변경 사항이 있습니다.\n\n계속 진행하면 변경 내용이 사라집니다. 정말 이동하시겠어요?"
+      );
+    }
+
     async function selectFile(path, options = {}) {
+      // Same-file (re-select) skips the guard; only changing files matters.
+      if (path !== state.selectedPath && !confirmDiscardDirty()) return;
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
       if (!state.cwd || !path.startsWith(state.cwd + "/")) {
@@ -4023,6 +4039,16 @@ const webAppHTML = `<!doctype html>
     window.addEventListener("popstate", async (event) => {
       const route = event.state || routeFromLocation();
       await restoreRoute(route);
+    });
+
+    // Browser refresh / tab close: warn if there are unsaved edits.
+    // Modern browsers ignore the custom string and show their own dialog,
+    // but the returnValue must be set to a truthy string to trigger it.
+    window.addEventListener("beforeunload", (event) => {
+      if (!state.editDirty) return;
+      event.preventDefault();
+      event.returnValue = "저장되지 않은 변경 사항이 있습니다.";
+      return event.returnValue;
     });
 
     collapseSidebarEl.onclick = () => setSidebarCollapsed(!state.sidebarCollapsed);
