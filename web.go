@@ -1401,16 +1401,44 @@ const webAppHTML = `<!doctype html>
       display: flex;
       position: relative;
     }
-    .editor-line-highlight {
-      position: absolute;
-      pointer-events: none;
+    /* Backdrop mirrors the textarea contents one-for-one so we can paint
+       a background color over the active source line without trying to
+       compute pixel-perfect overlay coordinates (wrap, scrollbar gutter,
+       and font-metric differences kept biting that approach). The
+       textarea sits on top, fully transparent, so the caret + text show
+       through and the highlight underneath always lines up with the
+       text the browser actually rendered. */
+    .split-editor textarea.editor {
+      position: relative;
       z-index: 2;
-      background: color-mix(in oklab, var(--accent) 14%, transparent);
-      box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent) inset;
-      border-radius: 4px;
-      transition: top 0.1s ease, height 0.1s ease;
+      background: transparent !important;
     }
-    .editor-line-highlight[hidden] { display: none; }
+    .editor-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      margin: 0;
+      font: 14px/1.6 ui-monospace, SFMono-Regular, monospace;
+      padding: 18px;
+      border: 1px solid transparent;
+      border-radius: 16px;
+      background: color-mix(in oklab, var(--code) 92%, black);
+      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      color: transparent;
+      overflow-y: scroll;
+      overflow-x: hidden;
+      scrollbar-width: none;
+    }
+    .editor-backdrop::-webkit-scrollbar { display: none; }
+    .editor-backdrop .editor-active-line {
+      background: color-mix(in oklab, var(--accent) 22%, transparent);
+      box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent);
+      border-radius: 2px;
+    }
     .split-editor textarea.editor {
       flex: 1 1 auto;
       width: 100%;
@@ -3854,14 +3882,14 @@ const webAppHTML = `<!doctype html>
         previewBodyEl.innerHTML =
           '<div class="split-view">' +
           '<div class="split-editor">' +
-            '<div class="editor-line-highlight" hidden></div>' +
+            '<div class="editor-backdrop" aria-hidden="true"></div>' +
             '<textarea class="editor" spellcheck="false"></textarea>' +
           '</div>' +
           '<div class="split-preview"></div>' +
           '</div>';
         const editorEl = previewBodyEl.querySelector(".editor");
         const splitPrevEl = previewBodyEl.querySelector(".split-preview");
-        const editorHighlightEl = previewBodyEl.querySelector(".editor-line-highlight");
+        const editorBackdropEl = previewBodyEl.querySelector(".editor-backdrop");
         editorEl.value = state.editDraft || activeData.content || "";
         // initial render of the right pane
         await renderMarkdownInto(splitPrevEl, editorEl.value, activeData.kind, { trackSourceLines: true });
@@ -3905,53 +3933,37 @@ const webAppHTML = `<!doctype html>
           splitPrevEl.scrollTop = next;
           requestAnimationFrame(() => { _programmaticScroll = false; });
         }
-        // Mirror-div caret position measurement — textareas don't expose
-        // pixel coordinates for the caret, and a logical-line × line-height
-        // estimate breaks under soft wrapping (long lines that wrap visually
-        // but share one source line). Copy enough computed styles onto a
-        // hidden div, drop a marker span at the caret offset, and read the
-        // span's offsetTop. This handles wrapping correctly.
-        const _caretMirror = document.createElement("div");
-        _caretMirror.setAttribute("aria-hidden", "true");
-        _caretMirror.style.position = "absolute";
-        _caretMirror.style.visibility = "hidden";
-        _caretMirror.style.top = "0";
-        _caretMirror.style.left = "-9999px";
-        _caretMirror.style.whiteSpace = "pre-wrap";
-        _caretMirror.style.wordWrap = "break-word";
-        _caretMirror.style.overflowWrap = "break-word";
-        document.body.appendChild(_caretMirror);
-        // Only copy typography from the textarea. Width / padding / border
-        // are forced below so the mirror's CONTENT area matches the
-        // textarea's content area exactly — copying computed width drifted
-        // by the scrollbar gutter when the textarea overflowed vertically,
-        // which made long lines wrap one row later in the mirror than in
-        // the textarea, throwing every offsetTop off.
-        const _mirrorProps = [
-          "fontStyle","fontVariant","fontWeight","fontStretch","fontSize","fontSizeAdjust","lineHeight","fontFamily","textAlign","textTransform","textIndent","textDecoration","letterSpacing","wordSpacing","tabSize","MozTabSize",
-        ];
-        function _syncMirrorStyles(cs) {
-          for (const p of _mirrorProps) _caretMirror.style[p] = cs[p];
-          // Force the mirror's content area to exactly match the
-          // textarea's — clientWidth excludes the scrollbar, and we
-          // subtract padding because we'll set our own padding to 0.
-          const pl = parseFloat(cs.paddingLeft) || 0;
-          const pr = parseFloat(cs.paddingRight) || 0;
-          const contentWidth = Math.max(0, editorEl.clientWidth - pl - pr);
-          _caretMirror.style.boxSizing = "content-box";
-          _caretMirror.style.width = contentWidth + "px";
-          _caretMirror.style.padding = "0";
-          _caretMirror.style.border = "0";
+        // ── editor active-line highlight via backdrop ──────────────
+        // Earlier passes tried to position an overlay band with a mirror
+        // measuring marker.offsetTop. That broke whenever wrapping /
+        // padding / scrollbar gutters differed between mirror and
+        // textarea (most visibly on files with Korean text or tables).
+        // Switch to a backdrop technique: a <div> behind the textarea
+        // duplicates the text 1:1, the active source line is wrapped
+        // in <span class="editor-active-line">, and the browser does
+        // the wrapping math for us. The textarea on top is transparent
+        // so the highlight under it always lines up with the rendered
+        // text the user sees.
+        function escapeForBackdrop(s) {
+          return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
-        function measureYAtOffset(offset) {
-          const cs = getComputedStyle(editorEl);
-          _syncMirrorStyles(cs);
-          _caretMirror.textContent = editorEl.value.substring(0, offset);
-          const marker = document.createElement("span");
-          // Non-empty marker so a trailing newline doesn't collapse.
-          marker.textContent = "​";
-          _caretMirror.appendChild(marker);
-          return marker.offsetTop;
+        function updateEditorBackdrop() {
+          if (!editorBackdropEl) return;
+          const value = editorEl.value;
+          const activeLine = caretLine();
+          const lines = value.split("\n");
+          const parts = new Array(lines.length);
+          for (let i = 0; i < lines.length; i++) {
+            // Empty rows still need *something* with width or the
+            // background won't paint — use a regular space.
+            const safe = lines[i].length ? escapeForBackdrop(lines[i]) : " ";
+            parts[i] = (i === activeLine)
+              ? '<span class="editor-active-line">' + safe + '</span>'
+              : safe;
+          }
+          editorBackdropEl.innerHTML = parts.join("\n");
+          editorBackdropEl.scrollTop = editorEl.scrollTop;
+          editorBackdropEl.scrollLeft = editorEl.scrollLeft;
         }
         function offsetOfLineStart(line) {
           const lines = editorEl.value.split("\n");
@@ -3959,44 +3971,11 @@ const webAppHTML = `<!doctype html>
           for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
           return pos;
         }
-        function updateEditorLineHighlight() {
-          // Single-line band under the caret. Stays the same height
-          // regardless of how large the block is on the preview side, so
-          // huge blocks (mermaid, tables, long code fences) never produce
-          // a viewport-sized smear that hides where the user is editing.
-          if (!editorHighlightEl) return;
-          const cs = getComputedStyle(editorEl);
-          const lineHeight = parseFloat(cs.lineHeight) || 22;
-          const borderTop = parseFloat(cs.borderTopWidth) || 0;
-          const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
-          const paddingTop = parseFloat(cs.paddingTop) || 0;
-          const paddingBottom = parseFloat(cs.paddingBottom) || 0;
-          const paddingLeft = parseFloat(cs.paddingLeft) || 0;
-          const paddingRight = parseFloat(cs.paddingRight) || 0;
-          // measureYAtOffset is taken in the textarea's CONTENT coordinate
-          // space (the mirror has padding/border = 0). To place the band
-          // over the same row inside .split-editor we must offset by the
-          // textarea's border AND padding-top.
-          const yTop = measureYAtOffset(editorEl.selectionStart || 0);
-          const topRel = yTop - editorEl.scrollTop;
-          const innerHeight = editorEl.clientHeight - paddingTop - paddingBottom;
-          if (topRel + lineHeight < 0 || topRel > innerHeight) {
-            editorHighlightEl.hidden = true;
-            return;
-          }
-          editorHighlightEl.hidden = false;
-          editorHighlightEl.style.top = (borderTop + paddingTop + topRel) + "px";
-          editorHighlightEl.style.left = (borderLeft + paddingLeft) + "px";
-          editorHighlightEl.style.width = (editorEl.clientWidth - paddingLeft - paddingRight) + "px";
-          editorHighlightEl.style.height = lineHeight + "px";
-        }
 
         function syncCursorHighlight() {
-          // Editor side always shows the single line under the caret so the
-          // user can always see exactly where they're typing — even when
-          // the caret sits inside a 50-line mermaid block or table that
-          // would otherwise produce a band the height of the viewport.
-          updateEditorLineHighlight();
+          // Editor side: repaint the backdrop with the active-line span
+          // around the caret's source line.
+          updateEditorBackdrop();
           if (!splitPrevEl) return;
           const line = caretLine();
           // Preview side shows the WHOLE block that contains the caret —
@@ -4031,6 +4010,10 @@ const webAppHTML = `<!doctype html>
           state.editDirty = state.editDraft !== state.selectedContent;
           updateEditorButtons();
           statusTextEl.textContent = state.editDirty ? "Unsaved changes" : "Editing";
+          // Repaint the backdrop on every keystroke so the active-line
+          // highlight tracks live edits before the (debounced) preview
+          // re-render fires.
+          updateEditorBackdrop();
           clearTimeout(splitRenderTimer);
           splitRenderTimer = setTimeout(async () => {
             await renderMarkdownInto(splitPrevEl, event.target.value, activeData.kind, { trackSourceLines: true });
@@ -4059,13 +4042,16 @@ const webAppHTML = `<!doctype html>
           requestAnimationFrame(() => { splitSyncSource = null; });
         }
         editorEl.addEventListener("scroll", () => {
-          updateEditorLineHighlight();
+          // Keep the backdrop's scroll glued to the textarea's so the
+          // highlight band tracks visible rows as the user scrolls.
+          editorBackdropEl.scrollTop = editorEl.scrollTop;
+          editorBackdropEl.scrollLeft = editorEl.scrollLeft;
           if (_programmaticScroll) return;
           syncScrollFrom(editorEl, splitPrevEl);
         });
-        // The textarea may resize when the splitter is dragged; keep the
-        // highlight band sized to match.
-        const resizeObs = new ResizeObserver(() => updateEditorLineHighlight());
+        // The textarea may resize when the splitter is dragged; rebuild
+        // the backdrop so wrapping recomputes against the new width.
+        const resizeObs = new ResizeObserver(() => updateEditorBackdrop());
         resizeObs.observe(editorEl);
         splitPrevEl.addEventListener("scroll", () => {
           if (_programmaticScroll) return;
@@ -4095,7 +4081,8 @@ const webAppHTML = `<!doctype html>
           editorEl.scrollLeft = sx;
           editorEl.scrollTop = sy;
           const lineHeight = parseFloat(getComputedStyle(editorEl).lineHeight) || 22;
-          const caretY = measureYAtOffset(pos);
+          const paddingTopPx = parseFloat(getComputedStyle(editorEl).paddingTop) || 0;
+          const caretY = line * lineHeight + paddingTopPx;
           const view0 = editorEl.scrollTop;
           const view1 = view0 + editorEl.clientHeight;
           if (caretY < view0) {
@@ -4106,15 +4093,12 @@ const webAppHTML = `<!doctype html>
           syncCursorHighlight();
         });
 
-        // Tear down the mirror element when the lightbox / preview leaves
-        // split mode, so we don't leak DOM nodes if the user toggles modes.
-        const teardown = () => {
-          if (_caretMirror && _caretMirror.parentNode) _caretMirror.parentNode.removeChild(_caretMirror);
-        };
+        // Disconnect the resize observer when the editor leaves the DOM
+        // so we don't keep firing updateEditorBackdrop on a stale node.
         previewBodyEl.addEventListener("DOMNodeRemoved", function once(e) {
           if (e.target === editorEl || (e.target.contains && e.target.contains(editorEl))) {
             previewBodyEl.removeEventListener("DOMNodeRemoved", once);
-            teardown();
+            try { resizeObs.disconnect(); } catch (e) {}
           }
         });
         return;
