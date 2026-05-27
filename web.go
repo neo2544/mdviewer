@@ -5585,7 +5585,31 @@ const webAppHTML = `<!doctype html>
       });
     }
 
+    function hasAnnotations() {
+      const svg = getAnnotationSVG();
+      if (!svg) return false;
+      return svg.querySelector(".lb-annotation") !== null;
+    }
+
     function closeLightbox() {
+      // Mid-stroke close: just drop it, no confirm — the user is clearly
+      // already trying to close.
+      _lbAnnoActive = null;
+      if (hasAnnotations()) {
+        const ok = window.confirm("주석이 있어요. 닫으면 저장하지 않은 그림은 사라집니다.\n💾로 PNG 저장 후 닫으시겠어요?\n\n[확인] 지금 저장 → 닫기\n[취소] 그냥 닫기");
+        if (ok) {
+          // Bake to PNG, then close once the download is triggered.
+          saveLightboxImage();
+          // Defer close so the synthesized <a>.click() runs before the
+          // stage is wiped.
+          setTimeout(closeLightboxNow, 60);
+          return;
+        }
+      }
+      closeLightboxNow();
+    }
+
+    function closeLightboxNow() {
       _lbAnnoActive = null;
       _lbDrawMode = false;
       _lbEraserMode = false;
