@@ -3898,27 +3898,59 @@ const webAppHTML = `<!doctype html>
           splitPrevEl.scrollTop = Math.max(0, target);
           requestAnimationFrame(() => { splitSyncSource = null; });
         }
+        // Mirror-div caret position measurement — textareas don't expose
+        // pixel coordinates for the caret, and a logical-line × line-height
+        // estimate breaks under soft wrapping (long lines that wrap visually
+        // but share one source line). Copy enough computed styles onto a
+        // hidden div, drop a marker span at the caret offset, and read the
+        // span's offsetTop. This handles wrapping correctly.
+        const _caretMirror = document.createElement("div");
+        _caretMirror.setAttribute("aria-hidden", "true");
+        _caretMirror.style.position = "absolute";
+        _caretMirror.style.visibility = "hidden";
+        _caretMirror.style.top = "0";
+        _caretMirror.style.left = "-9999px";
+        _caretMirror.style.whiteSpace = "pre-wrap";
+        _caretMirror.style.wordWrap = "break-word";
+        _caretMirror.style.overflowWrap = "break-word";
+        document.body.appendChild(_caretMirror);
+        const _mirrorProps = [
+          "boxSizing","width","borderTopWidth","borderRightWidth","borderBottomWidth","borderLeftWidth","borderStyle","paddingTop","paddingRight","paddingBottom","paddingLeft","fontStyle","fontVariant","fontWeight","fontStretch","fontSize","fontSizeAdjust","lineHeight","fontFamily","textAlign","textTransform","textIndent","textDecoration","letterSpacing","wordSpacing","tabSize","MozTabSize",
+        ];
+        function measureCaretY() {
+          const cs = getComputedStyle(editorEl);
+          for (const p of _mirrorProps) _caretMirror.style[p] = cs[p];
+          const before = editorEl.value.substring(0, editorEl.selectionStart || 0);
+          _caretMirror.textContent = before;
+          const marker = document.createElement("span");
+          // A non-empty marker prevents a trailing newline from collapsing.
+          marker.textContent = "​";
+          _caretMirror.appendChild(marker);
+          const top = marker.offsetTop;
+          const lineHeight = parseFloat(cs.lineHeight) || 22;
+          return { top, lineHeight };
+        }
+
         function updateEditorLineHighlight() {
           if (!editorHighlightEl) return;
           const cs = getComputedStyle(editorEl);
-          const lineHeight = parseFloat(cs.lineHeight) || 18;
-          const paddingTop = parseFloat(cs.paddingTop) || 0;
-          const paddingLeft = parseFloat(cs.paddingLeft) || 0;
-          const paddingRight = parseFloat(cs.paddingRight) || 0;
           const borderTop = parseFloat(cs.borderTopWidth) || 0;
           const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
-          const lineIdx = caretLine();
-          const lineTopAbs = lineIdx * lineHeight;
-          const yInContent = lineTopAbs - editorEl.scrollTop;
-          // Visible content area is roughly [0, clientHeight - paddingTop -
-          // paddingBottom]. Hide the highlight band when the caret line
-          // scrolls outside that range so it doesn't smear over the padding.
-          if (yInContent < 0 || yInContent > editorEl.clientHeight - lineHeight) {
+          const paddingLeft = parseFloat(cs.paddingLeft) || 0;
+          const paddingRight = parseFloat(cs.paddingRight) || 0;
+          const { top, lineHeight } = measureCaretY();
+          // top is measured from the mirror's content origin, which lines
+          // up with the textarea's content origin (i.e. it already includes
+          // paddingTop). Subtract scrollTop, then translate into
+          // .split-editor coords by adding the textarea's border.
+          const yInContent = top - editorEl.scrollTop;
+          const innerHeight = editorEl.clientHeight; // includes padding, not border
+          if (yInContent + lineHeight < 0 || yInContent > innerHeight) {
             editorHighlightEl.hidden = true;
             return;
           }
           editorHighlightEl.hidden = false;
-          editorHighlightEl.style.top = (borderTop + paddingTop + yInContent) + "px";
+          editorHighlightEl.style.top = (borderTop + yInContent) + "px";
           editorHighlightEl.style.left = (borderLeft + paddingLeft) + "px";
           editorHighlightEl.style.width = (editorEl.clientWidth - paddingLeft - paddingRight) + "px";
           editorHighlightEl.style.height = lineHeight + "px";
@@ -3988,6 +4020,38 @@ const webAppHTML = `<!doctype html>
         resizeObs.observe(editorEl);
         splitPrevEl.addEventListener("scroll", () => {
           syncScrollFrom(splitPrevEl, editorEl);
+        });
+
+        // Clicking a rendered block in the preview moves the editor caret
+        // to that source line. Skip clicks on interactive controls
+        // (mermaid toolbar buttons, links) so we don't hijack them.
+        splitPrevEl.addEventListener("click", (event) => {
+          if (event.target.closest && event.target.closest("button, a, input, textarea, [contenteditable]")) return;
+          const el = event.target.closest && event.target.closest("[data-source-line]");
+          if (!el) return;
+          const line = parseInt(el.getAttribute("data-source-line"), 10);
+          if (isNaN(line)) return;
+          const lines = editorEl.value.split("\n");
+          let pos = 0;
+          for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
+          editorEl.focus();
+          editorEl.setSelectionRange(pos, pos);
+          const lineHeight = parseFloat(getComputedStyle(editorEl).lineHeight) || 22;
+          const desired = line * lineHeight - editorEl.clientHeight / 2 + lineHeight / 2;
+          editorEl.scrollTop = Math.max(0, desired);
+          syncCursorHighlight();
+        });
+
+        // Tear down the mirror element when the lightbox / preview leaves
+        // split mode, so we don't leak DOM nodes if the user toggles modes.
+        const teardown = () => {
+          if (_caretMirror && _caretMirror.parentNode) _caretMirror.parentNode.removeChild(_caretMirror);
+        };
+        previewBodyEl.addEventListener("DOMNodeRemoved", function once(e) {
+          if (e.target === editorEl || (e.target.contains && e.target.contains(editorEl))) {
+            previewBodyEl.removeEventListener("DOMNodeRemoved", once);
+            teardown();
+          }
         });
         return;
       }
