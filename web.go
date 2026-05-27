@@ -3440,7 +3440,7 @@ const webAppHTML = `<!doctype html>
           '<div class="usage-guide-text">' +
           '<div class="usage-guide-title">Built-in usage guide</div>' +
           '<div class="usage-guide-subtitle">Select a file from the left to open your content.</div>' +
-          '<a class="usage-guide-git-link" id="welcomeGitLink" target="_blank" rel="noopener" hidden></a>' +
+          '<a class="usage-guide-git-link" href="https://github.com/neo2544/mdviewer" target="_blank" rel="noopener">↗ MD Viewer on GitHub  ·  github.com/neo2544/mdviewer</a>' +
           '</div>' +
           '</div>' +
           '<div class="usage-guide-body">' + rendered + '</div>' +
@@ -3448,7 +3448,6 @@ const webAppHTML = `<!doctype html>
         // Run mermaid (in case the guide ever uses it) and decorate links.
         try { await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") }); } catch (e) {}
         decorateRenderedMarkdown();
-        applyGitRemoteEverywhere();
         previewTitleEl.textContent = "Markdown Browser";
         previewMetaEl.textContent = "Usage guide";
         kindChipEl.textContent = "Help";
@@ -3621,24 +3620,20 @@ const webAppHTML = `<!doctype html>
     var _gitRemoteCwd = null;
     var _currentGitRemote = null; // {name,url,web_url} | null — last resolved
 
-    // applyGitRemoteEverywhere mirrors _currentGitRemote onto both the
-    // sidebar link and (when the welcome guide is rendered) the welcome
-    // banner link. Safe to call any time — missing elements are skipped.
+    // applyGitRemoteEverywhere mirrors _currentGitRemote onto the sidebar
+    // git remote link. (The welcome banner has a STATIC link to the
+    // MD Viewer project; only the sidebar surfaces the *current folder's*
+    // remote.)
     function applyGitRemoteEverywhere() {
       var chosen = _currentGitRemote;
-      var targets = [gitRemoteLinkEl, document.getElementById("welcomeGitLink")];
-      for (var i = 0; i < targets.length; i++) {
-        var el = targets[i];
-        if (!el) continue;
-        if (!chosen) {
-          el.hidden = true;
-          continue;
-        }
-        el.href = chosen.web_url;
-        el.title = chosen.name + ": " + chosen.url;
-        el.textContent = "↗ " + chosen.name + " on web";
-        el.hidden = false;
+      if (!chosen) {
+        gitRemoteLinkEl.hidden = true;
+        return;
       }
+      gitRemoteLinkEl.href = chosen.web_url;
+      gitRemoteLinkEl.title = chosen.name + ": " + chosen.url;
+      gitRemoteLinkEl.textContent = "↗ " + chosen.name + " on web";
+      gitRemoteLinkEl.hidden = false;
     }
 
     async function refreshGitRemote() {
