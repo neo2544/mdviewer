@@ -1405,9 +1405,17 @@ const webAppHTML = `<!doctype html>
     }
     .preview-body:has(.html-frame-wrap) { padding: 0; position: relative; }
     .collapse-toggle {
-      min-width: 40px;
-      padding-inline: 0;
+      width: 30px;
+      height: 30px;
+      min-width: 30px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
       font-weight: 700;
+      line-height: 1;
+      flex: 0 0 auto;
     }
     .reveal-sidebar {
       position: fixed;
