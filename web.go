@@ -2498,6 +2498,33 @@ const webAppHTML = `<!doctype html>
     }
     .git-remote-link:hover { text-decoration: underline; }
     .git-remote-link[hidden] { display: none; }
+    /* Icon-prefixed inputs: the icon sits inside the rounded box and
+       the input gets extra left padding so text doesn't run under it. */
+    .searchbox.has-icon { position: relative; }
+    .searchbox.has-icon .searchbox-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 14px;
+      height: 14px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .searchbox.has-icon .search-input { padding-left: 32px; }
+    .searchbox.has-icon:focus-within .searchbox-icon { color: var(--accent); }
+    /* Path chip: small folder icon prefix. */
+    #cwd.path-chip::before {
+      content: "";
+      display: inline-block;
+      width: 11px;
+      height: 9px;
+      margin-right: 6px;
+      vertical-align: -1px;
+      background: currentColor;
+      mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 9' fill='currentColor'><path d='M0 1.5 C0 .7.7 0 1.5 0 H3.6 L4.8 1.2 H9.5 c.8 0 1.5.7 1.5 1.5 V7.5 c0 .8-.7 1.5-1.5 1.5 H1.5 C.7 9 0 8.3 0 7.5 Z'/></svg>") center / contain no-repeat;
+      -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 9' fill='currentColor'><path d='M0 1.5 C0 .7.7 0 1.5 0 H3.6 L4.8 1.2 H9.5 c.8 0 1.5.7 1.5 1.5 V7.5 c0 .8-.7 1.5-1.5 1.5 H1.5 C.7 9 0 8.3 0 7.5 Z'/></svg>") center / contain no-repeat;
+    }
   </style>
   <script>
     // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
@@ -2529,10 +2556,17 @@ const webAppHTML = `<!doctype html>
           </div>
           <div class="subtle path-chip" id="cwd"></div>
           <a class="git-remote-link" id="gitRemoteLink" href="#" target="_blank" rel="noopener" hidden>↗ open remote</a>
-          <div class="searchbox">
+          <div class="searchbox has-icon">
+            <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" />
+              <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
+            </svg>
             <input class="search-input" id="searchInput" type="search" placeholder="Search files" spellcheck="false" />
           </div>
-          <div class="searchbox path-jump">
+          <div class="searchbox path-jump has-icon">
+            <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2.5 4.5 L8 4.5 L9.5 6 L13.5 6 L13.5 12.5 L2.5 12.5 Z" />
+            </svg>
             <input class="search-input" id="pathInput" type="text" placeholder="Jump to path (Enter)…  e.g. ~/notes/foo.md" spellcheck="false" autocomplete="off" />
           </div>
         </div>
