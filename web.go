@@ -1492,6 +1492,15 @@ const webAppHTML = `<!doctype html>
       -webkit-user-select: text !important;
       cursor: text !important;
     }
+    /* Default (no Alt held) inside the lightbox: aggressively block text
+       selection. The plain user-select:none on .lightbox is inherited by
+       the stage, but some browsers still let SVG <text> become selectable
+       via dragging — !important on every descendant ends the argument. */
+    body:not(.alt-select-mode) .lightbox-stage,
+    body:not(.alt-select-mode) .lightbox-stage * {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
     /* Hover toolbar on top of mermaid diagrams. Renders only on hover so it
        doesn't compete with the diagram visually. */
     .mermaid-toolbar {
