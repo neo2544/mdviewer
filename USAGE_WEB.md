@@ -110,6 +110,40 @@
 
 > 🛈 Alt 드래그 모드에선 다이어그램에 점선 외곽선이 뜨고 텍스트 커서로 바뀝니다.
 
+### 🧪 샘플 다이어그램 — 렌더링 확인
+
+아래가 보이면 mermaid 가 정상 동작하는 거예요. 다이어그램에 호버하면 우상단에 **Copy text** 버튼이 뜨고, 클릭하면 라이트박스로 확대됩니다.
+
+```mermaid
+flowchart LR
+    A[📁 사이드바] -->|파일 클릭| B[📄 Markdown]
+    B --> C{모드}
+    C -- Preview --> D[👀 렌더링]
+    C -- Edit --> E[✏️ Textarea]
+    C -- Split --> F[✂️ 좌우 분할]
+    E --> G[💾 Cmd+S]
+    F --> G
+    D -.수정 필요-.-> E
+```
+
+다른 형식도 동일하게 동작합니다 — 시퀀스 다이어그램 예:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 👤 User
+    participant V as MD Viewer
+    participant FS as 💾 File
+    U->>V: 파일 클릭
+    V->>FS: read
+    FS-->>V: content
+    V-->>U: 렌더링
+    U->>V: Cmd+S
+    V->>FS: write
+    FS-->>V: ok
+    V-->>U: 저장 완료
+```
+
 ---
 
 ## ✏️ 6. 편집 / 저장
