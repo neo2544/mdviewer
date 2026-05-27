@@ -5404,10 +5404,10 @@ const webAppHTML = `<!doctype html>
     }
 
     // The 📝 toolbar button is an "add new post-it" action — each press
-    // drops a fresh note at the center of the visible area and opens its
-    // editor. Empty-space clicks no longer create notes; manipulation
-    // mode (handles + drag/resize/delete on existing notes) is enabled
-    // automatically.
+    // drops a fresh note at the center of the visible area. We don't
+    // open the text editor right away so the user can drag the empty
+    // note into place first; a click on the note opens the editor when
+    // they're ready to type.
     function addNewPostit() {
       if (!_lbDrawMode) return;
       const svg = getAnnotationSVG();
@@ -5420,7 +5420,6 @@ const webAppHTML = `<!doctype html>
       const y = p.y - (POSTIT_PAD * 2 + POSTIT_LH) / 2;
       const g = createPostit(svg, x, y, "");
       recordAnnoAction({ type: "add", strokes: [g] });
-      openPostitEditor(g);
     }
 
     function setPostitSize(g, w, h) {
