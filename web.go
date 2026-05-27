@@ -1994,7 +1994,11 @@ const webAppHTML = `<!doctype html>
     .lightbox.eraser-mode .lb-annotation { cursor: pointer; }
     .lightbox.eraser-mode .lb-annotation:hover { stroke-width: 6 !important; filter: drop-shadow(0 0 4px rgba(255,255,255,0.6)); }
     .lightbox.postit-mode .lightbox-stage { cursor: crosshair; }
-    .lightbox.postit-mode .lb-postit { cursor: text; }
+    .lightbox.postit-mode .lb-postit { cursor: move; }
+    .lb-postit-resize, .lb-postit-delete { visibility: hidden; }
+    .lightbox.postit-mode .lb-postit-resize { visibility: visible; cursor: nwse-resize; }
+    .lightbox.postit-mode .lb-postit-delete { visibility: visible; cursor: pointer; }
+    .lightbox.postit-mode .lb-postit-delete:hover circle { fill: #d32f2f; }
     .lb-postit-editor {
       position: fixed;
       background: #fff59d;
@@ -5138,6 +5142,7 @@ const webAppHTML = `<!doctype html>
     var _lbRedoStack = [];
     var _lbEraserMode = false;
     var _lbPostitMode = false;
+    var _lbPostitDrag = null; // { g, kind: "move"|"resize", startX, startY, before, didMove }
     const POSTIT_W = 160;
     const POSTIT_PAD = 10;
     const POSTIT_FONT = 14;
@@ -5244,11 +5249,22 @@ const webAppHTML = `<!doctype html>
     function applyAnnoAction(action, reverse) {
       const svg = getAnnotationSVG();
       if (!svg) return;
-      const adding = (action.type === "add" && !reverse) || (action.type === "remove" && reverse);
-      if (adding) {
-        for (const s of action.strokes) svg.appendChild(s);
-      } else {
-        for (const s of action.strokes) s.remove();
+      if (action.type === "add" || action.type === "remove") {
+        const adding = (action.type === "add" && !reverse) || (action.type === "remove" && reverse);
+        if (adding) {
+          for (const s of action.strokes) svg.appendChild(s);
+        } else {
+          for (const s of action.strokes) s.remove();
+        }
+        return;
+      }
+      if (action.type === "transform") {
+        applyPostitState(action.target, reverse ? action.before : action.after);
+        return;
+      }
+      if (action.type === "text") {
+        setPostitText(action.target, reverse ? action.before : action.after);
+        return;
       }
     }
 
@@ -5386,9 +5402,25 @@ const webAppHTML = `<!doctype html>
       syncAnnotationInteractive();
     }
 
+    function setPostitSize(g, w, h) {
+      const body = g.querySelector(".lb-postit-body");
+      if (body) {
+        body.setAttribute("width", String(w));
+        body.setAttribute("height", String(h));
+      }
+      const resize = g.querySelector(".lb-postit-resize");
+      if (resize) {
+        resize.setAttribute("x", String(w - 14));
+        resize.setAttribute("y", String(h - 14));
+      }
+      const delG = g.querySelector(".lb-postit-delete");
+      if (delG) delG.setAttribute("transform", "translate(" + w + ",0)");
+      g.dataset.w = String(w);
+      g.dataset.h = String(h);
+    }
+
     function setPostitText(g, text) {
-      const textEl = g.querySelector("text");
-      const rect = g.querySelector("rect");
+      const textEl = g.querySelector(".lb-postit-text");
       while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
       const raw = (text == null ? "" : String(text));
       const lines = raw.length ? raw.split("\n") : [""];
@@ -5402,9 +5434,11 @@ const webAppHTML = `<!doctype html>
         tspan.textContent = lines[i].length ? lines[i] : "​";
         textEl.appendChild(tspan);
       }
-      rect.setAttribute("width", String(POSTIT_W));
-      rect.setAttribute("height", String(POSTIT_PAD * 2 + lines.length * POSTIT_LH));
       g.setAttribute("data-text", raw);
+      // Auto-grow vertically unless the user has manually resized.
+      if (!g.dataset.manualSize) {
+        setPostitSize(g, POSTIT_W, POSTIT_PAD * 2 + lines.length * POSTIT_LH);
+      }
     }
 
     function createPostit(svg, x, y, text) {
@@ -5412,34 +5446,91 @@ const webAppHTML = `<!doctype html>
       const g = document.createElementNS(ns, "g");
       g.setAttribute("class", "lb-annotation lb-postit");
       g.setAttribute("transform", "translate(" + x + "," + y + ")");
-      const rect = document.createElementNS(ns, "rect");
-      rect.setAttribute("rx", "6");
-      rect.setAttribute("fill", "#fff59d");
-      rect.setAttribute("stroke", "#fbc02d");
-      rect.setAttribute("stroke-width", "1");
-      rect.setAttribute("vector-effect", "non-scaling-stroke");
-      g.appendChild(rect);
+
+      const body = document.createElementNS(ns, "rect");
+      body.setAttribute("class", "lb-postit-body");
+      body.setAttribute("rx", "6");
+      body.setAttribute("fill", "#fff59d");
+      body.setAttribute("stroke", "#fbc02d");
+      body.setAttribute("stroke-width", "1");
+      body.setAttribute("vector-effect", "non-scaling-stroke");
+      g.appendChild(body);
+
       const textEl = document.createElementNS(ns, "text");
+      textEl.setAttribute("class", "lb-postit-text");
       textEl.setAttribute("x", String(POSTIT_PAD));
       textEl.setAttribute("y", String(POSTIT_PAD + POSTIT_FONT));
       textEl.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
       textEl.setAttribute("font-size", String(POSTIT_FONT));
       textEl.setAttribute("fill", "#2b2b2b");
       g.appendChild(textEl);
+
+      // Resize grip — bottom-right.
+      const resize = document.createElementNS(ns, "rect");
+      resize.setAttribute("class", "lb-postit-resize");
+      resize.setAttribute("width", "14");
+      resize.setAttribute("height", "14");
+      resize.setAttribute("rx", "2");
+      resize.setAttribute("fill", "#fbc02d");
+      g.appendChild(resize);
+
+      // Delete button — top-right, anchored at (w,0).
+      const delG = document.createElementNS(ns, "g");
+      delG.setAttribute("class", "lb-postit-delete");
+      const delCircle = document.createElementNS(ns, "circle");
+      delCircle.setAttribute("r", "9");
+      delCircle.setAttribute("fill", "#ef5350");
+      delCircle.setAttribute("stroke", "#ffffff");
+      delCircle.setAttribute("stroke-width", "1.5");
+      const delText = document.createElementNS(ns, "text");
+      delText.setAttribute("text-anchor", "middle");
+      delText.setAttribute("dominant-baseline", "central");
+      delText.setAttribute("font-size", "14");
+      delText.setAttribute("fill", "#ffffff");
+      delText.setAttribute("font-weight", "700");
+      delText.textContent = "×";
+      delG.appendChild(delCircle);
+      delG.appendChild(delText);
+      g.appendChild(delG);
+
       setPostitText(g, text || "");
       g.style.pointerEvents = (_lbEraserMode || _lbPostitMode) ? "all" : "none";
       svg.appendChild(g);
       return g;
     }
 
+    function parsePostitTranslate(g) {
+      const t = g.getAttribute("transform") || "";
+      const m = /translate\(([-\d.]+)[,\s]+([-\d.]+)\)/.exec(t);
+      if (!m) return { x: 0, y: 0 };
+      return { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+    }
+
+    function readPostitState(g) {
+      const p = parsePostitTranslate(g);
+      return {
+        tx: p.x, ty: p.y,
+        w: parseFloat(g.dataset.w) || POSTIT_W,
+        h: parseFloat(g.dataset.h) || (POSTIT_PAD * 2 + POSTIT_LH),
+        manualSize: !!g.dataset.manualSize,
+      };
+    }
+
+    function applyPostitState(g, s) {
+      g.setAttribute("transform", "translate(" + s.tx + "," + s.ty + ")");
+      setPostitSize(g, s.w, s.h);
+      if (s.manualSize) g.dataset.manualSize = "1";
+      else delete g.dataset.manualSize;
+    }
+
     function openPostitEditor(g) {
       const svg = getAnnotationSVG();
       if (!svg) return;
-      const rect = g.querySelector("rect");
+      const body = g.querySelector(".lb-postit-body");
       const ctm = g.getScreenCTM();
       if (!ctm) return;
-      const w = parseFloat(rect.getAttribute("width")) || POSTIT_W;
-      const h = parseFloat(rect.getAttribute("height")) || (POSTIT_PAD * 2 + POSTIT_LH);
+      const w = parseFloat(body.getAttribute("width")) || POSTIT_W;
+      const h = parseFloat(body.getAttribute("height")) || (POSTIT_PAD * 2 + POSTIT_LH);
       const pt = svg.createSVGPoint();
       pt.x = 0; pt.y = 0;
       const tl = pt.matrixTransform(ctm);
@@ -5447,7 +5538,8 @@ const webAppHTML = `<!doctype html>
       const br = pt.matrixTransform(ctm);
       const editor = document.createElement("textarea");
       editor.className = "lb-postit-editor";
-      editor.value = g.getAttribute("data-text") || "";
+      const before = g.getAttribute("data-text") || "";
+      editor.value = before;
       editor.style.left = tl.x + "px";
       editor.style.top = tl.y + "px";
       editor.style.width = Math.max(40, br.x - tl.x) + "px";
@@ -5461,7 +5553,10 @@ const webAppHTML = `<!doctype html>
         done = true;
         const newText = cancelled ? null : editor.value;
         if (editor.parentNode) editor.parentNode.removeChild(editor);
-        if (newText !== null) setPostitText(g, newText);
+        if (newText !== null && newText !== before) {
+          setPostitText(g, newText);
+          recordAnnoAction({ type: "text", target: g, before, after: newText });
+        }
       };
       editor.addEventListener("blur", () => commit(false));
       editor.addEventListener("keydown", (e) => {
@@ -5491,6 +5586,9 @@ const webAppHTML = `<!doctype html>
       // the live SVG, then ensure xmlns is set (some Mermaid output omits it).
       const clone = svg.cloneNode(true);
       if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      // Strip post-it manipulation handles from the export — users want the
+      // finished note, not the resize grip and close button.
+      clone.querySelectorAll(".lb-postit-resize, .lb-postit-delete").forEach((el) => el.remove());
       const vb = svg.viewBox && svg.viewBox.baseVal;
       const rect = svg.getBoundingClientRect();
       const baseW = (vb && vb.width) || svg.clientWidth || rect.width || 1024;
@@ -5678,11 +5776,46 @@ const webAppHTML = `<!doctype html>
         return;
       }
       if (_lbPostitMode && event.button === 0) {
+        const delHandle = event.target.closest && event.target.closest(".lb-postit-delete");
+        if (delHandle) {
+          const g = delHandle.closest(".lb-postit");
+          event.preventDefault();
+          event.stopPropagation();
+          g.remove();
+          recordAnnoAction({ type: "remove", strokes: [g] });
+          return;
+        }
+        const resizeHandle = event.target.closest && event.target.closest(".lb-postit-resize");
+        if (resizeHandle) {
+          const g = resizeHandle.closest(".lb-postit");
+          event.preventDefault();
+          event.stopPropagation();
+          const svg = getAnnotationSVG();
+          if (!svg) return;
+          const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
+          _lbPostitDrag = {
+            g, kind: "resize",
+            startX: p.x, startY: p.y,
+            before: readPostitState(g),
+            didMove: false,
+          };
+          try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
+          return;
+        }
         const existing = event.target.closest && event.target.closest(".lb-postit");
         if (existing) {
           event.preventDefault();
           event.stopPropagation();
-          openPostitEditor(existing);
+          const svg = getAnnotationSVG();
+          if (!svg) return;
+          const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
+          _lbPostitDrag = {
+            g: existing, kind: "move",
+            startX: p.x, startY: p.y,
+            before: readPostitState(existing),
+            didMove: false,
+          };
+          try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
           return;
         }
         const svg = getAnnotationSVG();
@@ -5717,6 +5850,26 @@ const webAppHTML = `<!doctype html>
 
     lightboxEl.addEventListener("pointermove", (event) => {
       if (_lbAnnoActive) { continueAnnotationStroke(event); return; }
+      if (_lbPostitDrag) {
+        const svg = getAnnotationSVG();
+        if (!svg) return;
+        const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
+        const dx = p.x - _lbPostitDrag.startX;
+        const dy = p.y - _lbPostitDrag.startY;
+        if (!_lbPostitDrag.didMove && Math.hypot(dx, dy) > 2) _lbPostitDrag.didMove = true;
+        if (_lbPostitDrag.kind === "move") {
+          const nx = _lbPostitDrag.before.tx + dx;
+          const ny = _lbPostitDrag.before.ty + dy;
+          _lbPostitDrag.g.setAttribute("transform", "translate(" + nx + "," + ny + ")");
+        } else if (_lbPostitDrag.kind === "resize") {
+          const nw = Math.max(60, _lbPostitDrag.before.w + dx);
+          const nh = Math.max(36, _lbPostitDrag.before.h + dy);
+          setPostitSize(_lbPostitDrag.g, nw, nh);
+          _lbPostitDrag.g.dataset.manualSize = "1";
+        }
+        event.preventDefault();
+        return;
+      }
       if (!lbState.dragging) return;
       // Same guard as the inline pan handler — abort if Alt comes down mid-drag.
       if (event.altKey || state.altKey) {
@@ -5740,6 +5893,19 @@ const webAppHTML = `<!doctype html>
     var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
       if (_lbAnnoActive) { endAnnotationStroke(event); return; }
+      if (_lbPostitDrag) {
+        const d = _lbPostitDrag;
+        _lbPostitDrag = null;
+        try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+        if (d.didMove) {
+          const after = readPostitState(d.g);
+          recordAnnoAction({ type: "transform", target: d.g, before: d.before, after });
+        } else {
+          // Treat a click without movement as "open editor".
+          openPostitEditor(d.g);
+        }
+        return;
+      }
       const wasDrag = lbState.didDrag;
       lbState.dragging = false;
       lightboxEl.classList.remove("dragging");
