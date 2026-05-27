@@ -4855,8 +4855,8 @@ const webAppHTML = `<!doctype html>
       ov.style.height = "100%";
       ov.style.overflow = "visible";
       ov.style.pointerEvents = "none";
-      // .lightbox-stage > * has `background: white` (so images/diagrams
-      // get the white card look). The overlay must be transparent so the
+      // .lightbox-stage > * has background:white (so images/diagrams get
+      // the white card look). The overlay must be transparent so the
       // diagram below it is visible. Also kill the card box-shadow/radius.
       ov.style.background = "transparent";
       ov.style.boxShadow = "none";
