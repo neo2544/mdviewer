@@ -2261,32 +2261,32 @@ const webAppHTML = `<!doctype html>
         </div>
         <div class="actions">
           <div class="seg" role="tablist" aria-label="View mode">
-            <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false">
+            <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
               <span>Preview</span>
             </button>
-            <button class="seg-btn" id="editModeButton" type="button" role="tab" aria-selected="false">
+            <button class="seg-btn" id="editModeButton" type="button" role="tab" aria-selected="false" title="Edit mode — raw source in a textarea (⌘S to save)">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
               <span>Edit</span>
             </button>
-            <button class="seg-btn" id="splitModeButton" type="button" role="tab" aria-selected="false">
+            <button class="seg-btn" id="splitModeButton" type="button" role="tab" aria-selected="false" title="Split mode — editor + live preview side by side">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 6h6M4 10h6M4 14h6M4 18h6M14 6h6M14 10h6M14 14h6M14 18h6"/></svg>
               <span>Split</span>
             </button>
           </div>
-          <button class="action" id="saveButton" type="button" title="Save (⌘S)">
+          <button class="action" id="saveButton" type="button" title="Save changes to disk (⌘S)">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
             <span>Save</span>
             <kbd>⌘S</kbd>
           </button>
-          <button class="action icon-only" id="refreshButton" type="button" title="Refresh" aria-label="Refresh">
+          <button class="action icon-only" id="refreshButton" type="button" title="Refresh — reload current file from disk (prompts if unsaved changes)" aria-label="Refresh">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
           </button>
-          <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground" aria-label="Mermaid Playground">
+          <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
           </button>
           <span class="divider" aria-hidden="true"></span>
-          <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark" aria-label="Theme">
+          <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
           </button>
           <span class="chip" id="kindChip" data-kind="idle" aria-live="polite">Idle</span>
@@ -2788,6 +2788,11 @@ const webAppHTML = `<!doctype html>
     function describeEntryMeta(entry) {
       const flag = state.fileFlags[entry.path] || "";
       const lines = [];
+      // Filename first so a truncated row in the list still reveals its
+      // full name via the hover tooltip.
+      if (entry && entry.name) {
+        lines.push(entry.name);
+      }
       if (flag) {
         lines.push("Status: " + flag.charAt(0).toUpperCase() + flag.slice(1));
       }
