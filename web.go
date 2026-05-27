@@ -1430,6 +1430,13 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, var(--accent) 14%, transparent);
       box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent) inset;
     }
+    /* Table rows have their own zebra stripes via more-specific
+       selectors; override them so the active row is unambiguous. */
+    .split-preview tr.source-line-active,
+    .split-preview .preview-body tr.source-line-active {
+      background: color-mix(in oklab, var(--accent) 22%, transparent) !important;
+      box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 55%, transparent) inset;
+    }
     @media (max-width: 760px) {
       .split-view { flex-direction: column; }
       .split-editor, .split-preview { flex: 1 1 auto; }
@@ -4117,7 +4124,7 @@ const webAppHTML = `<!doctype html>
       // tokens, which is good enough for the split-view cursor follow.
       try {
         const tokens = marked.lexer(source || "");
-        const lines = [];
+        const renderTokens = [];
         let cursor = 0;
         for (const tok of tokens) {
           if (!tok.raw) continue;
@@ -4133,11 +4140,28 @@ const webAppHTML = `<!doctype html>
           } else {
             line = source.slice(0, cursor).split("\n").length - 1;
           }
-          lines.push(line);
+          renderTokens.push({ token: tok, line });
         }
         const blocks = container.children;
-        for (let i = 0; i < blocks.length && i < lines.length; i++) {
-          blocks[i].setAttribute("data-source-line", String(lines[i]));
+        for (let i = 0; i < blocks.length && i < renderTokens.length; i++) {
+          const block = blocks[i];
+          const { token, line } = renderTokens[i];
+          block.setAttribute("data-source-line", String(line));
+          // Per-row stamping for tables: header sits on the block's start
+          // line, the separator pipe row takes the next line, then data
+          // rows follow one per line. Stamping each <tr> lets the
+          // cursor-follow zoom into a specific row.
+          if (token.type === "table") {
+            const tableEl = block.tagName === "TABLE" ? block : block.querySelector("table");
+            if (tableEl) {
+              const headEl = tableEl.querySelector("thead tr");
+              if (headEl) headEl.setAttribute("data-source-line", String(line));
+              const bodyRows = tableEl.querySelectorAll("tbody tr");
+              for (let r = 0; r < bodyRows.length; r++) {
+                bodyRows[r].setAttribute("data-source-line", String(line + 2 + r));
+              }
+            }
+          }
         }
       } catch (e) { /* annotation is best-effort */ }
     }
