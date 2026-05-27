@@ -1483,7 +1483,61 @@ const webAppHTML = `<!doctype html>
       background: var(--code);
       border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
     }
+    .preview-body pre code {
+      font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", "Fira Code", Menlo, monospace;
+      font-size: 0.82em;
+      line-height: 1.55;
+    }
+    .preview-body :not(pre) > code {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.9em;
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: color-mix(in oklab, var(--code) 90%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 65%, transparent);
+    }
     .preview-body code { font-family: ui-monospace, SFMono-Regular, monospace; }
+    /* Wrapper around fenced code blocks: lets us float a copy button
+       in the top-right corner without disturbing scroll on the <pre>. */
+    .code-wrap { position: relative; }
+    .code-wrap .code-copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 92%, transparent);
+      color: var(--text);
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      backdrop-filter: blur(4px);
+      z-index: 1;
+    }
+    .code-wrap:hover .code-copy-btn,
+    .code-wrap:focus-within .code-copy-btn { opacity: 1; }
+    .code-wrap .code-copy-btn:hover {
+      background: color-mix(in oklab, var(--accent) 18%, var(--panel-2));
+    }
+    .code-wrap .code-copy-btn.copied {
+      background: color-mix(in oklab, oklch(0.7 0.18 150) 30%, var(--panel-2));
+      border-color: color-mix(in oklab, oklch(0.7 0.18 150) 60%, transparent);
+    }
+    .code-wrap .code-lang-tag {
+      position: absolute;
+      top: 8px;
+      left: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: color-mix(in oklab, var(--text) 55%, var(--muted));
+      pointer-events: none;
+      opacity: 0.7;
+    }
     #previewTitle, #previewMeta {
       white-space: nowrap;
       overflow: hidden;
@@ -3837,6 +3891,7 @@ const webAppHTML = `<!doctype html>
           console.warn("usage guide mermaid.run failed:", e);
         }
         try { highlightCodeBlocks(previewBodyEl); } catch (e) {}
+        try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
         decorateRenderedMarkdown();
         try { attachZoomToPreview(); } catch (e) {}
         previewTitleEl.textContent = "Markdown Browser";
@@ -4216,6 +4271,82 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    function decorateCodeBlocks(container) {
+      // Wrap every <pre><code> (except mermaid, which is replaced earlier)
+      // in a .code-wrap so we can float a copy button + language tag in
+      // the corners.
+      const pres = container.querySelectorAll("pre");
+      for (const pre of pres) {
+        if (pre.parentElement && pre.parentElement.classList.contains("code-wrap")) continue;
+        const code = pre.querySelector("code");
+        if (!code) continue;
+        if (code.classList.contains("language-mermaid")) continue;
+        const wrap = document.createElement("div");
+        wrap.className = "code-wrap";
+        // Preserve any data-source-line marker so cursor-follow keeps
+        // pointing at this block in split view.
+        const srcLine = pre.getAttribute("data-source-line");
+        if (srcLine !== null) {
+          wrap.setAttribute("data-source-line", srcLine);
+          pre.removeAttribute("data-source-line");
+        }
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+
+        // Language tag (top-left) — pulled from the language-XYZ class
+        // marked emits, ignoring "plaintext" which hljs adds when there
+        // was no original hint.
+        let lang = "";
+        for (const c of code.classList) {
+          if (c.indexOf("language-") === 0) {
+            const v = c.slice("language-".length);
+            if (v && v !== "plaintext" && v !== "undefined") { lang = v; break; }
+          }
+        }
+        if (lang) {
+          const tag = document.createElement("span");
+          tag.className = "code-lang-tag";
+          tag.textContent = lang;
+          wrap.appendChild(tag);
+        }
+
+        // Copy button.
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "code-copy-btn";
+        btn.textContent = "Copy";
+        btn.title = "Copy code to clipboard";
+        btn.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const text = code.innerText;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(text);
+            } else {
+              const ta = document.createElement("textarea");
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand("copy");
+              document.body.removeChild(ta);
+            }
+            const prev = btn.textContent;
+            btn.textContent = "Copied!";
+            btn.classList.add("copied");
+            setTimeout(() => {
+              btn.textContent = prev;
+              btn.classList.remove("copied");
+            }, 1200);
+          } catch (e) {
+            btn.textContent = "Failed";
+            setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+          }
+        });
+        wrap.appendChild(btn);
+      }
+    }
+
     async function renderMarkdownInto(container, content, kind, options) {
       options = options || {};
       if (kind !== "markdown" && kind !== "text") {
@@ -4245,6 +4376,7 @@ const webAppHTML = `<!doctype html>
         console.warn("mermaid.run in container failed:", e);
       }
       try { highlightCodeBlocks(container); } catch (e) {}
+      try { decorateCodeBlocks(container); } catch (e) {}
       try { decorateRenderedMarkdown(); } catch (e) {}
       try { attachZoomToPreview(); } catch (e) {}
     }
@@ -4268,6 +4400,7 @@ const webAppHTML = `<!doctype html>
         }
         await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") });
         try { highlightCodeBlocks(previewBodyEl); } catch (e) {}
+        try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
         decorateRenderedMarkdown();
         // Explicitly attach zoom/toolbar after mermaid finishes — the
         // MutationObserver path is unreliable for the toolbar because it
