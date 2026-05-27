@@ -4935,6 +4935,11 @@ const webAppHTML = `<!doctype html>
         svg.style.maxHeight = "none";
         svg.style.width = "";
         svg.style.height = "";
+        // SVG default is overflow:hidden — annotation polylines drawn
+        // past the diagram edge would be clipped. Allow them to extend
+        // freely beyond the diagram into the surrounding lightbox area.
+        svg.style.overflow = "visible";
+        svg.setAttribute("overflow", "visible");
       }
       // Defer measurement one frame so getBoundingClientRect on inner
       // shapes returns real values (the SVG was just inserted).
