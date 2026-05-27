@@ -1532,9 +1532,13 @@ const webAppHTML = `<!doctype html>
     /* Wrapper around fenced code blocks: lets us float a copy button
        in the top-right corner without disturbing scroll on the <pre>. */
     .code-wrap { position: relative; }
+    /* Reserve a strip at the top of every wrapped <pre> for the language
+       tag + copy button so the first line of code never collides with
+       them — even on tightly-wrapped diagrams. */
+    .code-wrap > pre { padding-top: 30px; }
     .code-wrap .code-copy-btn {
       position: absolute;
-      top: 8px;
+      top: 6px;
       right: 8px;
       border: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
       background: color-mix(in oklab, var(--panel-2) 92%, transparent);
@@ -1561,7 +1565,7 @@ const webAppHTML = `<!doctype html>
     .code-wrap .code-lang-tag {
       position: absolute;
       top: 8px;
-      left: 12px;
+      left: 14px;
       font-size: 10px;
       font-weight: 600;
       letter-spacing: 0.04em;
@@ -1569,6 +1573,7 @@ const webAppHTML = `<!doctype html>
       color: color-mix(in oklab, var(--text) 55%, var(--muted));
       pointer-events: none;
       opacity: 0.7;
+      z-index: 1;
     }
     #previewTitle, #previewMeta {
       white-space: nowrap;
