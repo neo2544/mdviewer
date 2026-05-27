@@ -4785,7 +4785,6 @@ const webAppHTML = `<!doctype html>
         lbState.x = (vw - _lbBaselineW * lbState.scale) / 2;
         lbState.y = (vh - _lbBaselineH * lbState.scale) / 2;
         applyLightboxTransform();
-        syncAnnotationViewBox();
         return;
       }
       // Make sure we know the natural dimensions before sizing.
@@ -4807,7 +4806,6 @@ const webAppHTML = `<!doctype html>
         applyLightboxTransform();
         _lbBaselineW = natW;
         _lbBaselineH = natH;
-        syncAnnotationViewBox();
       };
       if (natW > 0 && natH > 0) {
         finish();
@@ -4844,70 +4842,54 @@ const webAppHTML = `<!doctype html>
       });
     }
 
-    function createAnnotationOverlay() {
-      const ns = "http://www.w3.org/2000/svg";
-      const ov = document.createElementNS(ns, "svg");
-      ov.id = "lightboxAnnotations";
-      ov.style.position = "absolute";
-      ov.style.left = "0";
-      ov.style.top = "0";
-      ov.style.width = "100%";
-      ov.style.height = "100%";
-      ov.style.overflow = "visible";
-      ov.style.pointerEvents = "none";
-      // .lightbox-stage > * has background:white (so images/diagrams get
-      // the white card look). The overlay must be transparent so the
-      // diagram below it is visible. Also kill the card box-shadow/radius.
-      ov.style.background = "transparent";
-      ov.style.boxShadow = "none";
-      ov.style.borderRadius = "0";
-      ov.setAttribute("xmlns", ns);
-      // preserveAspectRatio "none" so the user-space coords map directly
-      // to the rendered box (the overlay viewBox is set to match the
-      // diagram natural dims after fit — see syncAnnotationViewBox).
-      ov.setAttribute("preserveAspectRatio", "none");
-      return ov;
+    // Annotations: polylines added DIRECTLY to the diagram's SVG so they
+    // share its user-space coord system (no padding/overlay alignment
+    // pitfalls). For raster images we skip drawing — no SVG to draw into.
+    function getAnnotationSVG() {
+      const child = lightboxStageEl.firstElementChild;
+      const target = findScalableTarget(child);
+      if (!target || target.kind !== "svg") return null;
+      return target.el;
     }
 
-    // syncAnnotationViewBox aligns the overlay's user-space with the
-    // diagram's natural dimensions so polyline coords stored in those
-    // units render at the right visual position regardless of zoom level.
-    function syncAnnotationViewBox() {
-      const overlay = document.getElementById("lightboxAnnotations");
-      if (!overlay) return;
-      if (_lbBaselineW > 0 && _lbBaselineH > 0) {
-        overlay.setAttribute("viewBox", "0 0 " + _lbBaselineW + " " + _lbBaselineH);
+    // screenToSVGUserSpace converts a viewport click into the SVG's own
+    // user-space using getScreenCTM — robust against any combination of
+    // padding, CSS transforms, viewBox, and zoom on the SVG.
+    function screenToSVGUserSpace(svg, clientX, clientY) {
+      if (!svg.createSVGPoint || !svg.getScreenCTM) {
+        return { x: clientX, y: clientY };
       }
+      const pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return { x: clientX, y: clientY };
+      return pt.matrixTransform(ctm.inverse());
     }
 
     function clearAnnotations() {
-      const overlay = document.getElementById("lightboxAnnotations");
-      if (!overlay) return;
-      overlay.innerHTML = "";
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const marks = svg.querySelectorAll(".lb-annotation");
+      for (const el of marks) el.remove();
       _lbAnnoActive = null;
     }
 
-    function screenToStageLocal(clientX, clientY) {
-      return {
-        x: (clientX - lbState.x) / lbState.scale,
-        y: (clientY - lbState.y) / lbState.scale,
-      };
-    }
-
     function startAnnotationStroke(event) {
-      const overlay = document.getElementById("lightboxAnnotations");
-      if (!overlay) return;
+      const svg = getAnnotationSVG();
+      if (!svg) return;
       const ns = "http://www.w3.org/2000/svg";
       const poly = document.createElementNS(ns, "polyline");
+      poly.setAttribute("class", "lb-annotation");
       poly.setAttribute("fill", "none");
       poly.setAttribute("stroke", "#ff3b30");
-      poly.setAttribute("stroke-width", String(3 / Math.max(0.25, lbState.scale)));
+      poly.setAttribute("stroke-width", "3");
       poly.setAttribute("stroke-linecap", "round");
       poly.setAttribute("stroke-linejoin", "round");
       poly.setAttribute("vector-effect", "non-scaling-stroke");
-      const p = screenToStageLocal(event.clientX, event.clientY);
+      const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
       poly.setAttribute("points", p.x + "," + p.y);
-      overlay.appendChild(poly);
+      svg.appendChild(poly);
       _lbAnnoActive = poly;
       _lbAnnoStartedAt = Date.now();
       try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
@@ -4915,7 +4897,9 @@ const webAppHTML = `<!doctype html>
 
     function continueAnnotationStroke(event) {
       if (!_lbAnnoActive) return;
-      const p = screenToStageLocal(event.clientX, event.clientY);
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
       const cur = _lbAnnoActive.getAttribute("points") || "";
       _lbAnnoActive.setAttribute("points", cur + " " + p.x + "," + p.y);
     }
@@ -4939,7 +4923,6 @@ const webAppHTML = `<!doctype html>
       lightboxStageEl.innerHTML = "";
       _lbAnnoActive = null;
       lightboxStageEl.appendChild(node);
-      lightboxStageEl.appendChild(createAnnotationOverlay());
       lightboxEl.hidden = false;
       document.body.classList.add("lightbox-open");
       // Strip Mermaid's max-width / inline sizing so the SVG can lay out
