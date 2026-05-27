@@ -1610,6 +1610,11 @@ const webAppHTML = `<!doctype html>
       justify-content: space-between;
       padding: 14px 16px 8px;
     }
+    .popup-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .popup-title {
       font-weight: 700;
       color: var(--accent);
@@ -2121,7 +2126,6 @@ const webAppHTML = `<!doctype html>
           </button>
           <div class="section-actions">
             <button class="action" id="showAllRecentFiles" title="Show all recent files" hidden>Show all</button>
-            <button class="action" id="clearRecentFiles" title="Clear recent files">Clear</button>
           </div>
         </div>
         <div class="section-list" id="recentFiles"></div>
@@ -2134,7 +2138,6 @@ const webAppHTML = `<!doctype html>
           </button>
           <div class="section-actions">
             <button class="action" id="showAllRecentDirs" title="Show all recent folders" hidden>Show all</button>
-            <button class="action" id="clearRecentDirs" title="Clear recent folders">Clear</button>
           </div>
         </div>
         <div class="section-list" id="recentDirs"></div>
@@ -2228,7 +2231,10 @@ const webAppHTML = `<!doctype html>
     <div class="popup-card">
       <div class="popup-head">
         <div class="popup-title" id="popupTitle">Items</div>
-        <button type="button" class="popup-close" id="popupClose" title="Close">✕</button>
+        <div class="popup-head-actions">
+          <button type="button" class="action" id="popupClear" title="Clear list" hidden>Clear</button>
+          <button type="button" class="popup-close" id="popupClose" title="Close">✕</button>
+        </div>
       </div>
       <input type="text" id="popupSearch" placeholder="Filter…" autocomplete="off" spellcheck="false" />
       <div id="popupResults" class="popup-results"></div>
@@ -4207,11 +4213,20 @@ const webAppHTML = `<!doctype html>
       ? selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" })
       : loadDir(state.cwd, { historyMode: "replace" });
     document.getElementById("toggleFavorite").onclick = toggleFavorite;
-    document.getElementById("clearRecentFiles").onclick = () => {
-      if (state.recentFiles.length && confirm("Clear recent files list?")) clearRecents("files");
-    };
-    document.getElementById("clearRecentDirs").onclick = () => {
-      if (state.recentDirs.length && confirm("Clear recent folders list?")) clearRecents("dirs");
+    // Clear is now inside the "Show all" popup (popupClear button) —
+    // wired below in openListPopup based on state.popupKind.
+    document.getElementById("popupClear").onclick = () => {
+      if (state.popupKind === "recentFiles") {
+        if (state.recentFiles.length && confirm("Clear recent files list?")) {
+          clearRecents("files");
+          closeListPopup();
+        }
+      } else if (state.popupKind === "recentDirs") {
+        if (state.recentDirs.length && confirm("Clear recent folders list?")) {
+          clearRecents("dirs");
+          closeListPopup();
+        }
+      }
     };
     copyPathBtnEl.addEventListener("click", () => { copyCurrentPath(); });
     pathInputEl.addEventListener("keydown", (event) => {
@@ -4241,6 +4256,12 @@ const webAppHTML = `<!doctype html>
         favorites: "All favorites",
       };
       popupTitleEl.textContent = titles[kind] || "Items";
+      // Clear is only meaningful for the two recents lists; favorites
+      // has no bulk-clear semantics.
+      const clearBtn = document.getElementById("popupClear");
+      if (clearBtn) {
+        clearBtn.hidden = !(kind === "recentFiles" || kind === "recentDirs");
+      }
       popupEl.hidden = false;
       renderPopup();
       setTimeout(() => popupSearchEl.focus(), 0);
