@@ -1979,6 +1979,8 @@ const webAppHTML = `<!doctype html>
       box-shadow: 0 8px 24px rgba(0,0,0,0.35);
     }
     .lightbox-toolbar .draw-only[hidden] { display: none !important; }
+    .lightbox.eraser-mode .lb-annotation { cursor: pointer; }
+    .lightbox.eraser-mode .lb-annotation:hover { stroke-width: 6 !important; filter: drop-shadow(0 0 4px rgba(255,255,255,0.6)); }
     .lightbox-toolbar .lb-anno-color-label {
       display: grid;
       place-items: center;
@@ -2415,10 +2417,12 @@ const webAppHTML = `<!doctype html>
       <label class="draw-only lb-anno-opacity-label" id="lbAnnoOpacityLabel" title="Stroke opacity" hidden>
         <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
+      <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke to delete it" hidden>🩹</button>
       <button type="button" data-action="annoclear" title="Clear annotations">🧹</button>
+      <button type="button" data-action="annosave" id="lbAnnoSaveBtn" title="Save current view as PNG (with annotations)">💾</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · ✎ button: draw · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · ✎ button: draw · 🩹 eraser: click stroke to delete · 💾 save PNG · Double-click: reset · Esc: close</div>
   </div>
 
   <script type="module">
@@ -5096,6 +5100,7 @@ const webAppHTML = `<!doctype html>
     var _lbDrawColor = "#ff3b30";
     var _lbDrawOpacity = 0.5;
     var _lbAnnoUndoStack = []; // removed strokes available for redo
+    var _lbEraserMode = false;
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
@@ -5232,6 +5237,7 @@ const webAppHTML = `<!doctype html>
       poly.setAttribute("stroke-linecap", "round");
       poly.setAttribute("stroke-linejoin", "round");
       poly.setAttribute("vector-effect", "non-scaling-stroke");
+      poly.style.pointerEvents = _lbEraserMode ? "stroke" : "none";
       const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
       poly.setAttribute("points", p.x + "," + p.y);
       svg.appendChild(poly);
@@ -5265,12 +5271,93 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    function setAnnotationStrokesInteractive(interactive) {
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const marks = svg.querySelectorAll(".lb-annotation");
+      for (const el of marks) el.style.pointerEvents = interactive ? "stroke" : "none";
+    }
+
     function toggleDrawMode() {
       _lbDrawMode = !_lbDrawMode;
       const btn = document.getElementById("lbAnnoDrawBtn");
       if (btn) btn.classList.toggle("active", _lbDrawMode);
       lightboxEl.classList.toggle("draw-mode", _lbDrawMode);
       setDrawControlsVisible(_lbDrawMode);
+      // Leaving draw mode also cancels eraser; entering draw mode disables
+      // eraser too — the two gestures conflict on a single pointer.
+      if (_lbEraserMode) {
+        _lbEraserMode = false;
+        const eb = document.getElementById("lbAnnoEraseBtn");
+        if (eb) eb.classList.remove("active");
+        lightboxEl.classList.remove("eraser-mode");
+        setAnnotationStrokesInteractive(false);
+      }
+    }
+
+    function toggleEraserMode() {
+      if (!_lbDrawMode) return; // eraser button is hidden outside draw mode
+      _lbEraserMode = !_lbEraserMode;
+      const btn = document.getElementById("lbAnnoEraseBtn");
+      if (btn) btn.classList.toggle("active", _lbEraserMode);
+      lightboxEl.classList.toggle("eraser-mode", _lbEraserMode);
+      setAnnotationStrokesInteractive(_lbEraserMode);
+    }
+
+    function saveLightboxImage() {
+      const child = lightboxStageEl.firstElementChild;
+      if (!child) return;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      // For raw <img> content there are no SVG annotations to bake in —
+      // hand the user the source bytes directly.
+      if (child.tagName === "IMG") {
+        const a = document.createElement("a");
+        a.href = child.src;
+        a.download = "image-" + stamp + ".png";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+      const svg = child.tagName && child.tagName.toLowerCase() === "svg" ? child : child.querySelector("svg");
+      if (!svg) return;
+      // Snapshot via XMLSerializer + canvas: clone first so we don't mutate
+      // the live SVG, then ensure xmlns is set (some Mermaid output omits it).
+      const clone = svg.cloneNode(true);
+      if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      const rect = svg.getBoundingClientRect();
+      const w = (vb && vb.width) || svg.clientWidth || rect.width || 1024;
+      const h = (vb && vb.height) || svg.clientHeight || rect.height || 768;
+      clone.setAttribute("width", String(w));
+      clone.setAttribute("height", String(h));
+      const xml = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.max(2, window.devicePixelRatio || 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(w * scale);
+        canvas.height = Math.ceil(h * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((b) => {
+          URL.revokeObjectURL(url);
+          if (!b) return;
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(b);
+          a.download = "diagram-" + stamp + ".png";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        }, "image/png");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); };
+      img.src = url;
     }
 
     function openLightbox(node) {
@@ -5306,9 +5393,13 @@ const webAppHTML = `<!doctype html>
     function closeLightbox() {
       _lbAnnoActive = null;
       _lbDrawMode = false;
+      _lbEraserMode = false;
       const drawBtn = document.getElementById("lbAnnoDrawBtn");
       if (drawBtn) drawBtn.classList.remove("active");
+      const eraseBtn = document.getElementById("lbAnnoEraseBtn");
+      if (eraseBtn) eraseBtn.classList.remove("active");
       lightboxEl.classList.remove("draw-mode");
+      lightboxEl.classList.remove("eraser-mode");
       setDrawControlsVisible(false);
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
@@ -5348,6 +5439,19 @@ const webAppHTML = `<!doctype html>
       // Alt/Option held → user wants to select text inside the diagram,
       // not pan the lightbox. Let the browser handle the selection.
       if (event.altKey || state.altKey) return;
+      if (_lbEraserMode && event.button === 0) {
+        const stroke = event.target.closest && event.target.closest(".lb-annotation");
+        if (stroke) {
+          event.preventDefault();
+          event.stopPropagation();
+          _lbAnnoUndoStack.push(stroke);
+          stroke.remove();
+          return;
+        }
+        // Eraser is on but the click missed a stroke — do nothing (don't
+        // start a draw stroke or pan).
+        return;
+      }
       if (_lbDrawMode && event.button === 0) {
         event.preventDefault();
         startAnnotationStroke(event);
@@ -5437,7 +5541,9 @@ const webAppHTML = `<!doctype html>
       else if (action === "annodraw") toggleDrawMode();
       else if (action === "announdo") undoAnnotation();
       else if (action === "annoredo") redoAnnotation();
+      else if (action === "annoerase") toggleEraserMode();
       else if (action === "annoclear") clearAnnotations();
+      else if (action === "annosave") saveLightboxImage();
     });
 
     const lbAnnoColorInput = document.getElementById("lbAnnoColor");
