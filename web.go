@@ -911,7 +911,7 @@ const webAppHTML = `<!doctype html>
       gap: 12px;
       width: 100%;
       min-width: 0;
-      padding: 10px 12px;
+      padding: 6px 12px;
       border: 0;
       background: transparent;
       color: inherit;
