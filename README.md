@@ -31,6 +31,9 @@ scripts/uninstall.sh                                 # 제거
 ```
 
 설치 후 메뉴바 아이콘(M↓)을 클릭하면:
+
+![Menu bar dropdown showing MD Viewer options](assets/menubar-screenshot.png)
+
 - **Open in Browser** — 웹 뷰어 열기
 - **Reveal Root Folder in Finder**
 - **Copy URL**
