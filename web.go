@@ -3887,16 +3887,23 @@ const webAppHTML = `<!doctype html>
           }
           return last;
         }
+        // Whenever WE scroll a pane programmatically (centering the active
+        // preview block, etc.), set this flag. Both pane scroll handlers
+        // short-circuit while it's true so the proportional sync never
+        // bounces a programmatic move into the OTHER pane. The
+        // splitSyncSource guard couldn't do this — its !== check passes
+        // through re-entries from the same pane that we're driving.
+        let _programmaticScroll = false;
         function scrollPreviewBlockToCenter(el) {
           const cRect = splitPrevEl.getBoundingClientRect();
           const eRect = el.getBoundingClientRect();
           const elTopRel = eRect.top - cRect.top + splitPrevEl.scrollTop;
           const target = elTopRel - splitPrevEl.clientHeight / 2 + eRect.height / 2;
-          // Suppress the proportional scroll-sync handler so it doesn't
-          // bounce the editor in response to this programmatic move.
-          splitSyncSource = splitPrevEl;
-          splitPrevEl.scrollTop = Math.max(0, target);
-          requestAnimationFrame(() => { splitSyncSource = null; });
+          const next = Math.max(0, target);
+          if (Math.abs(next - splitPrevEl.scrollTop) < 1) return;
+          _programmaticScroll = true;
+          splitPrevEl.scrollTop = next;
+          requestAnimationFrame(() => { _programmaticScroll = false; });
         }
         // Mirror-div caret position measurement — textareas don't expose
         // pixel coordinates for the caret, and a logical-line × line-height
@@ -4046,6 +4053,7 @@ const webAppHTML = `<!doctype html>
         }
         editorEl.addEventListener("scroll", () => {
           updateEditorLineHighlight();
+          if (_programmaticScroll) return;
           syncScrollFrom(editorEl, splitPrevEl);
         });
         // The textarea may resize when the splitter is dragged; keep the
@@ -4053,6 +4061,7 @@ const webAppHTML = `<!doctype html>
         const resizeObs = new ResizeObserver(() => updateEditorLineHighlight());
         resizeObs.observe(editorEl);
         splitPrevEl.addEventListener("scroll", () => {
+          if (_programmaticScroll) return;
           syncScrollFrom(splitPrevEl, editorEl);
         });
 
@@ -4069,13 +4078,24 @@ const webAppHTML = `<!doctype html>
           let pos = 0;
           for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
           // Preserve scroll position — moving the caret should not yank
-          // the editor view to a new spot. Highlights update in place.
+          // the editor view to a new spot. After landing the caret,
+          // minimum scroll-into-view if (and only if) it would otherwise
+          // be off-screen. No centering.
           const sx = editorEl.scrollLeft;
           const sy = editorEl.scrollTop;
           editorEl.focus({ preventScroll: true });
           editorEl.setSelectionRange(pos, pos);
           editorEl.scrollLeft = sx;
           editorEl.scrollTop = sy;
+          const lineHeight = parseFloat(getComputedStyle(editorEl).lineHeight) || 22;
+          const caretY = measureYAtOffset(pos);
+          const view0 = editorEl.scrollTop;
+          const view1 = view0 + editorEl.clientHeight;
+          if (caretY < view0) {
+            editorEl.scrollTop = Math.max(0, caretY - lineHeight);
+          } else if (caretY + lineHeight > view1) {
+            editorEl.scrollTop = caretY + lineHeight - editorEl.clientHeight + lineHeight;
+          }
           syncCursorHighlight();
         });
 
