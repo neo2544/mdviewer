@@ -4079,26 +4079,22 @@ const webAppHTML = `<!doctype html>
           const lines = editorEl.value.split("\n");
           let pos = 0;
           for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
-          // Preserve scroll position — moving the caret should not yank
-          // the editor view to a new spot. After landing the caret,
-          // minimum scroll-into-view if (and only if) it would otherwise
-          // be off-screen. No centering.
-          const sx = editorEl.scrollLeft;
-          const sy = editorEl.scrollTop;
+          // Preview-driven click → center the caret in the editor too.
+          // Use the clone-textarea measurement (same wrap rules as the
+          // live editor) for an accurate caret-y, then scroll so that y
+          // sits at the editor's mid-height.
           editorEl.focus({ preventScroll: true });
           editorEl.setSelectionRange(pos, pos);
-          editorEl.scrollLeft = sx;
-          editorEl.scrollTop = sy;
-          const lineHeight = parseFloat(getComputedStyle(editorEl).lineHeight) || 22;
-          const paddingTopPx = parseFloat(getComputedStyle(editorEl).paddingTop) || 0;
-          const caretY = line * lineHeight + paddingTopPx;
-          const view0 = editorEl.scrollTop;
-          const view1 = view0 + editorEl.clientHeight;
-          if (caretY < view0) {
-            editorEl.scrollTop = Math.max(0, caretY - lineHeight);
-          } else if (caretY + lineHeight > view1) {
-            editorEl.scrollTop = caretY + lineHeight - editorEl.clientHeight + lineHeight;
-          }
+          const cs2 = getComputedStyle(editorEl);
+          const lineHeight = parseFloat(cs2.lineHeight) || 22;
+          const paddingTopPx = parseFloat(cs2.paddingTop) || 0;
+          const yInContent = measureCaretContentY();
+          const desired = yInContent - editorEl.clientHeight / 2 + lineHeight / 2 + paddingTopPx;
+          // Guard against bouncing this programmatic scroll back into
+          // the preview pane via the proportional sync handler.
+          _programmaticScroll = true;
+          editorEl.scrollTop = Math.max(0, desired);
+          requestAnimationFrame(() => { _programmaticScroll = false; });
           syncCursorHighlight();
         });
 
