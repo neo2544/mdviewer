@@ -4878,7 +4878,7 @@ const webAppHTML = `<!doctype html>
     // _lastLbTap is the timestamp of the previous non-drag pointerup. We
     // synthesize our own double-tap detection because some browsers
     // (Safari with pointer capture, Chrome with selectstart blocked)
-    // refuse to emit a `dblclick` event after the second quick click.
+    // refuse to emit a dblclick event after the second quick click.
     var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
       const wasDrag = lbState.didDrag;
