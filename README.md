@@ -3,6 +3,43 @@
 파일 탐색 + Markdown 렌더링을 지원하는 터미널 앱입니다.  
 **bubbletea + lipgloss + glamour** (charmbracelet 생태계)로 만들어졌습니다.
 
+## 🚀 빠른 설치 (메뉴바 + 자동 시작 + `.md` 연동)
+
+macOS에서 한 번에 설치하기:
+
+```bash
+# 1. 저장소 클론
+git clone https://github.com/neo2544/mdviewer.git
+cd mdviewer
+
+# 2. 설치 — 이 한 줄이면 끝
+scripts/install.sh
+```
+
+이렇게 하면:
+- ✅ `mdviewer` 바이너리 빌드 (Xcode CLT만 있으면 OK)
+- ✅ `~/Applications/MdViewer.app` 메뉴바 앱으로 등록 (Dock에는 안 뜸)
+- ✅ 로그인 시 자동 시작 + 죽으면 자동 재시작 (LaunchAgent)
+- ✅ `.md` / `.markdown` / `.mdx` 파일 더블클릭 → 바로 브라우저에서 열림
+- ✅ `http://127.0.0.1:8421/` 가 항상 떠 있음
+
+설치 옵션:
+```bash
+scripts/install.sh --root ~/Documents --port 8421   # 다른 폴더/포트
+scripts/install.sh --help                            # 전체 옵션
+scripts/uninstall.sh                                 # 제거
+```
+
+설치 후 메뉴바 아이콘(M↓)을 클릭하면:
+- **Open in Browser** — 웹 뷰어 열기
+- **Reveal Root Folder in Finder**
+- **Copy URL**
+- **Quit**
+
+로그: `~/Library/Logs/MdViewer/mdviewer.{out,err}.log`
+
+---
+
 ## 구조
 
 ```
