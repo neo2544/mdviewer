@@ -336,7 +336,21 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 	case ".html", ".htm":
 		resp.Kind = "html"
 		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
-	case ".txt", ".go", ".py", ".js", ".ts", ".sh", ".yaml", ".yml", ".json", ".toml", ".sql", ".log":
+	case ".txt", ".log", ".csv", ".tsv",
+		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+		".sh", ".bash", ".zsh", ".ksh", ".fish",
+		".ps1", ".psm1", ".bat", ".cmd",
+		".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".cfg", ".env", ".properties",
+		".sql",
+		".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
+		".java", ".jsp", ".gradle", ".kt", ".kts", ".scala", ".sc", ".groovy",
+		".rs", ".rb", ".rake", ".php", ".swift", ".dart",
+		".lua", ".pl", ".pm", ".r",
+		".xml", ".xhtml", ".plist", ".pom", ".csproj",
+		".css", ".scss", ".sass", ".less",
+		".hs", ".ex", ".exs", ".erl", ".clj", ".fs", ".fsx", ".ml", ".mli",
+		".jl", ".cr", ".coffee", ".tf", ".tfvars", ".proto",
+		".diff", ".patch", ".dockerfile", ".vim", ".cmake", ".mk":
 		data, err := os.ReadFile(absPath)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -399,7 +413,22 @@ func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 
 	ext := strings.ToLower(filepath.Ext(absPath))
 	switch ext {
-	case ".md", ".markdown", ".mdx", ".txt", ".go", ".py", ".js", ".ts", ".sh", ".yaml", ".yml", ".json", ".toml", ".sql", ".log":
+	case ".md", ".markdown", ".mdx",
+		".txt", ".log", ".csv", ".tsv",
+		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+		".sh", ".bash", ".zsh", ".ksh", ".fish",
+		".ps1", ".psm1", ".bat", ".cmd",
+		".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".cfg", ".env", ".properties",
+		".sql",
+		".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
+		".java", ".jsp", ".gradle", ".kt", ".kts", ".scala", ".sc", ".groovy",
+		".rs", ".rb", ".rake", ".php", ".swift", ".dart",
+		".lua", ".pl", ".pm", ".r",
+		".xml", ".xhtml", ".plist", ".pom", ".csproj",
+		".css", ".scss", ".sass", ".less",
+		".hs", ".ex", ".exs", ".erl", ".clj", ".fs", ".fsx", ".ml", ".mli",
+		".jl", ".cr", ".coffee", ".tf", ".tfvars", ".proto",
+		".diff", ".patch", ".dockerfile", ".vim", ".cmake", ".mk":
 	default:
 		http.Error(w, "unsupported file type for editing", http.StatusBadRequest)
 		return
@@ -636,6 +665,10 @@ const webAppHTML = `<!doctype html>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/julia.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/crystal.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/languages/coffeescript.min.js"></script>
+  <!-- Adds <table.hljs-ln> line-number gutters to any code element it
+       runs on; keeps hljs spans intact even when a token straddles a
+       newline (so multi-line strings/comments stay highlighted). -->
+  <script src="https://cdn.jsdelivr.net/npm/highlightjs-line-numbers.js@2.8.0/dist/highlightjs-line-numbers.min.js"></script>
   <link id="hljs-theme-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
   <link id="hljs-theme-light" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css" disabled>
   <style>
@@ -1514,6 +1547,38 @@ const webAppHTML = `<!doctype html>
     .preview-body pre code.hljs {
       background: transparent !important;
       padding: 0 !important;
+    }
+    /* highlightjs-line-numbers.js gutter — keep digits dim + monospace,
+       and align the code column to a comfortable left margin. */
+    .preview-body table.hljs-ln {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 0;
+    }
+    .preview-body table.hljs-ln td {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      vertical-align: top;
+    }
+    .preview-body .hljs-ln-numbers {
+      user-select: none;
+      text-align: right;
+      padding-right: 12px !important;
+      color: color-mix(in oklab, var(--text) 35%, var(--muted)) !important;
+      border-right: 1px solid color-mix(in oklab, var(--line) 25%, transparent);
+      width: 1%;
+      white-space: nowrap;
+    }
+    .preview-body .hljs-ln-code { padding-left: 12px !important; }
+    /* Standalone code-file preview (.c/.java/.py/etc.) takes the whole
+       viewport — let it fill the body and wrap nicely. */
+    .preview-body > .code-wrap.code-file {
+      margin: 0;
+    }
+    .preview-body > .code-wrap.code-file > pre {
+      max-height: none;
+      border-radius: 10px;
     }
     .preview-body pre code {
       font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", "Fira Code", Menlo, monospace;
@@ -4299,6 +4364,100 @@ const webAppHTML = `<!doctype html>
       } catch (e) { /* annotation is best-effort */ }
     }
 
+    // File-extension → highlight.js language id. Anything not in the
+    // table falls back to hljs autodetect, which generally does a good
+    // job for popular langs but is worth tightening when we know.
+    const EXT_TO_LANG = {
+      ".c": "c", ".h": "c",
+      ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+      ".cs": "csharp",
+      ".java": "java", ".jsp": "java", ".gradle": "groovy",
+      ".kt": "kotlin", ".kts": "kotlin",
+      ".scala": "scala", ".sc": "scala",
+      ".groovy": "groovy",
+      ".go": "go",
+      ".rs": "rust",
+      ".rb": "ruby", ".rake": "ruby",
+      ".php": "php",
+      ".swift": "swift",
+      ".py": "python", ".pyw": "python",
+      ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript",
+      ".ts": "typescript", ".tsx": "typescript",
+      ".dart": "dart",
+      ".lua": "lua",
+      ".pl": "perl", ".pm": "perl",
+      ".r": "r",
+      ".sh": "bash", ".bash": "bash", ".zsh": "bash", ".ksh": "bash", ".fish": "bash",
+      ".ps1": "powershell", ".psm1": "powershell",
+      ".bat": "dos", ".cmd": "dos",
+      ".vim": "vim",
+      ".xml": "xml", ".xhtml": "xml", ".plist": "xml", ".pom": "xml", ".csproj": "xml",
+      ".yaml": "yaml", ".yml": "yaml",
+      ".toml": "ini", ".ini": "ini", ".conf": "ini", ".cfg": "ini",
+      ".properties": "properties", ".env": "properties",
+      ".json": "json",
+      ".sql": "sql",
+      ".css": "css", ".scss": "scss", ".sass": "scss", ".less": "less",
+      ".hs": "haskell",
+      ".ex": "elixir", ".exs": "elixir",
+      ".erl": "erlang",
+      ".clj": "clojure",
+      ".fs": "fsharp", ".fsx": "fsharp",
+      ".ml": "ocaml", ".mli": "ocaml",
+      ".jl": "julia",
+      ".cr": "crystal",
+      ".coffee": "coffeescript",
+      ".tf": "hcl", ".tfvars": "hcl",
+      ".proto": "protobuf",
+      ".dockerfile": "dockerfile",
+      ".diff": "diff", ".patch": "diff",
+      ".cmake": "cmake",
+      ".mk": "makefile",
+      ".log": "plaintext", ".txt": "plaintext", ".csv": "plaintext", ".tsv": "plaintext",
+    };
+    function langFromPath(path) {
+      if (!path) return null;
+      const name = path.split("/").pop() || "";
+      if (/^Dockerfile(\.|$)/i.test(name)) return "dockerfile";
+      if (/^Makefile(\.|$)/i.test(name)) return "makefile";
+      if (/^Rakefile(\.|$)/i.test(name)) return "ruby";
+      if (/^Gemfile(\.|$)/i.test(name)) return "ruby";
+      if (/^CMakeLists\.txt$/i.test(name)) return "cmake";
+      const dot = name.lastIndexOf(".");
+      if (dot < 0) return null;
+      const ext = name.slice(dot).toLowerCase();
+      return EXT_TO_LANG[ext] || null;
+    }
+
+    function renderCodeFile(data) {
+      previewBodyEl.innerHTML = "";
+      const wrap = document.createElement("div");
+      wrap.className = "code-wrap code-file";
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      const lang = langFromPath(state.selectedPath);
+      if (lang) code.className = "language-" + lang;
+      code.textContent = data.content || "";
+      pre.appendChild(code);
+      wrap.appendChild(pre);
+      previewBodyEl.appendChild(wrap);
+      if (typeof hljs !== "undefined") {
+        try { hljs.highlightElement(code); } catch (e) {}
+        // Line numbers via the plugin, defer one frame so the highlight
+        // pass has settled before the plugin rebuilds the DOM into a
+        // table.
+        if (hljs.lineNumbersBlock) {
+          requestAnimationFrame(() => {
+            try { hljs.lineNumbersBlock(code, { singleLine: true }); } catch (e) {}
+          });
+        }
+      }
+      // Add copy button + language tag via the shared decorator. Skip
+      // its own wrapping step (already wrapped) by hooking the existing
+      // function — it detects the parent's .code-wrap class.
+      try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
+    }
+
     function highlightCodeBlocks(container) {
       if (typeof hljs === "undefined") return;
       // Skip mermaid (handled separately) and anything already painted.
@@ -4476,10 +4635,7 @@ const webAppHTML = `<!doctype html>
         return;
       }
       if (data.kind === "text") {
-        previewBodyEl.innerHTML = "";
-        const pre = document.createElement("pre");
-        pre.textContent = data.content;
-        previewBodyEl.appendChild(pre);
+        renderCodeFile(data);
         return;
       }
       previewBodyEl.innerHTML = '<div class="empty">Binary or unsupported file type.</div>';
