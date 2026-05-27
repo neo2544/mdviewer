@@ -4316,8 +4316,22 @@ const webAppHTML = `<!doctype html>
       clearTimeout(mermaidLabRenderTimer);
     }
 
+    // stripMermaidFence accepts inputs wrapped in a markdown fenced code
+    // block (triple-backtick or triple-tilde, optionally tagged "mermaid")
+    // and returns just the inner mermaid source. Lets the user paste
+    // straight from Markdown / chat tools.
+    function stripMermaidFence(text) {
+      let s = (text || "").trim();
+      // Use \x60 to express the backtick safely inside this string (the
+      // surrounding Go raw string would otherwise close on a literal
+      // backtick in the regex source).
+      s = s.replace(/^[\x60~]{3,}[ \t]*(?:mermaid|mmd)?[ \t]*\r?\n?/i, "");
+      s = s.replace(/\r?\n?[\x60~]{3,}[ \t]*$/i, "");
+      return s.trim();
+    }
+
     async function renderMermaidLab(src) {
-      const text = (src || "").trim();
+      const text = stripMermaidFence(src);
       mermaidLabPreviewEl.innerHTML = "";
       if (!text) {
         const hint = document.createElement("div");
@@ -4336,6 +4350,11 @@ const webAppHTML = `<!doctype html>
         const host = document.createElement("div");
         host.className = "mermaid";
         host.innerHTML = result.svg;
+        host.title = "Click to zoom in lightbox";
+        host.style.cursor = "zoom-in";
+        host.addEventListener("click", function () {
+          openLightbox(buildLightboxClone(host));
+        });
         mermaidLabPreviewEl.appendChild(host);
         if (typeof result.bindFunctions === "function") {
           try { result.bindFunctions(mermaidLabPreviewEl); } catch (e) {}
