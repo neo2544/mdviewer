@@ -1508,6 +1508,13 @@ const webAppHTML = `<!doctype html>
       background: var(--code);
       border: 0;
     }
+    /* hljs's github / github-dark themes paint their own #ffffff /
+       #0d1117 background on .hljs, which would clash with the outer
+       <pre>'s --code. Suppress it so the whole block is a single tone. */
+    .preview-body pre code.hljs {
+      background: transparent !important;
+      padding: 0 !important;
+    }
     .preview-body pre code {
       font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", "Fira Code", Menlo, monospace;
       font-size: 0.82em;
