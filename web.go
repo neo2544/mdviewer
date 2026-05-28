@@ -1844,6 +1844,15 @@ const webAppHTML = `<!doctype html>
     .preview-body .mermaid {
       cursor: zoom-in;
     }
+    /* Let mermaid SVGs render at their full intrinsic height. Without
+       this, mermaid 11 with useMaxWidth:false still inherits a
+       height:auto + max-width:100% rule that can squash tall diagrams.
+       overflow:auto on the wrapper keeps wide ones scrollable. */
+    .preview-body .mermaid svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
     /* ---- "Show all" popup modal ---- */
     .popup-modal {
       position: fixed;
@@ -2811,7 +2820,24 @@ const webAppHTML = `<!doctype html>
     // fixes and new diagram types (Venn, Ishikawa). 11.14/11.15 may bring
     // regressions, so bump explicitly after verifying.
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+    // htmlLabels:false makes mermaid emit pure SVG <text> labels instead
+    // of foreignObject + HTML. Two reasons:
+    //   1. Some flowcharts using HTML labels miscomputed the SVG's
+    //      intrinsic height and rendered with the bottom clipped.
+    //   2. foreignObject content is dropped when an SVG is drawn to
+    //      <canvas> via Image+drawImage, so PNG copy / save came back
+    //      empty for any diagram that used HTML labels.
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: { htmlLabels: false, useMaxWidth: false },
+      class: { htmlLabels: false, useMaxWidth: false },
+      stateDiagram: { htmlLabels: false, useMaxWidth: false },
+      er: { useMaxWidth: false },
+      gantt: { useMaxWidth: false },
+      sequence: { useMaxWidth: false },
+    });
     // Expose for code that lives outside this module scope (e.g. the
     // Mermaid Playground modal renderer accesses window.mermaid).
     window.mermaid = mermaid;
