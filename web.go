@@ -34,6 +34,11 @@ type listResponse struct {
 	Aliases   map[string]string `json:"aliases"`
 }
 
+type recursiveListEntry struct {
+	Dir   string     `json:"dir"`
+	Files []webEntry `json:"files"`
+}
+
 type fileResponse struct {
 	Path    string `json:"path"`
 	Name    string `json:"name"`
@@ -68,6 +73,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/aliases", s.handleAliases)
 	mux.HandleFunc("/api/search", s.handleSearch)
+	mux.HandleFunc("/api/list-recursive", s.handleListRecursive)
 	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
 	return mux
 }
@@ -4657,23 +4663,53 @@ const webAppHTML = `<!doctype html>
     }
 
     // Mermaid (especially with htmlLabels:false) sometimes emits a
-    // viewBox a few pixels shorter than the actually-drawn content,
-    // and the SVG default overflow:hidden then clips the bottom row.
-    // Mark every freshly-rendered mermaid SVG as overflow:visible so
-    // the spilled content draws, matching what the lightbox already
-    // does.
+    // viewBox a few pixels shorter than the actually-drawn content.
+    // The SVG defaults to clipping at viewBox bounds, so the bottom
+    // row gets chopped in the preview pane. Measure the real content
+    // bbox and expand the viewBox to match — the SVG's natural height
+    // then grows and the surrounding .mermaid wrapper grows with it,
+    // so the white background fully contains the diagram.
     function unclipMermaidSvgs(container) {
       const svgs = container.querySelectorAll(".mermaid > svg");
       for (const svg of svgs) {
         try {
-          svg.setAttribute("overflow", "visible");
-          svg.style.overflow = "visible";
           // Drop any explicit pixel height so the browser derives it
           // from the viewBox + width via aspect ratio. Some mermaid
           // versions set both width and height attrs, which can
           // squash a tall diagram inside a narrower container.
           if (svg.hasAttribute("height") && !svg.getAttribute("height").endsWith("%")) {
             svg.removeAttribute("height");
+          }
+          // Temporarily disable overflow so getBBox sees the true
+          // content extent (not the visible-overflow shadow).
+          svg.setAttribute("overflow", "visible");
+          svg.style.overflow = "visible";
+
+          let bbox = null;
+          try { bbox = svg.getBBox(); } catch (e) {}
+          if (!bbox || (!bbox.width && !bbox.height)) continue;
+          const vb = svg.viewBox && svg.viewBox.baseVal;
+          if (!vb) continue;
+
+          const contentRight = bbox.x + bbox.width;
+          const contentBottom = bbox.y + bbox.height;
+          const vbRight = vb.x + vb.width;
+          const vbBottom = vb.y + vb.height;
+          // Only expand — never shrink. Small margin keeps strokes
+          // from kissing the edge of the background.
+          const margin = 4;
+          const newW = Math.max(vb.width, contentRight - vb.x + margin);
+          const newH = Math.max(vb.height, contentBottom - vb.y + margin);
+          if (newW > vb.width || newH > vb.height) {
+            svg.setAttribute("viewBox", vb.x + " " + vb.y + " " + newW + " " + newH);
+            // Mermaid's style="max-width:..."px pins the displayed
+            // width; widen it too if we grew horizontally so the
+            // diagram doesn't get scaled down.
+            const styleAttr = svg.getAttribute("style") || "";
+            const mw = /max-width\s*:\s*([\d.]+)px/i.exec(styleAttr);
+            if (mw && newW > parseFloat(mw[1])) {
+              svg.setAttribute("style", styleAttr.replace(/max-width\s*:\s*[\d.]+px/i, "max-width: " + newW + "px"));
+            }
           }
         } catch (e) {}
       }
