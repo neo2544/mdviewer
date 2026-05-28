@@ -1733,15 +1733,22 @@ const webAppHTML = `<!doctype html>
       position: relative;
     }
     /* Defensive height-cap kill for tall mermaids in preview — some
-       browsers or generic SVG rules can otherwise clip the SVG. */
+       browsers or generic SVG rules can otherwise clip the SVG. The
+       overflow:visible matters too: mermaid (especially with
+       htmlLabels:false + SVG-native text) sometimes underestimates the
+       viewBox height by a few rows, and SVG defaults to clipping at
+       viewBox bounds. visible lets the spilled content draw — which
+       is what the lightbox already does. */
     .preview-body .mermaid,
     .preview-body .mermaid-wrap {
       max-height: none !important;
       height: auto !important;
+      overflow: visible !important;
     }
     .preview-body .mermaid > svg {
       max-height: none !important;
       height: auto !important;
+      overflow: visible !important;
     }
     /* Alt/Option held: enter text-selection mode. Pan/drag is suspended in
        JS, and we make SVG text actually selectable here. */
@@ -4160,6 +4167,7 @@ const webAppHTML = `<!doctype html>
         } catch (e) {
           console.warn("usage guide mermaid.run failed:", e);
         }
+        try { unclipMermaidSvgs(previewBodyEl); } catch (e) {}
         try { highlightCodeBlocks(previewBodyEl); } catch (e) {}
         try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
         decorateRenderedMarkdown();
@@ -4648,6 +4656,29 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    // Mermaid (especially with htmlLabels:false) sometimes emits a
+    // viewBox a few pixels shorter than the actually-drawn content,
+    // and the SVG default overflow:hidden then clips the bottom row.
+    // Mark every freshly-rendered mermaid SVG as overflow:visible so
+    // the spilled content draws, matching what the lightbox already
+    // does.
+    function unclipMermaidSvgs(container) {
+      const svgs = container.querySelectorAll(".mermaid > svg");
+      for (const svg of svgs) {
+        try {
+          svg.setAttribute("overflow", "visible");
+          svg.style.overflow = "visible";
+          // Drop any explicit pixel height so the browser derives it
+          // from the viewBox + width via aspect ratio. Some mermaid
+          // versions set both width and height attrs, which can
+          // squash a tall diagram inside a narrower container.
+          if (svg.hasAttribute("height") && !svg.getAttribute("height").endsWith("%")) {
+            svg.removeAttribute("height");
+          }
+        } catch (e) {}
+      }
+    }
+
     function decorateCodeBlocks(container) {
       // Wrap every <pre><code> (except mermaid, which is replaced earlier)
       // in a .code-wrap so we can float a copy button + language tag in
@@ -4752,6 +4783,7 @@ const webAppHTML = `<!doctype html>
       } catch (e) {
         console.warn("mermaid.run in container failed:", e);
       }
+      try { unclipMermaidSvgs(container); } catch (e) {}
       try { highlightCodeBlocks(container); } catch (e) {}
       try { decorateCodeBlocks(container); } catch (e) {}
       try { decorateRenderedMarkdown(); } catch (e) {}
@@ -4776,6 +4808,7 @@ const webAppHTML = `<!doctype html>
           code.parentElement.replaceWith(wrap);
         }
         await mermaid.run({ nodes: previewBodyEl.querySelectorAll(".mermaid") });
+        try { unclipMermaidSvgs(previewBodyEl); } catch (e) {}
         try { highlightCodeBlocks(previewBodyEl); } catch (e) {}
         try { decorateCodeBlocks(previewBodyEl); } catch (e) {}
         decorateRenderedMarkdown();
