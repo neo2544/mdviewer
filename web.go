@@ -2436,11 +2436,33 @@ const webAppHTML = `<!doctype html>
       font-size: 12px;
       color: var(--text);
       line-height: 1.45;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
     }
     .search-hit:hover { background: var(--panel-2); }
     .search-hit .search-hit-needle {
       color: var(--accent);
       font-weight: 600;
+    }
+    .search-hit .search-hit-line {
+      flex: 0 0 auto;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      color: color-mix(in oklab, var(--text) 45%, var(--muted));
+      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+      padding: 1px 6px;
+      border-radius: 999px;
+      min-width: 32px;
+      text-align: center;
+      letter-spacing: 0.02em;
+    }
+    .search-hit .search-hit-ctx {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .search-file-row {
       padding: 6px 8px;
@@ -2583,6 +2605,80 @@ const webAppHTML = `<!doctype html>
     }
     .searchbox.has-icon .search-input { padding-left: 32px; }
     .searchbox.has-icon:focus-within .searchbox-icon { color: var(--accent); }
+    .searchbox.has-browse-btn .search-input { padding-right: 28px; }
+    .searchbox-browse-btn {
+      position: absolute;
+      right: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 3px 4px;
+      border-radius: 6px;
+      line-height: 0;
+      display: flex;
+      align-items: center;
+    }
+    .searchbox-browse-btn:hover { color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); }
+    .searchbox-browse-btn svg { width: 13px; height: 13px; }
+    /* Folder Browse Modal */
+    .fb-search-wrap {
+      position: relative;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      display: flex;
+      align-items: center;
+    }
+    .fb-search-wrap .fb-search-icon {
+      position: absolute;
+      left: 14px;
+      width: 13px;
+      height: 13px;
+      color: var(--muted);
+      pointer-events: none;
+      flex-shrink: 0;
+    }
+    #fbSearch {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 13px;
+      padding: 10px 14px 10px 36px;
+      box-sizing: border-box;
+    }
+    .fb-group-header {
+      padding: 6px 14px 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: color-mix(in oklab, var(--panel-2) 95%, var(--line));
+      border-top: 1px solid color-mix(in oklab, var(--line) 50%, transparent);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .fb-group-header:first-child { border-top: 0; }
+    .fb-file {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .fb-file:hover { background: color-mix(in oklab, var(--accent) 12%, var(--panel-2)); }
+    .fb-file.active { background: color-mix(in oklab, var(--accent) 18%, var(--panel-2)); color: var(--accent); }
+    .fb-file-icon { color: var(--muted); font-size: 12px; flex-shrink: 0; line-height: 1; }
+    .fb-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fb-file-name mark { background: transparent; color: var(--accent); font-weight: 600; }
+    .fb-file-time { font-size: 11px; color: var(--muted); white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .fb-empty, .fb-loading { padding: 32px 16px; text-align: center; color: var(--muted); font-size: 13px; }
     /* Path chip: small folder icon prefix. */
     #cwd.path-chip::before {
       content: "";
@@ -2626,12 +2722,19 @@ const webAppHTML = `<!doctype html>
           </div>
           <div class="subtle path-chip" id="cwd"></div>
           <a class="git-remote-link" id="gitRemoteLink" href="#" target="_blank" rel="noopener" hidden>↗ open remote</a>
-          <div class="searchbox has-icon">
+          <div class="searchbox has-icon has-browse-btn">
             <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="7" cy="7" r="4.5" />
               <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
             </svg>
             <input class="search-input" id="searchInput" type="search" placeholder="Search files" spellcheck="false" />
+            <button class="searchbox-browse-btn" id="browseSubfoldersBtn" title="하위 폴더 포함 탐색" type="button" aria-label="하위 폴더 탐색">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1.5 3.5 C1.5 2.7 2.2 2 3 2 H5.5 L6.5 3 H13 c.8 0 1.5.7 1.5 1.5 V12.5 c0 .8-.7 1.5-1.5 1.5 H3 c-.8 0-1.5-.7-1.5-1.5 Z" />
+                <line x1="5" y1="7" x2="11" y2="7" />
+                <line x1="5" y1="10" x2="9" y2="10" />
+              </svg>
+            </button>
           </div>
           <div class="searchbox path-jump has-icon">
             <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2773,6 +2876,25 @@ const webAppHTML = `<!doctype html>
       <input type="text" id="popupSearch" placeholder="Filter…" autocomplete="off" spellcheck="false" />
       <div id="popupResults" class="popup-results"></div>
       <div class="popup-foot subtle">Click to open · Esc to close</div>
+    </div>
+  </div>
+  <div class="popup-modal" id="folderBrowseModal" hidden>
+    <div class="popup-card">
+      <div class="popup-head">
+        <div class="popup-title" id="folderBrowseTitle">하위 폴더 탐색</div>
+        <div class="popup-head-actions">
+          <button type="button" class="popup-close" id="folderBrowseClose" title="닫기">✕</button>
+        </div>
+      </div>
+      <div class="fb-search-wrap">
+        <svg class="fb-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5" />
+          <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
+        </svg>
+        <input type="search" id="fbSearch" placeholder="파일명 검색…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div id="fbResults" class="popup-results"></div>
+      <div class="popup-foot subtle">클릭하면 파일 열기 · Esc로 닫기</div>
     </div>
   </div>
   <div class="mermaid-lab-modal" id="mermaidLabModal" hidden>
@@ -3028,6 +3150,11 @@ const webAppHTML = `<!doctype html>
     const mermaidLabCloseBtnEl = document.getElementById("mermaidLabCloseBtn");
     const mermaidLabClearBtnEl = document.getElementById("mermaidLabClearBtn");
     const mermaidLabCopyBtnEl = document.getElementById("mermaidLabCopyBtn");
+    const browseSubfoldersBtnEl = document.getElementById("browseSubfoldersBtn");
+    const folderBrowseModalEl = document.getElementById("folderBrowseModal");
+    const folderBrowseTitleEl = document.getElementById("folderBrowseTitle");
+    const fbSearchEl = document.getElementById("fbSearch");
+    const fbResultsEl = document.getElementById("fbResults");
 
     function applySidebarLayout() {
       const minWidth = 140;
@@ -3953,8 +4080,66 @@ const webAppHTML = `<!doctype html>
       mark.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
+    // Resolve a 1-indexed line number for a hit. Code files: walk up to
+    // a <tr> in the .hljs-ln table. Markdown: walk up to any ancestor
+    // carrying a data-source-line attribute (set by annotateSourceLines).
+    function lineNumberForHit(mark) {
+      const tr = mark.closest && mark.closest("tr");
+      if (tr) {
+        const num = tr.querySelector(".hljs-ln-numbers");
+        if (num) {
+          const n = parseInt(num.getAttribute("data-line-number") || num.textContent, 10);
+          if (!isNaN(n)) return n;
+        }
+      }
+      let el = mark.parentElement;
+      while (el && el !== previewBodyEl) {
+        const v = el.getAttribute && el.getAttribute("data-source-line");
+        if (v != null) {
+          const n = parseInt(v, 10);
+          if (!isNaN(n)) return n + 1;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    }
+
+    // Rank a hit by how "important" its containing element looks.
+    // Headings outrank emphasis outrank code outrank plain body text.
+    // A whole-word boundary bumps the score so matches at term edges
+    // float above mid-word matches.
+    const _HIT_SCORE_BY_TAG = {
+      H1: 100, H2: 80, H3: 65, H4: 55, H5: 50, H6: 45,
+      STRONG: 30, B: 30, TH: 25, EM: 18, I: 18,
+      CODE: 14, BLOCKQUOTE: 8,
+    };
+    function _isWordBoundary(c) {
+      // ASCII word chars + Hangul syllables are "word"; everything else
+      // (spaces, punctuation, end-of-text) is a boundary.
+      return !c || !/[A-Za-z0-9_À-ɏ가-힯぀-ヿ一-鿿]/.test(c);
+    }
+    function priorityForHit(mark) {
+      let score = 0;
+      let el = mark.parentElement;
+      while (el && el !== previewBodyEl) {
+        const tag = el.tagName;
+        if (tag && _HIT_SCORE_BY_TAG[tag] && score < _HIT_SCORE_BY_TAG[tag]) {
+          score = _HIT_SCORE_BY_TAG[tag];
+        }
+        el = el.parentElement;
+      }
+      const before = (mark.previousSibling && mark.previousSibling.nodeValue) || "";
+      const after  = (mark.nextSibling && mark.nextSibling.nodeValue) || "";
+      if (_isWordBoundary(before.slice(-1)) && _isWordBoundary(after.slice(0, 1))) {
+        score += 20;
+      }
+      return score;
+    }
+
     // renderInFileResults updates the summary + clickable hit list in the
-    // right panel.
+    // right panel. Each row now shows the line number + a context snippet,
+    // and rows are ranked: heading > emphasis > code > body, with a
+    // whole-word boundary bonus.
     function renderInFileResults(needle, hits) {
       searchInFileHitsEl.innerHTML = "";
       if (!needle) {
@@ -3966,25 +4151,45 @@ const webAppHTML = `<!doctype html>
         return;
       }
       searchInFileSummaryEl.textContent = hits.length + " match" + (hits.length === 1 ? "" : "es");
+      // Build ranked index list, preserving the original hits[] order
+      // for focusHit (since it scrolls by index in document order).
+      const ranked = hits.map(function (m, i) {
+        return { mark: m, idx: i, score: priorityForHit(m), line: lineNumberForHit(m) };
+      });
+      ranked.sort(function (a, b) {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.idx - b.idx;
+      });
       const maxList = 50;
-      const shown = hits.slice(0, maxList);
-      for (let i = 0; i < shown.length; i++) {
-        const mark = shown[i];
+      const shown = ranked.slice(0, maxList);
+      for (const item of shown) {
+        const mark = item.mark;
         const ctxBefore = (mark.previousSibling && mark.previousSibling.nodeValue) || "";
         const ctxAfter  = (mark.nextSibling && mark.nextSibling.nodeValue) || "";
         const row = document.createElement("div");
         row.className = "search-hit";
+        if (item.line != null) {
+          const ln = document.createElement("span");
+          ln.className = "search-hit-line";
+          ln.textContent = "L" + item.line;
+          row.appendChild(ln);
+        }
+        const ctx = document.createElement("span");
+        ctx.className = "search-hit-ctx";
         const pre = document.createElement("span");
-        pre.textContent = "..." + ctxBefore.slice(-30);
+        pre.textContent = (ctxBefore.length > 30 ? "…" : "") + ctxBefore.slice(-30);
         const hit = document.createElement("span");
         hit.className = "search-hit-needle";
         hit.textContent = mark.textContent;
         const post = document.createElement("span");
-        post.textContent = ctxAfter.slice(0, 30) + "...";
-        row.appendChild(pre);
-        row.appendChild(hit);
-        row.appendChild(post);
-        row.addEventListener("click", function () { focusHit(i); });
+        post.textContent = ctxAfter.slice(0, 30) + (ctxAfter.length > 30 ? "…" : "");
+        ctx.appendChild(pre);
+        ctx.appendChild(hit);
+        ctx.appendChild(post);
+        row.appendChild(ctx);
+        row.addEventListener("click", (function (focusIdx) {
+          return function () { focusHit(focusIdx); };
+        })(item.idx));
         searchInFileHitsEl.appendChild(row);
       }
       if (hits.length > maxList) {
@@ -5683,6 +5888,128 @@ const webAppHTML = `<!doctype html>
     document.getElementById("showAllRecentDirs").onclick = () => openListPopup("recentDirs");
     document.getElementById("showAllFavorites").onclick = () => openListPopup("favorites");
 
+    // ---- Folder Browse Modal ----
+    let fbAllGroups = [];
+
+    function openFolderBrowse() {
+      folderBrowseModalEl.hidden = false;
+      fbSearchEl.value = "";
+      fbResultsEl.innerHTML = '<div class="fb-loading">불러오는 중…</div>';
+      const cwd = state.cwd || "";
+      const shortCwd = cwd ? cwd.replace(/.*\//, "") || cwd : "";
+      folderBrowseTitleEl.textContent = shortCwd ? shortCwd + " 하위 폴더 탐색" : "하위 폴더 탐색";
+      fbAllGroups = [];
+      setTimeout(() => { try { fbSearchEl.focus(); } catch (e) {} }, 50);
+      fetch("/api/list-recursive?dir=" + encodeURIComponent(cwd))
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(r); })
+        .then(function(groups) {
+          fbAllGroups = groups || [];
+          renderFolderBrowse(fbSearchEl.value);
+        })
+        .catch(function() {
+          fbResultsEl.innerHTML = '<div class="fb-empty">불러오기 실패</div>';
+        });
+    }
+
+    function closeFolderBrowse() {
+      folderBrowseModalEl.hidden = true;
+      fbAllGroups = [];
+    }
+
+    function fbHighlightName(name, query) {
+      if (!query) return escapeHtml(name);
+      const lname = name.toLowerCase();
+      const lq = query.toLowerCase();
+      const idx = lname.indexOf(lq);
+      if (idx < 0) return escapeHtml(name);
+      return escapeHtml(name.slice(0, idx)) +
+        "<mark>" + escapeHtml(name.slice(idx, idx + query.length)) + "</mark>" +
+        escapeHtml(name.slice(idx + query.length));
+    }
+
+    function renderFolderBrowse(query) {
+      fbResultsEl.innerHTML = "";
+      const q = (query || "").trim();
+      const lq = q.toLowerCase();
+      const cwd = state.cwd || "";
+      let hasAny = false;
+
+      for (const group of fbAllGroups) {
+        const files = lq
+          ? group.files.filter(function(f) { return f.name.toLowerCase().includes(lq); })
+          : group.files;
+        if (!files.length) continue;
+        hasAny = true;
+
+        // Folder header - show relative path from cwd
+        let relDir = group.dir;
+        if (group.dir === cwd) {
+          relDir = "./";
+        } else if (group.dir.startsWith(cwd + "/")) {
+          relDir = group.dir.slice(cwd.length + 1) + "/";
+        }
+
+        const header = document.createElement("div");
+        header.className = "fb-group-header";
+        header.title = group.dir;
+        header.textContent = "📁 " + relDir;
+        fbResultsEl.appendChild(header);
+
+        for (const file of files) {
+          const row = document.createElement("div");
+          row.className = "fb-file" + (file.path === state.selectedPath ? " active" : "");
+          row.title = file.path;
+
+          const iconEl = document.createElement("span");
+          iconEl.className = "fb-file-icon";
+          iconEl.textContent = "📄";
+          row.appendChild(iconEl);
+
+          const nameEl = document.createElement("span");
+          nameEl.className = "fb-file-name";
+          nameEl.innerHTML = fbHighlightName(file.name, q);
+          row.appendChild(nameEl);
+
+          const timeEl = document.createElement("span");
+          timeEl.className = "fb-file-time";
+          if (file.mod_time) {
+            try {
+              timeEl.textContent = relativeTime(new Date(file.mod_time).getTime());
+              timeEl.title = new Date(file.mod_time).toLocaleString();
+            } catch (e) {}
+          }
+          row.appendChild(timeEl);
+
+          row.onclick = function(path) {
+            return function() {
+              closeFolderBrowse();
+              selectFile(path, { historyMode: "push" });
+            };
+          }(file.path);
+          fbResultsEl.appendChild(row);
+        }
+      }
+
+      if (!hasAny) {
+        const empty = document.createElement("div");
+        empty.className = "fb-empty";
+        empty.textContent = lq ? "검색 결과 없음" : "파일 없음";
+        fbResultsEl.appendChild(empty);
+      }
+    }
+
+    browseSubfoldersBtnEl.addEventListener("click", openFolderBrowse);
+    document.getElementById("folderBrowseClose").onclick = closeFolderBrowse;
+    folderBrowseModalEl.addEventListener("click", function(e) {
+      if (e.target === folderBrowseModalEl) closeFolderBrowse();
+    });
+    fbSearchEl.addEventListener("input", function() {
+      renderFolderBrowse(fbSearchEl.value);
+    });
+    fbSearchEl.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") { e.preventDefault(); closeFolderBrowse(); }
+    });
+
     const paletteEl = document.getElementById("palette");
     const paletteInputEl = document.getElementById("paletteInput");
     const paletteResultsEl = document.getElementById("paletteResults");
@@ -5871,6 +6198,11 @@ const webAppHTML = `<!doctype html>
       // Esc closes the Mermaid Playground modal.
       if (event.key === "Escape" && !mermaidLabModalEl.hidden) {
         closeMermaidLab();
+        return;
+      }
+      // Esc closes the folder browse modal.
+      if (event.key === "Escape" && !folderBrowseModalEl.hidden) {
+        closeFolderBrowse();
         return;
       }
       // Esc closes the "Show all" popup when focus is anywhere outside its input.
@@ -7611,6 +7943,75 @@ func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Most matches first.
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
 	s.writeJSON(w, http.StatusOK, out)
+}
+
+func (s *webServer) handleListRecursive(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	q := strings.ToLower(r.URL.Query().Get("q"))
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid dir", http.StatusBadRequest)
+		return
+	}
+
+	const maxFiles = 2000
+	const maxDepth = 8
+	var result []recursiveListEntry
+	totalFiles := 0
+
+	var walk func(d string, depth int)
+	walk = func(d string, depth int) {
+		if depth > maxDepth || totalFiles >= maxFiles {
+			return
+		}
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			return
+		}
+		var files []webEntry
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			full := filepath.Join(d, entry.Name())
+			if entry.IsDir() {
+				walk(full, depth+1)
+				continue
+			}
+			if q != "" && !strings.Contains(strings.ToLower(entry.Name()), q) {
+				continue
+			}
+			var size int64
+			var modTime string
+			if info, ierr := entry.Info(); ierr == nil {
+				size = info.Size()
+				modTime = info.ModTime().Format(time.RFC3339)
+			}
+			files = append(files, webEntry{
+				Name:    entry.Name(),
+				Path:    full,
+				IsDir:   false,
+				Size:    size,
+				ModTime: modTime,
+			})
+			totalFiles++
+			if totalFiles >= maxFiles {
+				break
+			}
+		}
+		if len(files) > 0 {
+			result = append(result, recursiveListEntry{Dir: d, Files: files})
+		}
+	}
+
+	walk(abs, 0)
+	if result == nil {
+		result = []recursiveListEntry{}
+	}
+	s.writeJSON(w, http.StatusOK, result)
 }
 
 // collectSnippets returns up to maxCount short context strings around the
