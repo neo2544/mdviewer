@@ -2506,6 +2506,44 @@ const webAppHTML = `<!doctype html>
       100% { background-color: transparent; }
     }
     .preview-body.refresh-flash { animation: preview-refresh-flash 900ms ease-out; }
+    /* Transient toast notification used for copy/save confirmations. */
+    .toast-stack {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5000;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      padding: 10px 16px;
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--panel-2) 92%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      color: var(--text);
+      font-size: 13px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      backdrop-filter: blur(6px);
+      animation: toast-in 180ms ease-out, toast-out 220ms ease-in 1800ms forwards;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 60ch;
+    }
+    .toast .toast-icon { font-size: 15px; }
+    .toast.toast-ok { border-color: color-mix(in oklab, oklch(0.7 0.18 150) 55%, transparent); }
+    .toast.toast-err { border-color: color-mix(in oklab, oklch(0.7 0.22 28) 55%, transparent); }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes toast-out {
+      to { opacity: 0; transform: translateY(8px); }
+    }
     /* Icon-prefixed inputs: the icon sits inside the rounded box and
        the input gets extra left padding so text doesn't run under it. */
     .searchbox.has-icon { position: relative; }
@@ -2746,6 +2784,7 @@ const webAppHTML = `<!doctype html>
       <button type="button" data-action="zoom-out" title="Zoom out">−</button>
       <button type="button" data-action="reset" title="Reset (Double-click)">⤢</button>
       <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+      <button type="button" data-action="annocopy" id="lbAnnoCopyBtn" title="Copy current view as PNG to clipboard">📋</button>
       <button type="button" data-action="annosave" id="lbAnnoSaveBtn" title="Save current view as PNG (with annotations)">💾</button>
       <button type="button" data-action="close" title="Close (Esc)">✕</button>
     </div>
@@ -2765,6 +2804,7 @@ const webAppHTML = `<!doctype html>
     </div>
     <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
   </div>
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
   <script type="module">
     // Pinned to 11.13.0 — the "polished" 11.x release with backward-compat
@@ -2915,6 +2955,25 @@ const webAppHTML = `<!doctype html>
     const previewBodyEl = document.getElementById("previewBody");
     const kindChipEl = document.getElementById("kindChip");
     const statusTextEl = document.getElementById("statusText");
+    const toastStackEl = document.getElementById("toastStack");
+    function showToast(message, opts) {
+      if (!toastStackEl) return;
+      opts = opts || {};
+      const t = document.createElement("div");
+      t.className = "toast " + (opts.kind === "err" ? "toast-err" : opts.kind === "ok" ? "toast-ok" : "");
+      if (opts.icon) {
+        const ic = document.createElement("span");
+        ic.className = "toast-icon";
+        ic.textContent = opts.icon;
+        t.appendChild(ic);
+      }
+      const tx = document.createElement("span");
+      tx.textContent = message;
+      t.appendChild(tx);
+      toastStackEl.appendChild(t);
+      // Match the CSS animation total: 180ms in + 1800ms wait + 220ms out
+      setTimeout(() => { try { t.remove(); } catch (e) {} }, 2400);
+    }
     const scrollTextEl = document.getElementById("scrollText");
     const copyPathBtnEl = document.getElementById("copyPathBtn");
     const copyPathLabelEl = copyPathBtnEl.querySelector(".path-copy-label");
@@ -6411,23 +6470,19 @@ const webAppHTML = `<!doctype html>
       });
     }
 
-    function saveLightboxImage() {
+    function renderLightboxToBlob(onBlob) {
+      // Shared SVG→PNG-blob pipeline used by both Save (download) and
+      // Copy (clipboard). Callback receives (blob, mime).
       const child = lightboxStageEl.firstElementChild;
-      if (!child) return;
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      // For raw <img> content there are no SVG annotations to bake in —
-      // hand the user the source bytes directly.
+      if (!child) { onBlob(null); return; }
       if (child.tagName === "IMG") {
-        const a = document.createElement("a");
-        a.href = child.src;
-        a.download = "image-" + stamp + ".png";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Just hand back the raw image — fetch it from cache as a blob.
+        fetch(child.src).then((r) => r.blob()).then((b) => onBlob(b, b.type || "image/png"))
+          .catch(() => onBlob(null));
         return;
       }
       const svg = child.tagName && child.tagName.toLowerCase() === "svg" ? child : child.querySelector("svg");
-      if (!svg) return;
+      if (!svg) { onBlob(null); return; }
       // Snapshot via XMLSerializer + canvas: clone first so we don't mutate
       // the live SVG, then ensure xmlns is set (some Mermaid output omits it).
       const clone = svg.cloneNode(true);
@@ -6485,18 +6540,46 @@ const webAppHTML = `<!doctype html>
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         canvas.toBlob((b) => {
           URL.revokeObjectURL(url);
-          if (!b) return;
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(b);
-          a.download = "diagram-" + stamp + ".png";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          onBlob(b, "image/png");
         }, "image/png");
       };
-      img.onerror = () => { URL.revokeObjectURL(url); };
+      img.onerror = () => { URL.revokeObjectURL(url); onBlob(null); };
       img.src = url;
+    }
+
+    function saveLightboxImage() {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      renderLightboxToBlob((blob, mime) => {
+        if (!blob) { showToast("저장할 이미지를 만들 수 없어요", { kind: "err", icon: "⚠️" }); return; }
+        const ext = (mime || "image/png").indexOf("jpeg") >= 0 ? "jpg" : "png";
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "diagram-" + stamp + "." + ext;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        showToast("PNG로 저장했어요 (" + a.download + ")", { kind: "ok", icon: "💾" });
+      });
+    }
+
+    async function copyLightboxImage() {
+      if (!navigator.clipboard || typeof window.ClipboardItem !== "function") {
+        showToast("이 브라우저는 이미지 클립보드 복사를 지원하지 않아요", { kind: "err", icon: "⚠️" });
+        return;
+      }
+      renderLightboxToBlob(async (blob, mime) => {
+        if (!blob) { showToast("복사할 이미지를 만들 수 없어요", { kind: "err", icon: "⚠️" }); return; }
+        try {
+          // ClipboardItem only natively accepts image/png on most
+          // platforms; the SVG path already produces PNG.
+          const item = new ClipboardItem({ [mime || "image/png"]: blob });
+          await navigator.clipboard.write([item]);
+          showToast("이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+        } catch (e) {
+          showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+        }
+      });
     }
 
     function openLightbox(node) {
@@ -6831,6 +6914,7 @@ const webAppHTML = `<!doctype html>
       else if (action === "annopostit") addNewPostit();
       else if (action === "annoclear") clearAnnotations();
       else if (action === "annosave") saveLightboxImage();
+      else if (action === "annocopy") copyLightboxImage();
     };
     for (const tb of lightboxToolbarEls) tb.addEventListener("click", handleToolbarClick);
 
@@ -6948,15 +7032,61 @@ const webAppHTML = `<!doctype html>
       const text = extractMermaidText(svg);
       if (!text) {
         if (btn) flashButton(btn, "Empty", false);
+        showToast("복사할 텍스트가 없어요", { kind: "err", icon: "⚠️" });
         return;
       }
       try {
         await navigator.clipboard.writeText(text);
         if (btn) flashButton(btn, "Copied ✓", true);
+        showToast("머메이드 텍스트를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
       } catch (err) {
         console.error("copy failed:", err);
         if (btn) flashButton(btn, "Copy failed", false);
+        showToast("클립보드 복사 실패: " + (err && err.message || err), { kind: "err", icon: "⚠️" });
       }
+    }
+
+    async function copyMermaidImage(el) {
+      const svg = el.querySelector("svg");
+      if (!svg) { showToast("복사할 다이어그램이 없어요", { kind: "err", icon: "⚠️" }); return; }
+      if (!navigator.clipboard || typeof window.ClipboardItem !== "function") {
+        showToast("이 브라우저는 이미지 클립보드 복사를 지원하지 않아요", { kind: "err", icon: "⚠️" });
+        return;
+      }
+      const clone = svg.cloneNode(true);
+      if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      const rect = svg.getBoundingClientRect();
+      const w = (vb && vb.width) || svg.clientWidth || rect.width || 800;
+      const h = (vb && vb.height) || svg.clientHeight || rect.height || 600;
+      clone.setAttribute("width", String(w));
+      clone.setAttribute("height", String(h));
+      const xml = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = async () => {
+        const scale = Math.max(2, window.devicePixelRatio || 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(w * scale);
+        canvas.height = Math.ceil(h * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(async (b) => {
+          URL.revokeObjectURL(url);
+          if (!b) { showToast("이미지 생성 실패", { kind: "err", icon: "⚠️" }); return; }
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]);
+            showToast("다이어그램 이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+          } catch (e) {
+            showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+          }
+        }, "image/png");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); showToast("다이어그램 변환 실패", { kind: "err", icon: "⚠️" }); };
+      img.src = url;
     }
 
     function flashButton(btn, label, ok) {
@@ -7000,6 +7130,21 @@ const webAppHTML = `<!doctype html>
         copyMermaidText(el, copyBtn);
       });
       bar.appendChild(copyBtn);
+
+      const copyImgBtn = document.createElement("button");
+      copyImgBtn.type = "button";
+      copyImgBtn.className = "mermaid-tool-btn";
+      copyImgBtn.textContent = "Copy image";
+      copyImgBtn.title = "Copy this diagram as a PNG image to the clipboard";
+      copyImgBtn.addEventListener("pointerdown", stop);
+      copyImgBtn.addEventListener("pointerup", stop);
+      copyImgBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        copyMermaidImage(el);
+      });
+      bar.appendChild(copyImgBtn);
+
       wrap.appendChild(bar);
     }
 
