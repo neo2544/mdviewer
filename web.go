@@ -1732,6 +1732,17 @@ const webAppHTML = `<!doctype html>
       background: white;
       position: relative;
     }
+    /* Defensive height-cap kill for tall mermaids in preview — some
+       browsers or generic SVG rules can otherwise clip the SVG. */
+    .preview-body .mermaid,
+    .preview-body .mermaid-wrap {
+      max-height: none !important;
+      height: auto !important;
+    }
+    .preview-body .mermaid > svg {
+      max-height: none !important;
+      height: auto !important;
+    }
     /* Alt/Option held: enter text-selection mode. Pan/drag is suspended in
        JS, and we make SVG text actually selectable here. */
     .mermaid.alt-select {
@@ -6578,25 +6589,54 @@ const webAppHTML = `<!doctype html>
       clone.setAttribute("width", String(w));
       clone.setAttribute("height", String(h));
       const xml = new XMLSerializer().serializeToString(clone);
-      const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
+      // Use a base64 data URL — handles non-ASCII content (Korean text
+      // in labels) reliably and avoids blob: URL quirks some browsers
+      // hit on large SVGs.
+      let dataUrl;
+      try {
+        dataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
+      } catch (e) {
+        showToast("SVG 인코딩 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+        onBlob(null);
+        return;
+      }
       const img = new Image();
       img.onload = () => {
         const scale = Math.max(2, window.devicePixelRatio || 1);
+        // Cap canvas pixel dimensions to stay under browser limits.
+        const maxDim = 16384;
+        let cw = Math.ceil(w * scale);
+        let ch = Math.ceil(h * scale);
+        if (cw > maxDim || ch > maxDim) {
+          const k = Math.min(maxDim / cw, maxDim / ch);
+          cw = Math.ceil(cw * k);
+          ch = Math.ceil(ch * k);
+        }
         const canvas = document.createElement("canvas");
-        canvas.width = Math.ceil(w * scale);
-        canvas.height = Math.ceil(h * scale);
+        canvas.width = cw;
+        canvas.height = ch;
         const ctx = canvas.getContext("2d");
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        try {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        } catch (e) {
+          showToast("Canvas 그리기 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+          onBlob(null);
+          return;
+        }
         canvas.toBlob((b) => {
-          URL.revokeObjectURL(url);
+          if (!b) {
+            showToast("PNG 인코딩 실패 (canvas.toBlob null)", { kind: "err", icon: "⚠️" });
+          }
           onBlob(b, "image/png");
         }, "image/png");
       };
-      img.onerror = () => { URL.revokeObjectURL(url); onBlob(null); };
-      img.src = url;
+      img.onerror = (e) => {
+        showToast("SVG 이미지 로딩 실패 (data URL " + Math.round(dataUrl.length / 1024) + "KB)", { kind: "err", icon: "⚠️" });
+        onBlob(null);
+      };
+      img.src = dataUrl;
     }
 
     function saveLightboxImage() {
@@ -7163,24 +7203,37 @@ const webAppHTML = `<!doctype html>
         clone.setAttribute("width", String(w));
         clone.setAttribute("height", String(h));
         const xml = new XMLSerializer().serializeToString(clone);
-        const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+        let dataUrl;
+        try {
+          dataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
+        } catch (e) {
+          reject(new Error("SVG 인코딩 실패")); return;
+        }
         const img = new Image();
         img.onload = () => {
           const scale = Math.max(2, window.devicePixelRatio || 1);
+          const maxDim = 16384;
+          let cw = Math.ceil(w * scale);
+          let ch = Math.ceil(h * scale);
+          if (cw > maxDim || ch > maxDim) {
+            const k = Math.min(maxDim / cw, maxDim / ch);
+            cw = Math.ceil(cw * k);
+            ch = Math.ceil(ch * k);
+          }
           const canvas = document.createElement("canvas");
-          canvas.width = Math.ceil(w * scale);
-          canvas.height = Math.ceil(h * scale);
+          canvas.width = cw;
+          canvas.height = ch;
           const ctx = canvas.getContext("2d");
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          try { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); }
+          catch (e) { reject(new Error("Canvas 그리기 실패: " + (e && e.message || e))); return; }
           canvas.toBlob((b) => {
-            URL.revokeObjectURL(url);
-            b ? resolve(b) : reject(new Error("이미지 생성 실패"));
+            b ? resolve(b) : reject(new Error("PNG 인코딩 실패 (canvas.toBlob null)"));
           }, "image/png");
         };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("다이어그램 변환 실패")); };
-        img.src = url;
+        img.onerror = () => { reject(new Error("SVG 이미지 로딩 실패 (" + Math.round(dataUrl.length / 1024) + "KB)")); };
+        img.src = dataUrl;
       });
       try {
         const item = new ClipboardItem({ "image/png": blobPromise });
