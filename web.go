@@ -2498,6 +2498,14 @@ const webAppHTML = `<!doctype html>
     }
     .git-remote-link:hover { text-decoration: underline; }
     .git-remote-link[hidden] { display: none; }
+    /* Brief accent wash on the preview pane after an auto-refresh
+       reloads the open file. Lets the user feel the update without
+       losing their scroll position. */
+    @keyframes preview-refresh-flash {
+      0%   { background-color: color-mix(in oklab, var(--accent) 22%, transparent); }
+      100% { background-color: transparent; }
+    }
+    .preview-body.refresh-flash { animation: preview-refresh-flash 900ms ease-out; }
     /* Icon-prefixed inputs: the icon sits inside the rounded box and
        the input gets extra left padding so text doesn't run under it. */
     .searchbox.has-icon { position: relative; }
@@ -3964,6 +3972,11 @@ const webAppHTML = `<!doctype html>
     async function selectFile(path, options = {}) {
       // Same-file (re-select) skips the guard; only changing files matters.
       if (path !== state.selectedPath && !confirmDiscardDirty()) return;
+      // Capture the current scroll BEFORE the render wipes the body, so
+      // an auto-refresh of the same file can restore the user's place.
+      const prevScrollTop = (options.preserveScroll && path === state.selectedPath)
+        ? previewBodyEl.scrollTop
+        : null;
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
       if (!state.cwd || !path.startsWith(state.cwd + "/")) {
@@ -3996,12 +4009,22 @@ const webAppHTML = `<!doctype html>
       kindChipEl.textContent = data.kind;
       kindChipEl.setAttribute("data-kind", data.kind || "idle");
       await renderCurrentView(data);
-      if (state.selectedHash) {
+      if (prevScrollTop !== null) {
+        // Auto-refresh path: keep the user where they were and flash
+        // the pane briefly so the update is noticed.
+        previewBodyEl.scrollTop = prevScrollTop;
+        previewBodyEl.classList.remove("refresh-flash");
+        // Force a reflow so removing + re-adding restarts the animation
+        // when refreshes land back-to-back.
+        void previewBodyEl.offsetWidth;
+        previewBodyEl.classList.add("refresh-flash");
+        setTimeout(() => previewBodyEl.classList.remove("refresh-flash"), 1000);
+      } else if (state.selectedHash) {
         requestAnimationFrame(() => scrollToHash(state.selectedHash));
       } else {
         previewBodyEl.scrollTop = 0;
       }
-      statusTextEl.textContent = "Showing " + data.name;
+      statusTextEl.textContent = (prevScrollTop !== null ? "Updated " : "Showing ") + data.name;
       updateCopyPathButton(data.path || path);
       updateEditorButtons();
       if (options.historyMode) {
@@ -4777,7 +4800,9 @@ const webAppHTML = `<!doctype html>
           statusTextEl.textContent = "File changed on disk while editing";
           return;
         }
-        await selectFile(state.selectedPath);
+        // Preserve scroll on auto-refresh and signal the change with a
+        // brief flash on the preview surface.
+        await selectFile(state.selectedPath, { preserveScroll: true });
       }
     }
 
