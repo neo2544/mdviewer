@@ -6548,13 +6548,30 @@ const webAppHTML = `<!doctype html>
     }
 
     function saveLightboxImage() {
+      const child = lightboxStageEl.firstElementChild;
+      if (!child) {
+        showToast("저장할 콘텐츠가 없어요", { kind: "err", icon: "⚠️" });
+        return;
+      }
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      renderLightboxToBlob((blob, mime) => {
+      // For raw <img> content download the source bytes directly — no
+      // canvas round-trip needed (and avoids the IMG → fetch → blob
+      // hop that was silently failing in the previous refactor).
+      if (child.tagName === "IMG") {
+        const a = document.createElement("a");
+        a.href = child.src;
+        a.download = "image-" + stamp + ".png";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast("이미지를 저장했어요", { kind: "ok", icon: "💾" });
+        return;
+      }
+      renderLightboxToBlob((blob) => {
         if (!blob) { showToast("저장할 이미지를 만들 수 없어요", { kind: "err", icon: "⚠️" }); return; }
-        const ext = (mime || "image/png").indexOf("jpeg") >= 0 ? "jpg" : "png";
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = "diagram-" + stamp + "." + ext;
+        a.download = "diagram-" + stamp + ".png";
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -6568,18 +6585,44 @@ const webAppHTML = `<!doctype html>
         showToast("이 브라우저는 이미지 클립보드 복사를 지원하지 않아요", { kind: "err", icon: "⚠️" });
         return;
       }
-      renderLightboxToBlob(async (blob, mime) => {
-        if (!blob) { showToast("복사할 이미지를 만들 수 없어요", { kind: "err", icon: "⚠️" }); return; }
-        try {
-          // ClipboardItem only natively accepts image/png on most
-          // platforms; the SVG path already produces PNG.
-          const item = new ClipboardItem({ [mime || "image/png"]: blob });
-          await navigator.clipboard.write([item]);
-          showToast("이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
-        } catch (e) {
-          showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+      const child = lightboxStageEl.firstElementChild;
+      if (!child) {
+        showToast("복사할 콘텐츠가 없어요", { kind: "err", icon: "⚠️" });
+        return;
+      }
+      // Build the blob lazily inside a Promise. ClipboardItem accepts
+      // Promise<Blob> values, which lets navigator.clipboard.write
+      // fire SYNCHRONOUSLY inside the user gesture even though the
+      // actual PNG rendering is async — Chrome/Safari otherwise reject
+      // the write because the gesture context is "lost" by the time
+      // canvas.toBlob resolves.
+      const blobPromise = new Promise((resolve, reject) => {
+        if (child.tagName === "IMG") {
+          // For non-SVG images we still need a PNG blob (ClipboardItem
+          // only takes image/png reliably). Round through a canvas.
+          const tmp = new Image();
+          tmp.crossOrigin = "anonymous";
+          tmp.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = tmp.naturalWidth || tmp.width || 800;
+            canvas.height = tmp.naturalHeight || tmp.height || 600;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(tmp, 0, 0);
+            canvas.toBlob((b) => b ? resolve(b) : reject(new Error("PNG 변환 실패")), "image/png");
+          };
+          tmp.onerror = () => reject(new Error("이미지 로딩 실패"));
+          tmp.src = child.src;
+        } else {
+          renderLightboxToBlob((b) => b ? resolve(b) : reject(new Error("렌더 실패")));
         }
       });
+      try {
+        const item = new ClipboardItem({ "image/png": blobPromise });
+        await navigator.clipboard.write([item]);
+        showToast("이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+      } catch (e) {
+        showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+      }
     }
 
     function openLightbox(node) {
@@ -7053,40 +7096,45 @@ const webAppHTML = `<!doctype html>
         showToast("이 브라우저는 이미지 클립보드 복사를 지원하지 않아요", { kind: "err", icon: "⚠️" });
         return;
       }
-      const clone = svg.cloneNode(true);
-      if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      const vb = svg.viewBox && svg.viewBox.baseVal;
-      const rect = svg.getBoundingClientRect();
-      const w = (vb && vb.width) || svg.clientWidth || rect.width || 800;
-      const h = (vb && vb.height) || svg.clientHeight || rect.height || 600;
-      clone.setAttribute("width", String(w));
-      clone.setAttribute("height", String(h));
-      const xml = new XMLSerializer().serializeToString(clone);
-      const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = async () => {
-        const scale = Math.max(2, window.devicePixelRatio || 1);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.ceil(w * scale);
-        canvas.height = Math.ceil(h * scale);
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(async (b) => {
-          URL.revokeObjectURL(url);
-          if (!b) { showToast("이미지 생성 실패", { kind: "err", icon: "⚠️" }); return; }
-          try {
-            await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]);
-            showToast("다이어그램 이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
-          } catch (e) {
-            showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
-          }
-        }, "image/png");
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); showToast("다이어그램 변환 실패", { kind: "err", icon: "⚠️" }); };
-      img.src = url;
+      // Same lazy-Promise pattern as copyLightboxImage so the
+      // clipboard.write fires inside the user gesture even though the
+      // SVG-to-PNG rasterization is async.
+      const blobPromise = new Promise((resolve, reject) => {
+        const clone = svg.cloneNode(true);
+        if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        const rect = svg.getBoundingClientRect();
+        const w = (vb && vb.width) || svg.clientWidth || rect.width || 800;
+        const h = (vb && vb.height) || svg.clientHeight || rect.height || 600;
+        clone.setAttribute("width", String(w));
+        clone.setAttribute("height", String(h));
+        const xml = new XMLSerializer().serializeToString(clone);
+        const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.max(2, window.devicePixelRatio || 1);
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(w * scale);
+          canvas.height = Math.ceil(h * scale);
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob((b) => {
+            URL.revokeObjectURL(url);
+            b ? resolve(b) : reject(new Error("이미지 생성 실패"));
+          }, "image/png");
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("다이어그램 변환 실패")); };
+        img.src = url;
+      });
+      try {
+        const item = new ClipboardItem({ "image/png": blobPromise });
+        await navigator.clipboard.write([item]);
+        showToast("다이어그램 이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+      } catch (e) {
+        showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+      }
     }
 
     function flashButton(btn, label, ok) {
