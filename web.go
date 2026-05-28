@@ -1844,15 +1844,6 @@ const webAppHTML = `<!doctype html>
     .preview-body .mermaid {
       cursor: zoom-in;
     }
-    /* Let mermaid SVGs render at their full intrinsic height. Without
-       this, mermaid 11 with useMaxWidth:false still inherits a
-       height:auto + max-width:100% rule that can squash tall diagrams.
-       overflow:auto on the wrapper keeps wide ones scrollable. */
-    .preview-body .mermaid svg {
-      display: block;
-      max-width: 100%;
-      height: auto;
-    }
     /* ---- "Show all" popup modal ---- */
     .popup-modal {
       position: fixed;
@@ -2821,22 +2812,15 @@ const webAppHTML = `<!doctype html>
     // regressions, so bump explicitly after verifying.
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.esm.min.mjs";
     // htmlLabels:false makes mermaid emit pure SVG <text> labels instead
-    // of foreignObject + HTML. Two reasons:
-    //   1. Some flowcharts using HTML labels miscomputed the SVG's
-    //      intrinsic height and rendered with the bottom clipped.
-    //   2. foreignObject content is dropped when an SVG is drawn to
-    //      <canvas> via Image+drawImage, so PNG copy / save came back
-    //      empty for any diagram that used HTML labels.
+    // of foreignObject + HTML — required for reliable PNG export, since
+    // canvas drawImage drops foreignObject content in most browsers.
     mermaid.initialize({
       startOnLoad: false,
       theme: "default",
       securityLevel: "loose",
-      flowchart: { htmlLabels: false, useMaxWidth: false },
-      class: { htmlLabels: false, useMaxWidth: false },
-      stateDiagram: { htmlLabels: false, useMaxWidth: false },
-      er: { useMaxWidth: false },
-      gantt: { useMaxWidth: false },
-      sequence: { useMaxWidth: false },
+      flowchart: { htmlLabels: false },
+      class: { htmlLabels: false },
+      stateDiagram: { htmlLabels: false },
     });
     // Expose for code that lives outside this module scope (e.g. the
     // Mermaid Playground modal renderer accesses window.mermaid).
@@ -6496,6 +6480,46 @@ const webAppHTML = `<!doctype html>
       });
     }
 
+    // Walk an SVG and inline every meaningful computed style onto each
+    // element. The browser's Image-loaded-from-blob pipeline applies
+    // <style> blocks inside the SVG inconsistently — particularly for
+    // mermaid output where strokes/fills are class-based — so the safest
+    // way to bake a faithful PNG is to copy the rendered style values
+    // directly to inline attributes. Source-clone is mutated; pass a
+    // clone of the live element.
+    const _SVG_STYLE_PROPS = [
+      "fill","fill-opacity","fill-rule",
+      "stroke","stroke-width","stroke-linecap","stroke-linejoin","stroke-opacity","stroke-dasharray","stroke-dashoffset","stroke-miterlimit",
+      "opacity","visibility",
+      "color",
+      "font-family","font-size","font-weight","font-style","font-variant","letter-spacing","word-spacing",
+      "text-anchor","dominant-baseline","alignment-baseline",
+      "marker-start","marker-mid","marker-end",
+    ];
+    function inlineSvgStyles(liveRoot, cloneRoot) {
+      const liveAll = liveRoot.querySelectorAll("*");
+      const cloneAll = cloneRoot.querySelectorAll("*");
+      const n = Math.min(liveAll.length, cloneAll.length);
+      // Live root + clone root themselves too.
+      const pairs = [[liveRoot, cloneRoot]];
+      for (let i = 0; i < n; i++) pairs.push([liveAll[i], cloneAll[i]]);
+      for (const [live, target] of pairs) {
+        try {
+          const cs = getComputedStyle(live);
+          let extra = "";
+          for (const prop of _SVG_STYLE_PROPS) {
+            const v = cs.getPropertyValue(prop);
+            if (!v || v === "normal" || v === "auto") continue;
+            extra += prop + ":" + v + ";";
+          }
+          if (extra) {
+            const existing = target.getAttribute("style") || "";
+            target.setAttribute("style", extra + existing);
+          }
+        } catch (e) { /* skip */ }
+      }
+    }
+
     function renderLightboxToBlob(onBlob) {
       // Shared SVG→PNG-blob pipeline used by both Save (download) and
       // Copy (clipboard). Callback receives (blob, mime).
@@ -6513,6 +6537,8 @@ const webAppHTML = `<!doctype html>
       // the live SVG, then ensure xmlns is set (some Mermaid output omits it).
       const clone = svg.cloneNode(true);
       if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      if (!clone.getAttribute("xmlns:xlink")) clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+      try { inlineSvgStyles(svg, clone); } catch (e) {}
       // Strip post-it manipulation handles from the export — users want the
       // finished note, not the resize grip and close button.
       clone.querySelectorAll(".lb-postit-resize, .lb-postit-delete").forEach((el) => el.remove());
@@ -7128,6 +7154,8 @@ const webAppHTML = `<!doctype html>
       const blobPromise = new Promise((resolve, reject) => {
         const clone = svg.cloneNode(true);
         if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        if (!clone.getAttribute("xmlns:xlink")) clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+        try { inlineSvgStyles(svg, clone); } catch (e) {}
         const vb = svg.viewBox && svg.viewBox.baseVal;
         const rect = svg.getBoundingClientRect();
         const w = (vb && vb.width) || svg.clientWidth || rect.width || 800;
