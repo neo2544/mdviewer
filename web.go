@@ -223,12 +223,15 @@ func (s *webServer) saveAliases(aliases map[string]string) error {
 // last-write-wins per id keyed on updatedAt.
 
 type memo struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	Pinned    bool   `json:"pinned"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
+	Pinned        bool   `json:"pinned"`
+	SourcePath    string `json:"sourcePath,omitempty"`    // file the memo was captured from
+	SourceHash    string `json:"sourceHash,omitempty"`    // nearest heading id (backlink anchor)
+	SourceHeading string `json:"sourceHeading,omitempty"` // that heading's text (for display)
+	CreatedAt     string `json:"createdAt"`
+	UpdatedAt     string `json:"updatedAt"`
 }
 
 func (s *webServer) memosPath() string {
@@ -790,6 +793,10 @@ const webAppHTML = `<!doctype html>
   <link rel="apple-touch-icon" href="/icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+  <!-- KaTeX: math rendering for $…$, $$…$$, \(…\), \[…\] -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <!-- Common bundle above (≈38 languages); load a curated set of extras
        so docs covering ops / infra / less-mainstream languages light up
        too. Each script self-registers with hljs. -->
@@ -2579,6 +2586,40 @@ const webAppHTML = `<!doctype html>
       font-size: 1.05em;
       filter: grayscale(0.15);
     }
+    .outline-section[hidden] { display: none; }
+    .outline-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      max-height: 30vh;
+      overflow-y: auto;
+      margin-top: 4px;
+    }
+    .outline-list.collapsed { display: none; }
+    .outline-item {
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--muted);
+      padding: 3px 8px;
+      border-radius: 6px;
+      border-left: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .outline-item:hover { background: color-mix(in oklab, var(--panel-2) 70%, transparent); color: var(--text); }
+    .outline-item.active {
+      color: var(--text);
+      border-left-color: var(--accent);
+      background: color-mix(in oklab, var(--accent) 12%, transparent);
+    }
+    .outline-lvl-1 { padding-left: 8px; font-weight: 600; }
+    .outline-lvl-2 { padding-left: 18px; }
+    .outline-lvl-3 { padding-left: 28px; }
+    .outline-lvl-4 { padding-left: 38px; }
+    .outline-lvl-5 { padding-left: 48px; }
+    .outline-lvl-6 { padding-left: 58px; }
     .search-hit-list {
       display: flex;
       flex-direction: column;
@@ -2748,6 +2789,35 @@ const webAppHTML = `<!doctype html>
     }
     .memo-editor[hidden] { display: none; }
     .memo-sync-state { font-size: 10.5px; color: var(--muted); min-height: 13px; }
+    .memo-backlink {
+      display: block;
+      font-size: 11.5px;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 2px 0;
+    }
+    .memo-backlink[hidden] { display: none; }
+    .memo-backlink:hover { text-decoration: underline; }
+    .memo-selection-btn {
+      position: fixed;
+      z-index: 2600;
+      transform: translate(-50%, 6px);
+      border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+      background: color-mix(in oklab, var(--accent) 26%, var(--panel-2));
+      color: var(--text);
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .memo-selection-btn[hidden] { display: none; }
+    .memo-selection-btn:hover { background: color-mix(in oklab, var(--accent) 38%, var(--panel-2)); }
     .memo-conflict-count { font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0; }
     .memo-conflict-body { padding: 4px 16px 16px; overflow-y: auto; }
     .memo-conflict-name { font-size: 13px; font-weight: 600; color: var(--text); margin: 6px 0 4px; }
@@ -3211,6 +3281,13 @@ const webAppHTML = `<!doctype html>
       <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
       <div class="search-panel-body">
         <input type="search" class="search-input" id="searchPanelInput" placeholder="&#x1F50D; Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
+        <div class="outline-section" id="outlineSection" hidden>
+          <div class="search-section-head">
+            <div class="search-section-title"><span class="sec-ico">&#x1F4D1;</span>Outline</div>
+            <button type="button" class="search-sort-btn" id="outlineToggle" title="Collapse outline">&#x25BE;</button>
+          </div>
+          <div class="outline-list" id="outlineList"></div>
+        </div>
         <div>
           <div class="search-section-head">
             <div class="search-section-title"><span class="sec-ico">&#x1F4C4;</span>In this file</div>
@@ -3249,6 +3326,7 @@ const webAppHTML = `<!doctype html>
           <div class="memo-editor" id="memoEditor" hidden>
             <input type="text" class="memo-title-input" id="memoTitleInput" spellcheck="false" placeholder="제목(선택)" />
             <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
+            <a class="memo-backlink" id="memoBacklink" hidden></a>
             <div class="memo-sync-state" id="memoSyncState"></div>
           </div>
         </div>
@@ -3258,6 +3336,7 @@ const webAppHTML = `<!doctype html>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
   <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show search panel" hidden>&#x1F50D; Search</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
+  <button type="button" class="memo-selection-btn" id="memoSelectionBtn" hidden>📝 메모로 저장</button>
   <div class="popup-modal" id="listPopup" hidden>
     <div class="popup-card">
       <div class="popup-head">
@@ -3659,13 +3738,67 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    // ── Document outline + scroll-spy ──
+    const outlineState = { headings: [], itemById: {}, activeId: null };
+    function buildOutline(headings) {
+      const sectionEl = document.getElementById("outlineSection");
+      const listEl = document.getElementById("outlineList");
+      if (!sectionEl || !listEl) return;
+      outlineState.headings = [];
+      outlineState.itemById = {};
+      outlineState.activeId = null;
+      listEl.innerHTML = "";
+      const list = Array.prototype.slice.call(headings || []);
+      if (list.length < 2) { sectionEl.hidden = true; return; } // not worth an outline
+      sectionEl.hidden = false;
+      for (const h of list) {
+        const level = parseInt(h.tagName.slice(1), 10) || 1;
+        const item = document.createElement("div");
+        item.className = "outline-item outline-lvl-" + level;
+        item.textContent = h.textContent || "";
+        item.title = h.textContent || "";
+        item.addEventListener("click", function () { scrollToHash(h.id); setOutlineActive(h.id); });
+        listEl.appendChild(item);
+        outlineState.headings.push({ id: h.id, el: h });
+        outlineState.itemById[h.id] = item;
+      }
+      updateOutlineActive();
+    }
+    function setOutlineActive(id) {
+      if (outlineState.activeId === id) return;
+      const prev = outlineState.itemById[outlineState.activeId];
+      if (prev) prev.classList.remove("active");
+      const next = outlineState.itemById[id];
+      if (next) {
+        next.classList.add("active");
+        next.scrollIntoView({ block: "nearest" });
+      }
+      outlineState.activeId = id;
+    }
+    // Pick the last heading at or above the top of the viewport.
+    function updateOutlineActive() {
+      const hs = outlineState.headings;
+      if (!hs.length) return;
+      const top = previewBodyEl.scrollTop + 8;
+      let activeId = hs[0].id;
+      for (const h of hs) {
+        if (h.el.offsetTop <= top) activeId = h.id;
+        else break;
+      }
+      setOutlineActive(activeId);
+    }
+
     function decorateRenderedMarkdown() {
       const headings = previewBodyEl.querySelectorAll("h1, h2, h3, h4, h5, h6");
+      const seenIds = {};
       for (const heading of headings) {
-        if (!heading.id) {
-          heading.id = slugify(heading.textContent || "");
-        }
+        let id = heading.id || slugify(heading.textContent || "") || "section";
+        // De-duplicate so each heading anchors uniquely (outline + backlinks).
+        if (seenIds[id]) { let n = 2; while (seenIds[id + "-" + n]) n++; id = id + "-" + n; }
+        seenIds[id] = true;
+        heading.id = id;
       }
+      buildOutline(headings);
 
       const images = previewBodyEl.querySelectorAll("img");
       for (const img of images) {
@@ -3686,7 +3819,30 @@ const webAppHTML = `<!doctype html>
         }
         link.dataset.internalHref = href;
       }
+
+      renderMathSafe(previewBodyEl);
     }
+
+    // Render TeX math via KaTeX auto-render. No-op until the deferred KaTeX
+    // scripts have loaded; code/pre blocks are ignored so they stay verbatim.
+    function renderMathSafe(root) {
+      if (!root || typeof window.renderMathInElement !== "function") return;
+      try {
+        window.renderMathInElement(root, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "\\[", right: "\\]", display: true },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "$", right: "$", display: false },
+          ],
+          ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
+          throwOnError: false,
+        });
+      } catch (e) { /* malformed math shouldn't break the render */ }
+    }
+    // KaTeX scripts are deferred; if a file was already rendered before they
+    // finished loading, render math once they're available.
+    window.addEventListener("load", function () { renderMathSafe(previewBodyEl); });
 
     function humanSize(size) {
       if (!size) return "-";
@@ -5781,11 +5937,34 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    let outlineSpyRaf = null;
     previewBodyEl.addEventListener("scroll", () => {
       const maxScroll = Math.max(1, previewBodyEl.scrollHeight - previewBodyEl.clientHeight);
       const percent = Math.min(100, Math.max(0, Math.round(previewBodyEl.scrollTop / maxScroll * 100)));
       scrollTextEl.textContent = "Preview " + percent + "%";
+      if (outlineSpyRaf) cancelAnimationFrame(outlineSpyRaf);
+      outlineSpyRaf = requestAnimationFrame(updateOutlineActive);
     });
+
+    {
+      const outlineToggleEl = document.getElementById("outlineToggle");
+      const outlineListEl = document.getElementById("outlineList");
+      if (outlineToggleEl && outlineListEl) {
+        let collapsed = false;
+        try { collapsed = localStorage.getItem("mdviewer.outlineCollapsed") === "1"; } catch (e) {}
+        const applyCollapsed = function () {
+          outlineListEl.classList.toggle("collapsed", collapsed);
+          outlineToggleEl.textContent = collapsed ? "▸" : "▾";
+          outlineToggleEl.title = collapsed ? "Expand outline" : "Collapse outline";
+        };
+        applyCollapsed();
+        outlineToggleEl.addEventListener("click", function () {
+          collapsed = !collapsed;
+          try { localStorage.setItem("mdviewer.outlineCollapsed", collapsed ? "1" : "0"); } catch (e) {}
+          applyCollapsed();
+        });
+      }
+    }
 
     filesEl.addEventListener("pointerover", (event) => {
       const row = event.target.closest(".file[data-meta]");
@@ -5977,6 +6156,8 @@ const webAppHTML = `<!doctype html>
       const newBtnEl = document.getElementById("memoNewBtn");
       const copyBtnEl = document.getElementById("memoCopyBtn");
       const clearBtnEl = document.getElementById("memoClearBtn");
+      const backlinkEl = document.getElementById("memoBacklink");
+      const selectionBtnEl = document.getElementById("memoSelectionBtn");
       if (!listEl || !areaEl || !titleEl) return;
 
       const LS_KEY = "mdviewer.memos";
@@ -6119,6 +6300,17 @@ const webAppHTML = `<!doctype html>
         const memo = getMemo(m.activeId);
         titleEl.value = memo ? (memo.title || "") : "";
         areaEl.value = memo ? (memo.body || "") : "";
+        renderBacklink(memo);
+      }
+
+      function renderBacklink(memo) {
+        if (!backlinkEl) return;
+        if (!memo || !memo.sourcePath) { backlinkEl.hidden = true; return; }
+        const fileName = memo.sourcePath.split("/").pop();
+        const where = memo.sourceHeading ? (fileName + " › " + memo.sourceHeading) : fileName;
+        backlinkEl.textContent = "↩ 출처: " + where;
+        backlinkEl.title = "이 메모를 만든 위치로 이동: " + memo.sourcePath + (memo.sourceHash ? ("#" + memo.sourceHash) : "");
+        backlinkEl.hidden = false;
       }
 
       function setActive(id) {
@@ -6148,6 +6340,23 @@ const webAppHTML = `<!doctype html>
         setActive(memo.id);
         titleEl.focus();
         scheduleSync();
+      }
+
+      function createMemoFromSelection(text, source) {
+        const t = nowISO();
+        const memo = {
+          id: genId(), title: "", body: text, pinned: false,
+          sourcePath: (source && source.path) || "",
+          sourceHash: (source && source.hash) || "",
+          sourceHeading: (source && source.heading) || "",
+          createdAt: t, updatedAt: t,
+        };
+        m.memos.unshift(memo);
+        m.dirty.add(memo.id);
+        persistLocal();
+        setActive(memo.id);
+        scheduleSync();
+        showToast("선택한 내용을 메모로 저장했어요", { kind: "ok", icon: "📝" });
       }
 
       function togglePin(id) {
@@ -6224,12 +6433,19 @@ const webAppHTML = `<!doctype html>
       }
 
       function cloneMemo(x) {
-        return { id: x.id, title: x.title || "", body: x.body || "", pinned: !!x.pinned, createdAt: x.createdAt || "", updatedAt: x.updatedAt || "" };
+        return {
+          id: x.id, title: x.title || "", body: x.body || "", pinned: !!x.pinned,
+          sourcePath: x.sourcePath || "", sourceHash: x.sourceHash || "", sourceHeading: x.sourceHeading || "",
+          createdAt: x.createdAt || "", updatedAt: x.updatedAt || "",
+        };
       }
       function assignMemo(target, src) {
         target.title = src.title || "";
         target.body = src.body || "";
         target.pinned = !!src.pinned;
+        target.sourcePath = src.sourcePath || "";
+        target.sourceHash = src.sourceHash || "";
+        target.sourceHeading = src.sourceHeading || "";
         target.createdAt = src.createdAt || target.createdAt;
         target.updatedAt = src.updatedAt || "";
       }
@@ -6508,6 +6724,80 @@ const webAppHTML = `<!doctype html>
       titleEl.addEventListener("input", function () { onEdit("title", titleEl.value); });
       areaEl.addEventListener("input", function () { onEdit("body", areaEl.value); });
       if (newBtnEl) newBtnEl.addEventListener("click", newMemo);
+
+      // Backlink: jump to the file/heading the active memo was captured from.
+      if (backlinkEl) {
+        backlinkEl.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          const memo = getMemo(m.activeId);
+          if (!memo || !memo.sourcePath) return;
+          if (typeof selectFile === "function") {
+            selectFile(memo.sourcePath, memo.sourceHash ? { hash: memo.sourceHash } : {});
+          }
+        });
+      }
+
+      // ── selection → memo ──
+      // Show a floating "메모로 저장" button when the user selects text in the
+      // rendered document; capture the nearest preceding heading as a backlink.
+      function nearestHeadingForRange(range) {
+        const headings = previewBodyEl.querySelectorAll("h1, h2, h3, h4, h5, h6");
+        if (!headings.length) return null;
+        let rectTop;
+        try { rectTop = range.getBoundingClientRect().top; } catch (e) { return null; }
+        const baseTop = previewBodyEl.getBoundingClientRect().top - previewBodyEl.scrollTop;
+        const selTop = rectTop - baseTop;
+        let best = null;
+        for (const h of headings) {
+          if (h.offsetTop <= selTop + 1) best = h; else break;
+        }
+        best = best || headings[0];
+        return { hash: best.id, heading: (best.textContent || "").trim() };
+      }
+      function currentPreviewSelection() {
+        const sel = window.getSelection && window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+        const text = sel.toString().trim();
+        if (!text) return null;
+        const range = sel.getRangeAt(0);
+        // Selection must be inside the rendered preview body.
+        const anc = range.commonAncestorContainer;
+        const node = anc.nodeType === 1 ? anc : anc.parentNode;
+        if (!node || !previewBodyEl.contains(node)) return null;
+        return { text: text, range: range };
+      }
+      function hideSelectionBtn() { if (selectionBtnEl) selectionBtnEl.hidden = true; }
+      function maybeShowSelectionBtn() {
+        if (!selectionBtnEl) return;
+        const s = currentPreviewSelection();
+        if (!s) { hideSelectionBtn(); return; }
+        let rect;
+        try { rect = s.range.getBoundingClientRect(); } catch (e) { hideSelectionBtn(); return; }
+        if (!rect || (!rect.width && !rect.height)) { hideSelectionBtn(); return; }
+        selectionBtnEl.style.left = (rect.left + rect.width / 2) + "px";
+        selectionBtnEl.style.top = rect.bottom + "px";
+        selectionBtnEl.hidden = false;
+      }
+      if (selectionBtnEl) {
+        document.addEventListener("mouseup", function () { setTimeout(maybeShowSelectionBtn, 0); });
+        document.addEventListener("keyup", function (e) {
+          if (e.shiftKey || e.key === "Shift") setTimeout(maybeShowSelectionBtn, 0);
+        });
+        previewBodyEl.addEventListener("scroll", hideSelectionBtn);
+        // mousedown elsewhere hides it (but not when pressing the button itself).
+        document.addEventListener("mousedown", function (e) {
+          if (e.target !== selectionBtnEl) hideSelectionBtn();
+        });
+        selectionBtnEl.addEventListener("click", function () {
+          const s = currentPreviewSelection();
+          if (!s) { hideSelectionBtn(); return; }
+          const src = nearestHeadingForRange(s.range) || {};
+          src.path = state.selectedPath || "";
+          createMemoFromSelection(s.text, src);
+          hideSelectionBtn();
+          if (window.getSelection) window.getSelection().removeAllRanges();
+        });
+      }
 
       if (filterEl) {
         filterEl.addEventListener("input", function () { m.filter = filterEl.value; renderList(); });
