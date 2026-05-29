@@ -231,6 +231,7 @@ type memo struct {
 	SourcePath    string `json:"sourcePath,omitempty"`    // file the memo was captured from
 	SourceHash    string `json:"sourceHash,omitempty"`    // nearest heading id (backlink anchor)
 	SourceHeading string `json:"sourceHeading,omitempty"` // that heading's text (for display)
+	SourceQuote   string `json:"sourceQuote,omitempty"`   // selected text snippet, highlighted on backlink
 	CreatedAt     string `json:"createdAt"`
 	UpdatedAt     string `json:"updatedAt"`
 }
@@ -2859,6 +2860,16 @@ const webAppHTML = `<!doctype html>
     }
     .memo-editor[hidden] { display: none; }
     .memo-sync-state { font-size: 10.5px; color: var(--muted); min-height: 13px; }
+    .backlink-hit {
+      border-radius: 3px;
+      background: color-mix(in oklab, var(--accent) 45%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent);
+      animation: backlinkFlash 2.4s ease forwards;
+    }
+    @keyframes backlinkFlash {
+      0%, 55% { background: color-mix(in oklab, var(--accent) 50%, transparent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 50%, transparent); }
+      100% { background: transparent; box-shadow: 0 0 0 2px transparent; }
+    }
     .memo-backlink {
       display: block;
       font-size: 11.5px;
@@ -3855,6 +3866,50 @@ const webAppHTML = `<!doctype html>
       const target = previewBodyEl.querySelector("#" + CSS.escape(hash));
       if (target) {
         target.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
+    }
+
+    // Find a memo's quoted source text in the rendered preview, scroll to it,
+    // and flash a highlight. Tries progressively shorter prefixes so it still
+    // lands close even if the text shifted slightly. Used by memo backlinks.
+    function highlightQuoteInPreview(quote) {
+      if (!quote) return false;
+      const q = String(quote).replace(/\s+/g, " ").trim();
+      if (q.length < 4) return false;
+      const lens = [q.length, 60, 40, 24];
+      let hit = null;
+      walkTextNodes(previewBodyEl, function (node) {
+        if (hit) return;
+        const txt = node.textContent;
+        for (const L of lens) {
+          const sub = q.slice(0, Math.min(L, q.length)).trim();
+          if (sub.length < 4) continue;
+          const i = txt.indexOf(sub);
+          if (i >= 0) { hit = { node: node, i: i, len: sub.length }; return; }
+        }
+      });
+      if (!hit) return false;
+      try {
+        const range = document.createRange();
+        range.setStart(hit.node, hit.i);
+        range.setEnd(hit.node, hit.i + hit.len);
+        const span = document.createElement("span");
+        span.className = "backlink-hit";
+        range.surroundContents(span);
+        span.scrollIntoView({ block: "center", behavior: "smooth" });
+        setTimeout(function () {
+          const parent = span.parentNode;
+          if (!parent) return;
+          while (span.firstChild) parent.insertBefore(span.firstChild, span);
+          parent.removeChild(span);
+          parent.normalize();
+        }, 2600);
+        return true;
+      } catch (e) {
+        // Range spanned multiple elements — just scroll to the containing block.
+        const el = hit.node.parentElement;
+        if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+        return true;
       }
     }
 
@@ -6621,11 +6676,15 @@ const webAppHTML = `<!doctype html>
 
       function createMemoFromSelection(text, source) {
         const t = nowISO();
+        // Keep a quote of the selection so the backlink can jump to and
+        // highlight the exact spot (capped to stay light).
+        const quote = (text || "").replace(/\s+/g, " ").trim().slice(0, 200);
         const memo = {
           id: genId(), title: "", body: text, pinned: false,
           sourcePath: (source && source.path) || "",
           sourceHash: (source && source.hash) || "",
           sourceHeading: (source && source.heading) || "",
+          sourceQuote: quote,
           createdAt: t, updatedAt: t,
         };
         m.memos.unshift(memo);
@@ -6712,7 +6771,8 @@ const webAppHTML = `<!doctype html>
       function cloneMemo(x) {
         return {
           id: x.id, title: x.title || "", body: x.body || "", pinned: !!x.pinned,
-          sourcePath: x.sourcePath || "", sourceHash: x.sourceHash || "", sourceHeading: x.sourceHeading || "",
+          sourcePath: x.sourcePath || "", sourceHash: x.sourceHash || "",
+          sourceHeading: x.sourceHeading || "", sourceQuote: x.sourceQuote || "",
           createdAt: x.createdAt || "", updatedAt: x.updatedAt || "",
         };
       }
@@ -6723,6 +6783,7 @@ const webAppHTML = `<!doctype html>
         target.sourcePath = src.sourcePath || "";
         target.sourceHash = src.sourceHash || "";
         target.sourceHeading = src.sourceHeading || "";
+        target.sourceQuote = src.sourceQuote || "";
         target.createdAt = src.createdAt || target.createdAt;
         target.updatedAt = src.updatedAt || "";
       }
@@ -7004,12 +7065,14 @@ const webAppHTML = `<!doctype html>
 
       // Backlink: jump to the file/heading the active memo was captured from.
       if (backlinkEl) {
-        backlinkEl.addEventListener("click", function (ev) {
+        backlinkEl.addEventListener("click", async function (ev) {
           ev.preventDefault();
           const memo = getMemo(m.activeId);
-          if (!memo || !memo.sourcePath) return;
-          if (typeof selectFile === "function") {
-            selectFile(memo.sourcePath, memo.sourceHash ? { hash: memo.sourceHash } : {});
+          if (!memo || !memo.sourcePath || typeof selectFile !== "function") return;
+          await selectFile(memo.sourcePath, memo.sourceHash ? { hash: memo.sourceHash } : {});
+          // After the file renders, jump to + flash the exact quoted spot.
+          if (memo.sourceQuote) {
+            setTimeout(function () { highlightQuoteInPreview(memo.sourceQuote); }, 140);
           }
         });
       }
@@ -7112,10 +7175,23 @@ const webAppHTML = `<!doctype html>
             showToast("메모가 비어 있어요", { kind: "err", icon: "⚠️" });
             return;
           }
-          const header = state.selectedPath
-            ? (state.selectedPath.split("/").pop() + "  (" + state.selectedPath + ")")
-            : "(no file open)";
-          const payload = header + "\n" + "─".repeat(Math.min(header.length, 60)) + "\n\n" + body;
+          const title = memo ? (memo.title || "").trim() : "";
+          // Link target: the memo's source (where it was captured), else the
+          // currently-open file. Works as a clickable backlink inside mdviewer.
+          const linkTarget = (memo && memo.sourcePath)
+            ? (memo.sourcePath + (memo.sourceHash ? ("#" + memo.sourceHash) : ""))
+            : (state.selectedPath || "");
+          let payload;
+          if (title) {
+            // Title as a markdown link to the source, then the body.
+            const head = linkTarget ? ("[" + title + "](" + linkTarget + ")") : ("# " + title);
+            payload = head + "\n\n" + body;
+          } else {
+            const header = state.selectedPath
+              ? (state.selectedPath.split("/").pop() + "  (" + state.selectedPath + ")")
+              : "(no file open)";
+            payload = header + "\n" + "─".repeat(Math.min(header.length, 60)) + "\n\n" + body;
+          }
           try {
             if (navigator.clipboard && navigator.clipboard.writeText) {
               await navigator.clipboard.writeText(payload);
@@ -7127,7 +7203,7 @@ const webAppHTML = `<!doctype html>
               document.execCommand("copy");
               document.body.removeChild(ta);
             }
-            showToast("메모를 파일명과 함께 복사했어요", { kind: "ok", icon: "📋" });
+            showToast(title ? "메모를 제목 링크와 함께 복사했어요" : "메모를 파일명과 함께 복사했어요", { kind: "ok", icon: "📋" });
           } catch (e) {
             showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
           }

@@ -241,3 +241,30 @@ func TestSortMemosByUpdatedDesc(t *testing.T) {
 		}
 	}
 }
+
+func TestMemosSourceQuoteRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := &webServer{appRoot: dir}
+	want := memo{
+		ID: "q", Body: "x",
+		SourcePath: "/n/spec.md", SourceHash: "design", SourceHeading: "Design",
+		SourceQuote: "the exact sentence to find",
+		CreatedAt:   "2026-05-30T00:00:00Z", UpdatedAt: "2026-05-30T00:00:00Z",
+	}
+	if err := s.saveMemos([]memo{want}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.loadMemos()
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("sourceQuote not preserved: %+v", got)
+	}
+}
+
+func TestMergeMemosPreservesSourceQuote(t *testing.T) {
+	existing := []memo{{ID: "a", Body: "a", UpdatedAt: "2026-05-30T00:00:00Z"}}
+	incoming := []memo{{ID: "a", Body: "a", SourceQuote: "quote here", UpdatedAt: "2026-05-30T01:00:00Z"}}
+	got := mergeMemos(existing, incoming)
+	if len(got) != 1 || got[0].SourceQuote != "quote here" {
+		t.Fatalf("merge dropped sourceQuote: %+v", got)
+	}
+}
