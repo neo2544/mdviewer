@@ -3353,8 +3353,8 @@ const webAppHTML = `<!doctype html>
       </div>
     </main>
     <div class="splitter" id="rightSplitter" aria-hidden="true"></div>
-    <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
-      <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
+    <aside id="searchPanel" class="shell search-panel" aria-label="Panel (Outline · Search · Memo)">
+      <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide panel">&#x203A;</button>
       <div class="search-panel-body">
         <div class="panel-tabs" role="tablist" aria-label="Panel sections">
           <button type="button" class="panel-tab" id="panelTabOutline" data-tab="outline" role="tab">📑 Outline</button>
@@ -3433,7 +3433,7 @@ const webAppHTML = `<!doctype html>
     </aside>
   </div>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
-  <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show search panel" hidden>&#x1F50D; Search</button>
+  <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show panel (Outline · Search · Memo)" hidden>&#x25A4; Panel</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
   <div class="memo-selection-bar" id="memoSelectionBar" hidden>
     <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모</button>
