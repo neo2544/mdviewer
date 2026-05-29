@@ -2600,14 +2600,18 @@ const webAppHTML = `<!doctype html>
       display: flex;
       flex-direction: column;
       gap: 1px;
-      max-height: 30vh;
+      max-height: 40vh;
       overflow-y: auto;
       margin-top: 4px;
     }
     .outline-list.collapsed { display: none; }
     .outline-item {
-      font-size: 12px;
-      line-height: 1.45;
+      /* Keep natural height: without flex:0 0 auto, the overflow:hidden below
+         lets the flex column shrink items to unreadable slivers when there are
+         many headings. With it, items stay full-size and the list scrolls. */
+      flex: 0 0 auto;
+      font-size: 12.5px;
+      line-height: 1.5;
       color: var(--text);
       padding: 3px 8px;
       border-radius: 6px;
@@ -4864,6 +4868,12 @@ const webAppHTML = `<!doctype html>
       if (searchFolderAbort) { try { searchFolderAbort.abort(); } catch (e) {} }
       const ctrl = new AbortController();
       searchFolderAbort = ctrl;
+      // Git-wide search can take a while; show a loading hint until results land.
+      const loadingEl = document.createElement("div");
+      loadingEl.className = "search-empty";
+      loadingEl.textContent = state.folderSearchScope === "git"
+        ? "Git 저장소 전체 검색 중… ⏳" : "검색 중…";
+      searchFolderHitsEl.appendChild(loadingEl);
       let results = [];
       try {
         const url = "/api/search?dir=" + encodeURIComponent(state.cwd || "") +
@@ -4874,12 +4884,14 @@ const webAppHTML = `<!doctype html>
         results = await r.json();
       } catch (err) {
         if (err && err.name === "AbortError") return;
+        searchFolderHitsEl.innerHTML = "";
         const e = document.createElement("div");
         e.className = "search-empty";
         e.textContent = "Search failed.";
         searchFolderHitsEl.appendChild(e);
         return;
       }
+      searchFolderHitsEl.innerHTML = ""; // clear the loading hint
       // Hide the currently-open file from the cross-file list — its
       // matches are already in the "In this file" section.
       const filtered = results.filter(function (r) {
