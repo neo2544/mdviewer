@@ -2252,6 +2252,15 @@ const webAppHTML = `<!doctype html>
       white-space: pre-wrap;
       font-size: 12px;
     }
+    .mermaid-lab-preview-pane .mermaid-lab-math {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100%;
+      font-size: 20px;
+      color: var(--text);
+      text-align: center;
+    }
     .mermaid-lab-foot {
       padding: 10px 16px 12px;
       border-top: 1px solid var(--line);
@@ -2598,8 +2607,8 @@ const webAppHTML = `<!doctype html>
     .outline-list.collapsed { display: none; }
     .outline-item {
       font-size: 12px;
-      line-height: 1.4;
-      color: var(--muted);
+      line-height: 1.45;
+      color: var(--text);
       padding: 3px 8px;
       border-radius: 6px;
       border-left: 2px solid transparent;
@@ -2608,11 +2617,17 @@ const webAppHTML = `<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .outline-item:hover { background: color-mix(in oklab, var(--panel-2) 70%, transparent); color: var(--text); }
+    /* Deeper levels are progressively softer so the hierarchy reads at a glance
+       while every item stays legible. */
+    .outline-lvl-3, .outline-lvl-4, .outline-lvl-5, .outline-lvl-6 {
+      color: color-mix(in oklab, var(--text) 82%, var(--muted));
+    }
+    .outline-item:hover { background: color-mix(in oklab, var(--panel-2) 60%, transparent); color: var(--text); }
     .outline-item.active {
-      color: var(--text);
+      color: var(--accent);
+      font-weight: 600;
       border-left-color: var(--accent);
-      background: color-mix(in oklab, var(--accent) 12%, transparent);
+      background: color-mix(in oklab, var(--accent) 14%, transparent);
     }
     .outline-lvl-1 { padding-left: 8px; font-weight: 600; }
     .outline-lvl-2 { padding-left: 18px; }
@@ -3284,7 +3299,10 @@ const webAppHTML = `<!doctype html>
         <div class="outline-section" id="outlineSection" hidden>
           <div class="search-section-head">
             <div class="search-section-title"><span class="sec-ico">&#x1F4D1;</span>Outline</div>
-            <button type="button" class="search-sort-btn" id="outlineToggle" title="Collapse outline">&#x25BE;</button>
+            <div class="memo-actions">
+              <button type="button" class="search-sort-btn" id="outlineLevel" title="표시할 헤딩 레벨 (클릭하여 변경)">H1–3</button>
+              <button type="button" class="search-sort-btn" id="outlineToggle" title="Collapse outline">&#x25BE;</button>
+            </div>
           </div>
           <div class="outline-list" id="outlineList"></div>
         </div>
@@ -3739,28 +3757,45 @@ const webAppHTML = `<!doctype html>
     }
 
     // ── Document outline + scroll-spy ──
-    const outlineState = { headings: [], itemById: {}, activeId: null };
+    // all = every heading; rendered = those within the current level cap.
+    const outlineState = { all: [], rendered: [], itemById: {}, activeId: null, maxLevel: 3 };
+    try {
+      const lv = parseInt(localStorage.getItem("mdviewer.outlineMaxLevel"), 10);
+      if (lv === 2 || lv === 3 || lv === 6) outlineState.maxLevel = lv;
+    } catch (e) {}
+
     function buildOutline(headings) {
       const sectionEl = document.getElementById("outlineSection");
-      const listEl = document.getElementById("outlineList");
-      if (!sectionEl || !listEl) return;
-      outlineState.headings = [];
-      outlineState.itemById = {};
-      outlineState.activeId = null;
-      listEl.innerHTML = "";
-      const list = Array.prototype.slice.call(headings || []);
-      if (list.length < 2) { sectionEl.hidden = true; return; } // not worth an outline
+      if (!sectionEl) return;
+      outlineState.all = Array.prototype.slice.call(headings || []).map(function (h) {
+        return { id: h.id, el: h, level: parseInt(h.tagName.slice(1), 10) || 1, text: (h.textContent || "").trim() };
+      });
+      if (outlineState.all.length < 2) { sectionEl.hidden = true; return; } // not worth an outline
       sectionEl.hidden = false;
-      for (const h of list) {
-        const level = parseInt(h.tagName.slice(1), 10) || 1;
+      renderOutlineItems();
+    }
+    // (Re)render the visible items honoring the level cap. Deeper headings are
+    // omitted from the list; their section still highlights the nearest shown
+    // ancestor via scroll-spy.
+    function renderOutlineItems() {
+      const listEl = document.getElementById("outlineList");
+      if (!listEl) return;
+      listEl.innerHTML = "";
+      outlineState.itemById = {};
+      outlineState.rendered = [];
+      outlineState.activeId = null;
+      for (const h of outlineState.all) {
+        if (h.level > outlineState.maxLevel) continue;
         const item = document.createElement("div");
-        item.className = "outline-item outline-lvl-" + level;
-        item.textContent = h.textContent || "";
-        item.title = h.textContent || "";
-        item.addEventListener("click", function () { scrollToHash(h.id); setOutlineActive(h.id); });
+        item.className = "outline-item outline-lvl-" + h.level;
+        item.textContent = h.text;
+        item.title = h.text;
+        (function (id) {
+          item.addEventListener("click", function () { scrollToHash(id); setOutlineActive(id); });
+        })(h.id);
         listEl.appendChild(item);
-        outlineState.headings.push({ id: h.id, el: h });
         outlineState.itemById[h.id] = item;
+        outlineState.rendered.push({ id: h.id, el: h.el });
       }
       updateOutlineActive();
     }
@@ -3775,9 +3810,9 @@ const webAppHTML = `<!doctype html>
       }
       outlineState.activeId = id;
     }
-    // Pick the last heading at or above the top of the viewport.
+    // Highlight the last *shown* heading at or above the top of the viewport.
     function updateOutlineActive() {
-      const hs = outlineState.headings;
+      const hs = outlineState.rendered;
       if (!hs.length) return;
       const top = previewBodyEl.scrollTop + 8;
       let activeId = hs[0].id;
@@ -3786,6 +3821,15 @@ const webAppHTML = `<!doctype html>
         else break;
       }
       setOutlineActive(activeId);
+    }
+    const OUTLINE_LEVELS = [2, 3, 6];
+    function outlineLevelLabel(lv) { return lv >= 6 ? "All" : ("H1–" + lv); }
+    function applyOutlineLevel(lv) {
+      outlineState.maxLevel = (lv === 2 || lv === 3 || lv === 6) ? lv : 3;
+      try { localStorage.setItem("mdviewer.outlineMaxLevel", String(outlineState.maxLevel)); } catch (e) {}
+      const btn = document.getElementById("outlineLevel");
+      if (btn) btn.textContent = outlineLevelLabel(outlineState.maxLevel);
+      if (outlineState.all.length) renderOutlineItems();
     }
 
     function decorateRenderedMarkdown() {
@@ -5964,6 +6008,14 @@ const webAppHTML = `<!doctype html>
           applyCollapsed();
         });
       }
+      const outlineLevelEl = document.getElementById("outlineLevel");
+      if (outlineLevelEl) {
+        applyOutlineLevel(outlineState.maxLevel); // set initial label
+        outlineLevelEl.addEventListener("click", function () {
+          const i = OUTLINE_LEVELS.indexOf(outlineState.maxLevel);
+          applyOutlineLevel(OUTLINE_LEVELS[(i + 1) % OUTLINE_LEVELS.length]);
+        });
+      }
     }
 
     filesEl.addEventListener("pointerover", (event) => {
@@ -6959,14 +7011,39 @@ const webAppHTML = `<!doctype html>
       return s.trim();
     }
 
+    // Detect TeX math so the playground can preview formulas as well as
+    // diagrams. Mermaid sources practically never contain $…$ delimiters.
+    function looksLikeMath(s) {
+      return /\$\$[\s\S]+?\$\$/.test(s) ||
+        /(^|[^\\])\$[^$\n]+\$/.test(s) ||
+        /\\\([\s\S]+?\\\)/.test(s) ||
+        /\\\[[\s\S]+?\\\]/.test(s);
+    }
+
     async function renderMermaidLab(src) {
       const text = stripMermaidFence(src);
       mermaidLabPreviewEl.innerHTML = "";
       if (!text) {
         const hint = document.createElement("div");
         hint.className = "subtle";
-        hint.textContent = "Paste mermaid source on the left to see the rendered diagram here.";
+        hint.textContent = "Paste mermaid source — or TeX math like $E=mc^2$ — on the left to see it rendered here.";
         mermaidLabPreviewEl.appendChild(hint);
+        return;
+      }
+      // Math branch: render with KaTeX instead of mermaid.
+      if (looksLikeMath(text)) {
+        const host = document.createElement("div");
+        host.className = "mermaid-lab-math";
+        host.textContent = text;
+        mermaidLabPreviewEl.appendChild(host);
+        if (typeof window.renderMathInElement === "function") {
+          renderMathSafe(host);
+        } else {
+          const note = document.createElement("div");
+          note.className = "subtle";
+          note.textContent = "(KaTeX 로딩 중… 잠시 후 입력하면 렌더됩니다)";
+          mermaidLabPreviewEl.appendChild(note);
+        }
         return;
       }
       mermaidLabIdCounter += 1;
