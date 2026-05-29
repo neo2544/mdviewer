@@ -2445,6 +2445,39 @@ const webAppHTML = `<!doctype html>
       color: var(--accent);
       font-weight: 600;
     }
+    .search-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .search-sort {
+      display: inline-flex;
+      gap: 0;
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+      padding: 2px;
+    }
+    .search-sort-btn {
+      border: 0;
+      background: transparent;
+      color: color-mix(in oklab, var(--text) 60%, var(--muted));
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    .search-sort-btn:hover { color: var(--text); }
+    .search-sort-btn.active {
+      background: color-mix(in oklab, var(--accent) 65%, var(--panel-2));
+      color: var(--panel);
+    }
     .search-hit .search-hit-line {
       flex: 0 0 auto;
       font-family: ui-monospace, SFMono-Regular, monospace;
@@ -2850,7 +2883,13 @@ const webAppHTML = `<!doctype html>
       <div class="search-panel-body">
         <input type="search" class="search-input" id="searchPanelInput" placeholder="Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
         <div>
-          <div class="search-section-title">In this file</div>
+          <div class="search-section-head">
+            <div class="search-section-title">In this file</div>
+            <div class="search-sort" role="group" aria-label="Sort hits">
+              <button type="button" class="search-sort-btn active" id="searchSortLine" data-sort="line" title="Sort by line position">Line</button>
+              <button type="button" class="search-sort-btn" id="searchSortPriority" data-sort="priority" title="Sort by importance (heading first)">Priority</button>
+            </div>
+          </div>
           <div class="search-summary" id="searchInFileSummary">Type to search.</div>
           <div class="search-hit-list" id="searchInFileHits"></div>
         </div>
@@ -3084,6 +3123,10 @@ const webAppHTML = `<!doctype html>
       showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
       searchQueryRight: "",   // distinct from the left-sidebar file-name search
       searchInFileHits: [],   // array of <mark> elements in preview order
+      searchSortMode: (function () {
+        try { return localStorage.getItem("mdviewer.searchSortMode") || "line"; }
+        catch (e) { return "line"; }
+      })(),
       searchInFileFocus: -1,  // index of the currently emphasized hit
       sectionCollapsed: {
         recentFiles: localStorage.getItem("mdviewer.section.recentFiles.collapsed") === "1",
@@ -4156,10 +4199,22 @@ const webAppHTML = `<!doctype html>
       const ranked = hits.map(function (m, i) {
         return { mark: m, idx: i, score: priorityForHit(m), line: lineNumberForHit(m) };
       });
-      ranked.sort(function (a, b) {
-        if (b.score !== a.score) return b.score - a.score;
-        return a.idx - b.idx;
-      });
+      if (state.searchSortMode === "priority") {
+        ranked.sort(function (a, b) {
+          if (b.score !== a.score) return b.score - a.score;
+          return a.idx - b.idx;
+        });
+      } else {
+        // "line" mode (default) — by source line, then by document
+        // order within the same line. Hits without a resolvable line
+        // sort to the bottom but keep document order.
+        ranked.sort(function (a, b) {
+          const al = a.line == null ? Infinity : a.line;
+          const bl = b.line == null ? Infinity : b.line;
+          if (al !== bl) return al - bl;
+          return a.idx - b.idx;
+        });
+      }
       const maxList = 50;
       const shown = ranked.slice(0, maxList);
       for (const item of shown) {
@@ -5520,6 +5575,27 @@ const webAppHTML = `<!doctype html>
         runFolderSearch(state.searchQueryRight);
       }, 120);
     });
+    // Sort-mode toggle for the in-file search list.
+    function applySearchSortMode(mode) {
+      state.searchSortMode = (mode === "priority") ? "priority" : "line";
+      try { localStorage.setItem("mdviewer.searchSortMode", state.searchSortMode); } catch (e) {}
+      const btnLine = document.getElementById("searchSortLine");
+      const btnPri  = document.getElementById("searchSortPriority");
+      if (btnLine) btnLine.classList.toggle("active", state.searchSortMode === "line");
+      if (btnPri)  btnPri .classList.toggle("active", state.searchSortMode === "priority");
+      // Re-render the existing list under the new order (no need to
+      // re-walk the DOM since hits[] is already populated).
+      if (state.searchQueryRight) {
+        renderInFileResults(state.searchQueryRight, state.searchInFileHits);
+      }
+    }
+    applySearchSortMode(state.searchSortMode);
+    {
+      const btnLine = document.getElementById("searchSortLine");
+      const btnPri  = document.getElementById("searchSortPriority");
+      if (btnLine) btnLine.addEventListener("click", function () { applySearchSortMode("line"); });
+      if (btnPri)  btnPri .addEventListener("click", function () { applySearchSortMode("priority"); });
+    }
     searchInputEl.addEventListener("input", (event) => {
       state.searchQuery = event.target.value || "";
       renderFiles(state.entries);
