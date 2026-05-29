@@ -75,6 +75,9 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/list-recursive", s.handleListRecursive)
 	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
+	mux.HandleFunc("/api/memos", s.handleMemos)
+	mux.HandleFunc("/api/memos/save", s.handleSaveMemos)
+	mux.HandleFunc("/api/memos/delete", s.handleDeleteMemo)
 	return mux
 }
 
@@ -211,6 +214,146 @@ func (s *webServer) saveAliases(aliases map[string]string) error {
 		return err
 	}
 	return os.WriteFile(s.aliasesPath(), data, 0o644)
+}
+
+// Memos: a global notebook of free-form notes shared across all files and
+// browser sessions. Stored in their own JSON file alongside favorites/aliases
+// so they survive restarts and re-sync when a new session opens. Each memo
+// carries a client-generated id and createdAt/updatedAt timestamps; merges are
+// last-write-wins per id keyed on updatedAt.
+
+type memo struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+func (s *webServer) memosPath() string {
+	return filepath.Join(s.appRoot, memosFileName)
+}
+
+func (s *webServer) loadMemos() []memo {
+	data, err := os.ReadFile(s.memosPath())
+	if err != nil {
+		return nil
+	}
+	var memos []memo
+	if err := json.Unmarshal(data, &memos); err != nil {
+		return nil
+	}
+	out := make([]memo, 0, len(memos))
+	for _, m := range memos {
+		if m.ID == "" {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func (s *webServer) saveMemos(memos []memo) error {
+	if memos == nil {
+		memos = []memo{}
+	}
+	data, err := json.MarshalIndent(memos, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.memosPath(), data, 0o644)
+}
+
+// mergeMemos upserts incoming memos into existing using last-write-wins per id:
+// an incoming memo replaces an existing one only when its UpdatedAt sorts later
+// (RFC3339 strings compare lexicographically). Unknown ids are appended.
+// Existing memos absent from incoming are kept — save never deletes.
+func mergeMemos(existing, incoming []memo) []memo {
+	index := make(map[string]int, len(existing))
+	merged := make([]memo, len(existing))
+	copy(merged, existing)
+	for i := range merged {
+		index[merged[i].ID] = i
+	}
+	for _, in := range incoming {
+		if in.ID == "" {
+			continue
+		}
+		if i, ok := index[in.ID]; ok {
+			if in.UpdatedAt >= merged[i].UpdatedAt {
+				merged[i] = in
+			}
+		} else {
+			index[in.ID] = len(merged)
+			merged = append(merged, in)
+		}
+	}
+	return merged
+}
+
+// sortMemosByUpdatedDesc orders memos newest-updated first for display.
+func sortMemosByUpdatedDesc(memos []memo) {
+	sort.SliceStable(memos, func(i, j int) bool {
+		return memos[i].UpdatedAt > memos[j].UpdatedAt
+	})
+}
+
+func (s *webServer) handleMemos(w http.ResponseWriter, r *http.Request) {
+	memos := s.loadMemos()
+	sortMemosByUpdatedDesc(memos)
+	if memos == nil {
+		memos = []memo{}
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"memos": memos})
+}
+
+func (s *webServer) handleSaveMemos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload struct {
+		Memos []memo `json:"memos"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	merged := mergeMemos(s.loadMemos(), payload.Memos)
+	if err := s.saveMemos(merged); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sortMemosByUpdatedDesc(merged)
+	s.writeJSON(w, http.StatusOK, map[string]any{"memos": merged})
+}
+
+func (s *webServer) handleDeleteMemo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	memos := s.loadMemos()
+	out := memos[:0]
+	for _, m := range memos {
+		if m.ID == payload.ID {
+			continue
+		}
+		out = append(out, m)
+	}
+	if err := s.saveMemos(out); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sortMemosByUpdatedDesc(out)
+	s.writeJSON(w, http.StatusOK, map[string]any{"memos": out})
 }
 
 func (s *webServer) writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -2468,6 +2611,78 @@ const webAppHTML = `<!doctype html>
       border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2));
       box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
     }
+    .memo-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 168px;
+      overflow-y: auto;
+      margin: 2px 0;
+    }
+    .memo-list-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      user-select: none;
+    }
+    .memo-list-item:hover {
+      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+    }
+    .memo-list-item.active {
+      background: color-mix(in oklab, var(--accent) 16%, transparent);
+      border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+    }
+    .memo-item-main { flex: 1 1 auto; min-width: 0; }
+    .memo-item-title {
+      font-size: 12.5px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .memo-item-title.untitled { color: var(--muted); font-style: italic; }
+    .memo-item-time { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+    .memo-item-del {
+      flex: 0 0 auto;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 6px;
+      opacity: 0;
+    }
+    .memo-list-item:hover .memo-item-del { opacity: 1; }
+    .memo-item-del:hover { color: var(--text); background: color-mix(in oklab, var(--line) 50%, transparent); }
+    .memo-empty {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 4px;
+      text-align: center;
+    }
+    .memo-title-input {
+      width: 100%;
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 86%, transparent);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font: 13px/1.4 system-ui, -apple-system, sans-serif;
+      outline: none;
+    }
+    .memo-title-input::placeholder { color: var(--muted); }
+    .memo-title-input:focus {
+      border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2));
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+    }
+    .memo-editor[hidden] { display: none; }
+    .memo-sync-state { font-size: 10.5px; color: var(--muted); min-height: 13px; }
     .search-section-head {
       display: flex;
       align-items: center;
@@ -2924,11 +3139,18 @@ const webAppHTML = `<!doctype html>
           <div class="search-section-head">
             <div class="search-section-title">Memo</div>
             <div class="memo-actions">
+              <button type="button" class="search-sort-btn" id="memoNewBtn" title="New memo">＋ New</button>
               <button type="button" class="search-sort-btn" id="memoCopyBtn" title="Copy with filename header">📋 Copy</button>
-              <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear memo">Clear</button>
+              <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear this memo's body">Clear</button>
             </div>
           </div>
-          <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
+          <div class="memo-list" id="memoList"></div>
+          <div class="memo-empty" id="memoEmpty" hidden>메모가 없습니다. ＋ New로 추가하세요.</div>
+          <div class="memo-editor" id="memoEditor" hidden>
+            <input type="text" class="memo-title-input" id="memoTitleInput" spellcheck="false" placeholder="제목(선택)" />
+            <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
+            <div class="memo-sync-state" id="memoSyncState"></div>
+          </div>
         </div>
       </div>
     </aside>
@@ -5612,61 +5834,304 @@ const webAppHTML = `<!doctype html>
         runFolderSearch(state.searchQueryRight);
       }, 120);
     });
-    // ── Memo pad in the right panel ──────────────────────────────
-    // Quick scratch space for jotting things to remember while reading.
-    // Persisted in localStorage so it survives reloads. The Copy button
-    // produces "<filename>\n\n<memo>" so a paste into another doc has
-    // the source pinned at the top.
-    const memoAreaEl = document.getElementById("memoArea");
-    const memoCopyBtnEl = document.getElementById("memoCopyBtn");
-    const memoClearBtnEl = document.getElementById("memoClearBtn");
-    if (memoAreaEl) {
-      try { memoAreaEl.value = localStorage.getItem("mdviewer.memo") || ""; } catch (e) {}
-      let memoDebounce = null;
-      memoAreaEl.addEventListener("input", function () {
-        clearTimeout(memoDebounce);
-        memoDebounce = setTimeout(function () {
-          try { localStorage.setItem("mdviewer.memo", memoAreaEl.value || ""); } catch (e) {}
-        }, 250);
-      });
-    }
-    if (memoCopyBtnEl && memoAreaEl) {
-      memoCopyBtnEl.addEventListener("click", async function () {
-        const memo = memoAreaEl.value || "";
-        if (!memo.trim()) {
-          showToast("메모가 비어 있어요", { kind: "err", icon: "⚠️" });
-          return;
+    // ── Multi-memo notebook in the right panel ───────────────────
+    // A global notebook (not tied to the open file). Memos live in memory,
+    // are mirrored to localStorage for instant load/offline, and sync to the
+    // server file (.mdviewer_memos.json) so they survive restarts and re-sync
+    // when a new session opens. Each memo has an id + createdAt/updatedAt;
+    // merges are last-write-wins per id keyed on updatedAt.
+    (function setupMemos() {
+      const listEl = document.getElementById("memoList");
+      const emptyEl = document.getElementById("memoEmpty");
+      const editorEl = document.getElementById("memoEditor");
+      const titleEl = document.getElementById("memoTitleInput");
+      const areaEl = document.getElementById("memoArea");
+      const syncStateEl = document.getElementById("memoSyncState");
+      const newBtnEl = document.getElementById("memoNewBtn");
+      const copyBtnEl = document.getElementById("memoCopyBtn");
+      const clearBtnEl = document.getElementById("memoClearBtn");
+      if (!listEl || !areaEl || !titleEl) return;
+
+      const LS_KEY = "mdviewer.memos";
+      const LS_LEGACY = "mdviewer.memo";
+      const m = { memos: [], activeId: null, dirty: new Set(), syncTimer: null };
+
+      function nowISO() { return new Date().toISOString(); }
+      function genId() {
+        return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+      }
+      function getMemo(id) { return m.memos.find(function (x) { return x.id === id; }) || null; }
+      function firstLine(s) {
+        const lines = (s || "").split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const t = lines[i].trim();
+          if (t) return t;
         }
-        const header = state.selectedPath
-          ? (state.selectedPath.split("/").pop() + "  (" + state.selectedPath + ")")
-          : "(no file open)";
-        const payload = header + "\n" + "─".repeat(Math.min(header.length, 60)) + "\n\n" + memo;
+        return "";
+      }
+      function displayName(memo) {
+        const t = (memo.title || "").trim();
+        if (t) return { text: t, untitled: false };
+        const f = firstLine(memo.body);
+        if (f) return { text: f, untitled: false };
+        return { text: "Untitled", untitled: true };
+      }
+      function relTime(iso) {
+        const t = Date.parse(iso);
+        if (isNaN(t)) return "";
+        const s = Math.floor((Date.now() - t) / 1000);
+        if (s < 60) return "방금";
+        const mins = Math.floor(s / 60); if (mins < 60) return mins + "분 전";
+        const h = Math.floor(mins / 60); if (h < 24) return h + "시간 전";
+        const d = Math.floor(h / 24); if (d < 7) return d + "일 전";
+        const dt = new Date(t); return (dt.getMonth() + 1) + "/" + dt.getDate();
+      }
+      function sortMemos() {
+        m.memos.sort(function (a, b) { return (b.updatedAt || "").localeCompare(a.updatedAt || ""); });
+      }
+      function persistLocal() {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(m.memos)); } catch (e) {}
+      }
+      function loadLocal() {
+        try { const v = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+      }
+      function setSyncState(s) { if (syncStateEl) syncStateEl.textContent = s || ""; }
+
+      function renderList() {
+        listEl.innerHTML = "";
+        sortMemos();
+        for (const memo of m.memos) {
+          const row = document.createElement("div");
+          row.className = "memo-list-item" + (memo.id === m.activeId ? " active" : "");
+          const main = document.createElement("div");
+          main.className = "memo-item-main";
+          const name = displayName(memo);
+          const title = document.createElement("div");
+          title.className = "memo-item-title" + (name.untitled ? " untitled" : "");
+          title.textContent = name.text;
+          const time = document.createElement("div");
+          time.className = "memo-item-time";
+          time.textContent = relTime(memo.updatedAt);
+          main.appendChild(title);
+          main.appendChild(time);
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "memo-item-del";
+          del.title = "Delete memo";
+          del.textContent = "×";
+          del.addEventListener("click", function (ev) { ev.stopPropagation(); deleteMemo(memo.id); });
+          row.appendChild(main);
+          row.appendChild(del);
+          row.addEventListener("click", function () { setActive(memo.id); });
+          listEl.appendChild(row);
+        }
+        const has = m.memos.length > 0;
+        if (emptyEl) emptyEl.hidden = has;
+        if (editorEl) editorEl.hidden = !has;
+      }
+
+      function syncActiveEditor() {
+        const memo = getMemo(m.activeId);
+        titleEl.value = memo ? (memo.title || "") : "";
+        areaEl.value = memo ? (memo.body || "") : "";
+      }
+
+      function setActive(id) {
+        m.activeId = id;
+        renderList();
+        syncActiveEditor();
+      }
+
+      function onEdit(field, val) {
+        const memo = getMemo(m.activeId);
+        if (!memo) return;
+        memo[field] = val;
+        memo.updatedAt = nowISO();
+        m.dirty.add(memo.id);
+        persistLocal();
+        renderList(); // refresh display name + relative time live
+        setSyncState("편집 중…");
+        scheduleSync();
+      }
+
+      function newMemo() {
+        const memo = { id: genId(), title: "", body: "", createdAt: nowISO(), updatedAt: nowISO() };
+        m.memos.unshift(memo);
+        m.dirty.add(memo.id);
+        persistLocal();
+        setActive(memo.id);
+        titleEl.focus();
+        scheduleSync();
+      }
+
+      async function deleteMemo(id) {
+        if (!window.confirm("이 메모를 삭제할까요?")) return;
+        m.memos = m.memos.filter(function (x) { return x.id !== id; });
+        m.dirty.delete(id);
+        if (m.activeId === id) m.activeId = m.memos[0] ? m.memos[0].id : null;
+        persistLocal();
+        renderList();
+        syncActiveEditor();
         try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(payload);
-          } else {
-            const ta = document.createElement("textarea");
-            ta.value = payload;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            document.body.removeChild(ta);
-          }
-          showToast("메모를 파일명과 함께 복사했어요", { kind: "ok", icon: "📋" });
-        } catch (e) {
-          showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+          await fetch("/api/memos/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: id }),
+          });
+        } catch (e) { /* offline: server keeps it; harmless for single user */ }
+      }
+
+      // ── sync ──
+      function scheduleSync() {
+        clearTimeout(m.syncTimer);
+        m.syncTimer = setTimeout(flushDirty, 800);
+      }
+
+      async function flushDirty() {
+        if (!m.dirty.size) return;
+        const ids = Array.from(m.dirty);
+        const batch = [];
+        const sentAt = {};
+        for (const id of ids) {
+          const memo = getMemo(id);
+          if (memo) { batch.push(memo); sentAt[id] = memo.updatedAt; }
+          else m.dirty.delete(id); // gone (deleted) — drop from dirty
         }
-      });
-    }
-    if (memoClearBtnEl && memoAreaEl) {
-      memoClearBtnEl.addEventListener("click", function () {
-        if (!memoAreaEl.value) return;
-        if (!window.confirm("메모를 모두 지울까요?")) return;
-        memoAreaEl.value = "";
-        try { localStorage.removeItem("mdviewer.memo"); } catch (e) {}
-        memoAreaEl.focus();
-      });
-    }
+        if (!batch.length) return;
+        try {
+          const r = await fetch("/api/memos/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ memos: batch }),
+          });
+          if (!r.ok) throw new Error("save failed");
+          // Clear dirty only for memos untouched since we sent them.
+          for (const id of ids) {
+            const memo = getMemo(id);
+            if (!memo || sentAt[id] === memo.updatedAt) m.dirty.delete(id);
+          }
+          setSyncState("저장됨 · " + relTime(nowISO()));
+        } catch (e) {
+          setSyncState("저장 대기 중…"); // periodic flush retries
+        }
+      }
+
+      async function syncFromServer() {
+        let serverMemos = [];
+        try {
+          const r = await fetch("/api/memos");
+          if (!r.ok) throw new Error("load failed");
+          const data = await r.json();
+          serverMemos = (data && data.memos) || [];
+        } catch (e) { return; } // offline: keep local as-is
+        const localById = {};
+        for (const lm of m.memos) localById[lm.id] = lm;
+        const serverById = {};
+        for (const sm of serverMemos) serverById[sm.id] = sm;
+        // Adopt server memos that are new or newer than local.
+        for (const sm of serverMemos) {
+          if (!sm.id) continue;
+          const lm = localById[sm.id];
+          if (!lm || (sm.updatedAt || "") > (lm.updatedAt || "")) {
+            localById[sm.id] = sm;
+          }
+        }
+        // Push local memos the server is missing or has older copies of.
+        const toPush = [];
+        for (const lm of m.memos) {
+          const sm = serverById[lm.id];
+          if (!sm || (lm.updatedAt || "") > (sm.updatedAt || "")) toPush.push(lm.id);
+        }
+        m.memos = Object.keys(localById).map(function (id) { return localById[id]; });
+        sortMemos();
+        if (!getMemo(m.activeId)) m.activeId = m.memos[0] ? m.memos[0].id : null;
+        persistLocal();
+        renderList();
+        syncActiveEditor();
+        for (const id of toPush) m.dirty.add(id);
+        if (toPush.length) flushDirty();
+      }
+
+      function flushBeacon() {
+        if (!m.dirty.size || !navigator.sendBeacon) return;
+        const batch = [];
+        for (const id of m.dirty) { const memo = getMemo(id); if (memo) batch.push(memo); }
+        if (!batch.length) return;
+        try {
+          const blob = new Blob([JSON.stringify({ memos: batch })], { type: "application/json" });
+          navigator.sendBeacon("/api/memos/save", blob);
+        } catch (e) {}
+      }
+
+      // ── wire up ──
+      titleEl.addEventListener("input", function () { onEdit("title", titleEl.value); });
+      areaEl.addEventListener("input", function () { onEdit("body", areaEl.value); });
+      if (newBtnEl) newBtnEl.addEventListener("click", newMemo);
+
+      if (copyBtnEl) {
+        copyBtnEl.addEventListener("click", async function () {
+          const memo = getMemo(m.activeId);
+          const body = memo ? (memo.body || "") : "";
+          if (!body.trim()) {
+            showToast("메모가 비어 있어요", { kind: "err", icon: "⚠️" });
+            return;
+          }
+          const header = state.selectedPath
+            ? (state.selectedPath.split("/").pop() + "  (" + state.selectedPath + ")")
+            : "(no file open)";
+          const payload = header + "\n" + "─".repeat(Math.min(header.length, 60)) + "\n\n" + body;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(payload);
+            } else {
+              const ta = document.createElement("textarea");
+              ta.value = payload;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand("copy");
+              document.body.removeChild(ta);
+            }
+            showToast("메모를 파일명과 함께 복사했어요", { kind: "ok", icon: "📋" });
+          } catch (e) {
+            showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+          }
+        });
+      }
+
+      if (clearBtnEl) {
+        clearBtnEl.addEventListener("click", function () {
+          const memo = getMemo(m.activeId);
+          if (!memo || !memo.body) return;
+          if (!window.confirm("이 메모의 본문을 지울까요?")) return;
+          onEdit("body", "");
+          areaEl.value = "";
+          areaEl.focus();
+        });
+      }
+
+      // ── init ──
+      m.memos = loadLocal();
+      // One-time migration of the old single-memo scratchpad.
+      if (!m.memos.length) {
+        let legacy = "";
+        try { legacy = localStorage.getItem(LS_LEGACY) || ""; } catch (e) {}
+        if (legacy.trim()) {
+          const t = nowISO();
+          m.memos.push({ id: genId(), title: "", body: legacy, createdAt: t, updatedAt: t });
+          m.dirty.add(m.memos[0].id);
+          try { localStorage.removeItem(LS_LEGACY); } catch (e) {}
+          persistLocal();
+        }
+      }
+      sortMemos();
+      m.activeId = m.memos[0] ? m.memos[0].id : null;
+      renderList();
+      syncActiveEditor();
+      syncFromServer();
+      setInterval(flushDirty, 15000);
+      window.addEventListener("beforeunload", flushBeacon);
+    })();
 
     // Sort-mode toggle for the in-file search list.
     function applySearchSortMode(mode) {
