@@ -69,6 +69,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
 	mux.HandleFunc("/api/raw", s.handleRaw)
 	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
+	mux.HandleFunc("/api/favorites/reorder", s.handleReorderFavorites)
 	mux.HandleFunc("/api/resolve", s.handleResolve)
 	mux.HandleFunc("/api/usage", s.handleUsage)
 	mux.HandleFunc("/api/aliases", s.handleAliases)
@@ -690,8 +691,9 @@ func (s *webServer) handleToggleFavorite(w http.ResponseWriter, r *http.Request)
 	if found >= 0 {
 		favorites = append(favorites[:found], favorites[found+1:]...)
 	} else {
+		// Append in add-order; the user controls ordering via drag-reorder
+		// (/api/favorites/reorder) rather than a forced alphabetical sort.
 		favorites = append(favorites, dir)
-		sort.Strings(favorites)
 	}
 
 	if err := s.saveFavorites(favorites); err != nil {
@@ -703,6 +705,46 @@ func (s *webServer) handleToggleFavorite(w http.ResponseWriter, r *http.Request)
 		"favorites": favorites,
 		"favorited": found < 0,
 	})
+}
+
+// handleReorderFavorites persists a user-defined favorites order. The incoming
+// order is filtered to currently-saved favorites; any saved favorite missing
+// from the payload is appended (so a stale/partial client can't drop entries).
+func (s *webServer) handleReorderFavorites(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload struct {
+		Order []string `json:"order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	current := s.loadFavorites()
+	inCurrent := make(map[string]bool, len(current))
+	for _, p := range current {
+		inCurrent[p] = true
+	}
+	seen := make(map[string]bool, len(current))
+	out := make([]string, 0, len(current))
+	for _, p := range payload.Order {
+		if inCurrent[p] && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, p := range current { // keep any favorite the client omitted
+		if !seen[p] {
+			out = append(out, p)
+		}
+	}
+	if err := s.saveFavorites(out); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"favorites": out})
 }
 
 type gitRemote struct {
@@ -1092,6 +1134,14 @@ const webAppHTML = `<!doctype html>
     }
     .favorite-row:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); }
     .favorite-row.active { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); }
+    .favorite-row[draggable="true"] { cursor: grab; }
+    .fav-dragging {
+      opacity: 0.5;
+      outline: 2px dashed color-mix(in oklab, var(--accent) 60%, transparent);
+      outline-offset: -2px;
+      border-radius: 8px;
+    }
+    .popup-item[draggable="true"] { cursor: grab; }
     .favorite-main {
       flex: 1 1 auto;
       min-width: 0;
@@ -4631,6 +4681,71 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    // ── Drag-to-reorder favorites (sidebar + All-favorites modal) ──
+    let _favDragEl = null;
+    function favDragAfter(container, y) {
+      const els = Array.from(container.querySelectorAll("[draggable='true']:not(.fav-dragging)"));
+      let closest = { offset: -Infinity, el: null };
+      for (const el of els) {
+        const box = el.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) closest = { offset: offset, el: el };
+      }
+      return closest.el;
+    }
+    // Make a list's rows (each with dataset.path) drag-sortable. Container-level
+    // handlers bind once; rows are (re)marked draggable on every render.
+    function setupFavReorder(containerEl, onReorder) {
+      containerEl._favOnReorder = onReorder;
+      if (!containerEl._favReorderBound) {
+        containerEl._favReorderBound = true;
+        containerEl.addEventListener("dragover", function (e) {
+          if (!_favDragEl || _favDragEl.parentNode !== containerEl) return;
+          e.preventDefault();
+          const after = favDragAfter(containerEl, e.clientY);
+          if (after == null) containerEl.appendChild(_favDragEl);
+          else if (after !== _favDragEl) containerEl.insertBefore(_favDragEl, after);
+        });
+        containerEl.addEventListener("drop", function (e) {
+          if (!_favDragEl) return;
+          e.preventDefault();
+          const order = Array.from(containerEl.children)
+            .map(function (c) { return c.dataset && c.dataset.path; })
+            .filter(Boolean);
+          if (typeof containerEl._favOnReorder === "function") containerEl._favOnReorder(order);
+        });
+      }
+      Array.from(containerEl.children).forEach(function (row) {
+        if (!row.dataset || !row.dataset.path) return;
+        row.draggable = true;
+        row.addEventListener("dragstart", function (e) {
+          _favDragEl = row;
+          row.classList.add("fav-dragging");
+          e.dataTransfer.effectAllowed = "move";
+          try { e.dataTransfer.setData("text/plain", row.dataset.path); } catch (_) {}
+        });
+        row.addEventListener("dragend", function () {
+          if (_favDragEl) _favDragEl.classList.remove("fav-dragging");
+          _favDragEl = null;
+        });
+      });
+    }
+    async function commitFavoritesOrder(order) {
+      const seen = {};
+      order.forEach(function (p) { seen[p] = true; });
+      const full = order.concat(state.favorites.filter(function (p) { return !seen[p]; }));
+      state.favorites = full;
+      renderFavorites();
+      if (!popupEl.hidden && state.popupKind === "favorites") renderPopup();
+      try {
+        await fetch("/api/favorites/reorder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order: full }),
+        });
+      } catch (e) { /* offline: local order still applied */ }
+    }
+
     function renderFavorites() {
       favoritesEl.innerHTML = "";
       if (!state.favorites.length) {
@@ -4642,6 +4757,11 @@ const webAppHTML = `<!doctype html>
       for (const favorite of shown) {
         favoritesEl.appendChild(buildFavoriteRow(favorite));
       }
+      // Reorder the shown subset; keep any hidden favorites after them.
+      setupFavReorder(favoritesEl, function (domOrder) {
+        const rest = state.favorites.filter(function (p) { return domOrder.indexOf(p) < 0; });
+        commitFavoritesOrder(domOrder.concat(rest));
+      });
       toggleShowAll("showAllFavorites", state.favorites.length);
     }
 
@@ -7634,6 +7754,11 @@ const webAppHTML = `<!doctype html>
           }
         };
         popupResultsEl.appendChild(row);
+      }
+      // Drag-to-reorder favorites in the modal — only when the full,
+      // unfiltered list is shown (reordering a filtered subset is ambiguous).
+      if (state.popupKind === "favorites" && !q) {
+        setupFavReorder(popupResultsEl, function (domOrder) { commitFavoritesOrder(domOrder); });
       }
     }
 

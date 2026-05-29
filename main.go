@@ -851,8 +851,9 @@ func (m *model) toggleCurrentDirectoryFavorite() {
 		}
 	}
 
+	// Append in add-order — preserve the user-defined favorites order (shared
+	// with the web UI, which reorders via drag); don't force alphabetical.
 	m.favorites = append(m.favorites, dir)
-	sort.Strings(m.favorites)
 	for i, favorite := range m.favorites {
 		if favorite == dir {
 			m.favCursor = i

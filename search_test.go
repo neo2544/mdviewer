@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"path/filepath"
 	"testing"
 )
@@ -177,5 +178,35 @@ func TestSearchScopeGitHTTP(t *testing.T) {
 	}
 	if len(resF) != 1 || filepath.Base(resF[0].Path) != "subdoc.md" {
 		t.Errorf("shallow scope = %+v, want only subdoc.md", resF)
+	}
+}
+
+func TestReorderFavorites(t *testing.T) {
+	dir := t.TempDir()
+	s := &webServer{startDir: dir, appRoot: dir}
+	if err := s.saveFavorites([]string{"/a", "/b", "/c"}); err != nil {
+		t.Fatal(err)
+	}
+	// Reorder to c, a, b — and include an unknown path (ignored) + omit nothing.
+	body := `{"order":["/c","/a","/zzz"]}`
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, httptest.NewRequest("POST", "/api/favorites/reorder", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	got := s.loadFavorites()
+	// /c,/a from payload (unknown /zzz dropped), then omitted /b appended.
+	want := []string{"/c", "/a", "/b"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("reorder = %v, want %v", got, want)
+	}
+}
+
+func TestReorderFavoritesRejectsGET(t *testing.T) {
+	s := &webServer{appRoot: t.TempDir()}
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, httptest.NewRequest("GET", "/api/favorites/reorder", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rec.Code)
 	}
 }
