@@ -2717,8 +2717,8 @@ const webAppHTML = `<!doctype html>
     .memo-list {
       display: flex;
       flex-direction: column;
-      gap: 3px;
-      max-height: 168px;
+      gap: 6px;
+      max-height: 40vh;
       overflow-y: auto;
       margin: 2px 0;
     }
@@ -2740,21 +2740,25 @@ const webAppHTML = `<!doctype html>
       box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
     }
     .memo-list-item {
+      flex: 0 0 auto;
       display: flex;
       align-items: flex-start;
       gap: 6px;
-      padding: 6px 8px;
-      border-radius: 8px;
-      border: 1px solid transparent;
+      padding: 7px 9px;
+      border-radius: 9px;
+      border: 1px solid color-mix(in oklab, var(--line) 38%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 50%, transparent);
       cursor: pointer;
       user-select: none;
     }
     .memo-list-item:hover {
-      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 85%, transparent);
+      border-color: color-mix(in oklab, var(--line) 60%, transparent);
     }
     .memo-list-item.active {
       background: color-mix(in oklab, var(--accent) 16%, transparent);
-      border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+      border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+      box-shadow: inset 2px 0 0 var(--accent);
     }
     .memo-item-pin {
       flex: 0 0 auto;
@@ -2780,6 +2784,14 @@ const webAppHTML = `<!doctype html>
       text-overflow: ellipsis;
     }
     .memo-item-title.untitled { color: var(--muted); font-style: italic; }
+    .memo-item-source {
+      font-size: 10px;
+      color: color-mix(in oklab, var(--accent) 70%, var(--muted));
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .memo-item-snippet {
       font-size: 11px;
       line-height: 1.35;
@@ -3396,7 +3408,6 @@ const webAppHTML = `<!doctype html>
             <div class="memo-actions">
               <button type="button" class="search-sort-btn" id="memoNewBtn" title="New memo">＋ New</button>
               <button type="button" class="search-sort-btn" id="memoCopyBtn" title="Copy with filename header">📋 Copy</button>
-              <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear this memo's body">🧹 Clear</button>
             </div>
           </div>
           <div class="memo-controls" id="memoControls" hidden>
@@ -6383,7 +6394,6 @@ const webAppHTML = `<!doctype html>
       const syncStateEl = document.getElementById("memoSyncState");
       const newBtnEl = document.getElementById("memoNewBtn");
       const copyBtnEl = document.getElementById("memoCopyBtn");
-      const clearBtnEl = document.getElementById("memoClearBtn");
       const backlinkEl = document.getElementById("memoBacklink");
       const selectionBarEl = document.getElementById("memoSelectionBar");
       const selectionMemoBtnEl = document.getElementById("memoSelectionMemoBtn");
@@ -6498,6 +6508,14 @@ const webAppHTML = `<!doctype html>
             sn.textContent = snip;
             main.appendChild(sn);
           }
+          if (memo.sourcePath) {
+            const srcEl = document.createElement("div");
+            srcEl.className = "memo-item-source";
+            const fileName = memo.sourcePath.split("/").pop();
+            srcEl.textContent = "↩ " + (memo.sourceHeading ? (fileName + " › " + memo.sourceHeading) : fileName);
+            srcEl.title = memo.sourcePath + (memo.sourceHash ? ("#" + memo.sourceHash) : "");
+            main.appendChild(srcEl);
+          }
 
           const right = document.createElement("div");
           right.className = "memo-item-right";
@@ -6561,9 +6579,28 @@ const webAppHTML = `<!doctype html>
         scheduleSync();
       }
 
+      // Source for a new memo: the file currently open, plus the heading
+      // closest to the current scroll position (from the outline scroll-spy).
+      function currentViewSource() {
+        const path = state.selectedPath || "";
+        if (!path) return { path: "", hash: "", heading: "" };
+        const id = (typeof outlineState !== "undefined") ? outlineState.activeId : "";
+        let heading = "";
+        if (id && typeof outlineState !== "undefined" && outlineState.all) {
+          const h = outlineState.all.find(function (x) { return x.id === id; });
+          if (h) heading = h.text || "";
+        }
+        return { path: path, hash: id || "", heading: heading };
+      }
+
       function newMemo() {
         const t = nowISO();
-        const memo = { id: genId(), title: "", body: "", pinned: false, createdAt: t, updatedAt: t };
+        const src = currentViewSource();
+        const memo = {
+          id: genId(), title: "", body: "", pinned: false,
+          sourcePath: src.path, sourceHash: src.hash, sourceHeading: src.heading,
+          createdAt: t, updatedAt: t,
+        };
         m.memos.unshift(memo);
         m.dirty.add(memo.id);
         persistLocal();
@@ -7084,17 +7121,6 @@ const webAppHTML = `<!doctype html>
           } catch (e) {
             showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
           }
-        });
-      }
-
-      if (clearBtnEl) {
-        clearBtnEl.addEventListener("click", function () {
-          const memo = getMemo(m.activeId);
-          if (!memo || !memo.body) return;
-          if (!window.confirm("이 메모의 본문을 지울까요?")) return;
-          onEdit("body", "");
-          areaEl.value = "";
-          areaEl.focus();
         });
       }
 
