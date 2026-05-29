@@ -4053,18 +4053,22 @@ const webAppHTML = `<!doctype html>
     // walkTextNodes yields every text node descendant of root that has
     // non-empty content and isn't inside a SCRIPT/STYLE/MARK element.
     function walkTextNodes(root, visit) {
+      // Depth-first IN DOCUMENT ORDER. The previous stack-based version
+      // pushed sibling elements onto a LIFO and popped them in reverse,
+      // so a doc with H1/H2/H3 ended up visited as H3/H2/H1 — which
+      // pushed every "in this file" search result into reverse order
+      // (and same-line tiebreaker by idx therefore looked backwards).
       const SKIP = { SCRIPT: 1, STYLE: 1, MARK: 1 };
-      const stack = [root];
-      while (stack.length) {
-        const node = stack.pop();
-        for (const child of Array.from(node.childNodes)) {
+      function walk(node) {
+        for (const child of node.childNodes) {
           if (child.nodeType === 1) {
-            if (!SKIP[child.tagName]) stack.push(child);
+            if (!SKIP[child.tagName]) walk(child);
           } else if (child.nodeType === 3) {
             if (child.nodeValue && child.nodeValue.length) visit(child);
           }
         }
       }
+      walk(root);
     }
 
     // highlightInFile wraps each occurrence of needle in previewBodyEl with
