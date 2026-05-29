@@ -75,6 +75,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/list-recursive", s.handleListRecursive)
 	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
+	mux.HandleFunc("/api/git/root", s.handleGitRoot)
 	mux.HandleFunc("/api/memos", s.handleMemos)
 	mux.HandleFunc("/api/memos/save", s.handleSaveMemos)
 	mux.HandleFunc("/api/memos/delete", s.handleDeleteMemo)
@@ -2906,6 +2907,12 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, var(--accent) 65%, var(--panel-2));
       color: var(--panel);
     }
+    .search-sort-btn:disabled,
+    .search-sort-btn.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
     .search-hit .search-hit-line {
       flex: 0 0 auto;
       font-family: ui-monospace, SFMono-Regular, monospace;
@@ -3397,6 +3404,10 @@ const webAppHTML = `<!doctype html>
       <div class="popup-head">
         <div class="popup-title" id="folderBrowseTitle">하위 폴더 탐색</div>
         <div class="popup-head-actions">
+          <div class="search-sort" role="group" aria-label="탐색 범위">
+            <button type="button" class="search-sort-btn active" id="fbScopeFolder" title="현재 폴더 하위 탐색">하위 폴더</button>
+            <button type="button" class="search-sort-btn" id="fbScopeGit" title="Git 저장소 전체 탐색">Git repo</button>
+          </div>
           <button type="button" class="popup-close" id="folderBrowseClose" title="닫기">✕</button>
         </div>
       </div>
@@ -3599,6 +3610,9 @@ const webAppHTML = `<!doctype html>
       editDirty: false,
       restoringHistory: false,
       folderSearchScope: (localStorage.getItem("mdviewer.folderSearchScope") === "git") ? "git" : "folder",
+      fbScope: (localStorage.getItem("mdviewer.fbScope") === "git") ? "git" : "folder",
+      gitRepoRoot: null, // null = unknown, "" = not a repo, else repo root path
+      gitRepoCwd: null,  // cwd the gitRepoRoot was resolved for
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
@@ -4382,6 +4396,7 @@ const webAppHTML = `<!doctype html>
       }
       state.cwd = data.cwd;
       refreshGitRemote();
+      refreshGitScope();
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
@@ -6222,7 +6237,9 @@ const webAppHTML = `<!doctype html>
 
     // Folder-search scope: current folder vs the whole enclosing git repo.
     function applyFolderScope(scope) {
-      state.folderSearchScope = (scope === "git") ? "git" : "folder";
+      let next = (scope === "git") ? "git" : "folder";
+      if (next === "git" && state.gitRepoRoot === "") next = "folder"; // not a repo → ignore git
+      state.folderSearchScope = next;
       try { localStorage.setItem("mdviewer.folderSearchScope", state.folderSearchScope); } catch (e) {}
       const btnFolder = document.getElementById("searchScopeFolder");
       const btnGit = document.getElementById("searchScopeGit");
@@ -6238,6 +6255,40 @@ const webAppHTML = `<!doctype html>
       if (btnFolder) btnFolder.addEventListener("click", function () { applyFolderScope("folder"); });
       if (btnGit) btnGit.addEventListener("click", function () { applyFolderScope("git"); });
       applyFolderScope(state.folderSearchScope); // set initial active button + title
+    }
+
+    // Resolve whether the current folder is inside a git repo, then enable or
+    // disable the "Git" scope toggles accordingly. Cached per cwd.
+    async function refreshGitScope() {
+      if (!state.cwd) { state.gitRepoRoot = ""; updateGitScopeUI(); return; }
+      if (state.gitRepoCwd === state.cwd && state.gitRepoRoot !== null) { updateGitScopeUI(); return; }
+      try {
+        const r = await fetch("/api/git/root?dir=" + encodeURIComponent(state.cwd));
+        if (!r.ok) return;
+        const data = await r.json();
+        state.gitRepoRoot = (data && data.root) || "";
+        state.gitRepoCwd = state.cwd;
+      } catch (e) { return; }
+      updateGitScopeUI();
+    }
+    function updateGitScopeUI() {
+      const isRepo = !!state.gitRepoRoot;
+      // Content-search "Git 전체" toggle.
+      const gitBtn = document.getElementById("searchScopeGit");
+      if (gitBtn) {
+        gitBtn.disabled = !isRepo;
+        gitBtn.classList.toggle("disabled", !isRepo);
+        gitBtn.title = isRepo ? "상위 Git 저장소 전체 검색" : "현재 폴더가 Git 저장소가 아닙니다";
+      }
+      if (!isRepo && state.folderSearchScope === "git") applyFolderScope("folder");
+      // File-name browser "Git repo" toggle (only present while the modal exists).
+      const fbGitBtn = document.getElementById("fbScopeGit");
+      if (fbGitBtn) {
+        fbGitBtn.disabled = !isRepo;
+        fbGitBtn.classList.toggle("disabled", !isRepo);
+        fbGitBtn.title = isRepo ? "Git 저장소 전체 탐색" : "현재 폴더가 Git 저장소가 아닙니다";
+      }
+      if (!isRepo && state.fbScope === "git") { state.fbScope = "folder"; }
     }
     // ── Multi-memo notebook in the right panel ───────────────────
     // A global notebook (not tied to the open file). Memos live in memory,
@@ -7421,16 +7472,24 @@ const webAppHTML = `<!doctype html>
     // ---- Folder Browse Modal ----
     let fbAllGroups = [];
 
-    function openFolderBrowse() {
-      folderBrowseModalEl.hidden = false;
-      fbSearchEl.value = "";
+    function fbApplyScope(scope) {
+      let next = (scope === "git") ? "git" : "folder";
+      if (next === "git" && state.gitRepoRoot === "") next = "folder"; // not a repo
+      state.fbScope = next;
+      try { localStorage.setItem("mdviewer.fbScope", state.fbScope); } catch (e) {}
+      const bf = document.getElementById("fbScopeFolder");
+      const bg = document.getElementById("fbScopeGit");
+      if (bf) bf.classList.toggle("active", state.fbScope === "folder");
+      if (bg) bg.classList.toggle("active", state.fbScope === "git");
+    }
+
+    function loadFolderBrowse() {
       fbResultsEl.innerHTML = '<div class="fb-loading">불러오는 중…</div>';
-      const cwd = state.cwd || "";
-      const shortCwd = cwd ? cwd.replace(/.*\//, "") || cwd : "";
-      folderBrowseTitleEl.textContent = shortCwd ? shortCwd + " 하위 폴더 탐색" : "하위 폴더 탐색";
       fbAllGroups = [];
-      setTimeout(() => { try { fbSearchEl.focus(); } catch (e) {} }, 50);
-      fetch("/api/list-recursive?dir=" + encodeURIComponent(cwd))
+      const cwd = state.cwd || "";
+      const url = "/api/list-recursive?dir=" + encodeURIComponent(cwd) +
+                  (state.fbScope === "git" ? "&scope=git" : "");
+      fetch(url)
         .then(function(r) { return r.ok ? r.json() : Promise.reject(r); })
         .then(function(groups) {
           fbAllGroups = groups || [];
@@ -7439,6 +7498,20 @@ const webAppHTML = `<!doctype html>
         .catch(function() {
           fbResultsEl.innerHTML = '<div class="fb-empty">불러오기 실패</div>';
         });
+    }
+
+    async function openFolderBrowse() {
+      folderBrowseModalEl.hidden = false;
+      fbSearchEl.value = "";
+      fbResultsEl.innerHTML = '<div class="fb-loading">불러오는 중…</div>';
+      const cwd = state.cwd || "";
+      const shortCwd = cwd ? cwd.replace(/.*\//, "") || cwd : "";
+      folderBrowseTitleEl.textContent = shortCwd ? shortCwd + " 하위 폴더 탐색" : "하위 폴더 탐색";
+      fbAllGroups = [];
+      setTimeout(() => { try { fbSearchEl.focus(); } catch (e) {} }, 50);
+      await refreshGitScope();   // resolve git availability → gates the Git toggle
+      fbApplyScope(state.fbScope);
+      loadFolderBrowse();
     }
 
     function closeFolderBrowse() {
@@ -7530,6 +7603,12 @@ const webAppHTML = `<!doctype html>
 
     browseSubfoldersBtnEl.addEventListener("click", openFolderBrowse);
     document.getElementById("folderBrowseClose").onclick = closeFolderBrowse;
+    {
+      const fbF = document.getElementById("fbScopeFolder");
+      const fbG = document.getElementById("fbScopeGit");
+      if (fbF) fbF.addEventListener("click", function () { fbApplyScope("folder"); loadFolderBrowse(); });
+      if (fbG) fbG.addEventListener("click", function () { fbApplyScope("git"); loadFolderBrowse(); });
+    }
     folderBrowseModalEl.addEventListener("click", function(e) {
       if (e.target === folderBrowseModalEl) closeFolderBrowse();
     });
@@ -9443,6 +9522,22 @@ func (s *webServer) gitRoot(ctx context.Context, dir string) string {
 	return strings.TrimSpace(string(raw))
 }
 
+// handleGitRoot reports whether dir is inside a git repo and, if so, its root.
+// The UI uses this to enable/disable the "Git" search scope.
+func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"root": "", "isRepo": false})
+		return
+	}
+	root := s.gitRoot(r.Context(), abs)
+	s.writeJSON(w, http.StatusOK, map[string]any{"root": root, "isRepo": root != ""})
+}
+
 // searchFileForNeedle returns a searchResult for full when it contains needle.
 func searchFileForNeedle(full, needle string) (searchResult, bool) {
 	info, err := os.Stat(full)
@@ -9554,6 +9649,12 @@ func (s *webServer) handleListRecursive(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		http.Error(w, "invalid dir", http.StatusBadRequest)
 		return
+	}
+	// scope=git lists from the enclosing repo root (falls back to dir).
+	if r.URL.Query().Get("scope") == "git" {
+		if root := s.gitRoot(r.Context(), abs); root != "" {
+			abs = root
+		}
 	}
 
 	const maxFiles = 2000
