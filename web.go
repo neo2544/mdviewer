@@ -2735,6 +2735,32 @@ const webAppHTML = `<!doctype html>
     }
     .memo-editor[hidden] { display: none; }
     .memo-sync-state { font-size: 10.5px; color: var(--muted); min-height: 13px; }
+    .memo-conflict-count { font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0; }
+    .memo-conflict-body { padding: 4px 16px 16px; overflow-y: auto; }
+    .memo-conflict-name { font-size: 13px; font-weight: 600; color: var(--text); margin: 6px 0 4px; }
+    .memo-conflict-note { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .memo-conflict-cols { display: flex; gap: 10px; flex-wrap: wrap; }
+    .memo-conflict-col { flex: 1 1 220px; min-width: 0; }
+    .memo-conflict-col-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .memo-conflict-preview {
+      border: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 86%, transparent);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, monospace;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .memo-conflict-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .memo-conflict-actions .action { flex: 1 1 auto; }
+    .memo-conflict-actions .action.primary {
+      background: color-mix(in oklab, var(--accent) 22%, transparent);
+      border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+      color: var(--text);
+    }
     .search-section-head {
       display: flex;
       align-items: center;
@@ -3250,6 +3276,14 @@ const webAppHTML = `<!doctype html>
       </div>
       <div id="fbResults" class="popup-results"></div>
       <div class="popup-foot subtle">클릭하면 파일 열기 · Esc로 닫기</div>
+    </div>
+  </div>
+  <div class="popup-modal" id="memoConflictModal" hidden>
+    <div class="popup-card">
+      <div class="popup-head">
+        <div class="popup-title">⚠️ 메모 충돌 <span id="memoConflictCount" class="memo-conflict-count"></span></div>
+      </div>
+      <div id="memoConflictBody" class="memo-conflict-body"></div>
     </div>
   </div>
   <div class="mermaid-lab-modal" id="mermaidLabModal" hidden>
@@ -5922,7 +5956,13 @@ const webAppHTML = `<!doctype html>
       const LS_KEY = "mdviewer.memos";
       const LS_LEGACY = "mdviewer.memo";
       const LS_SORT = "mdviewer.memoSort";
-      const m = { memos: [], activeId: null, dirty: new Set(), syncTimer: null, filter: "", sort: "updated" };
+      const m = {
+        memos: [], activeId: null, dirty: new Set(), syncTimer: null,
+        filter: "", sort: "updated",
+        base: {},            // id -> updatedAt we last knew the server had (conflict baseline)
+        conflicts: {},       // id -> { id, kind:"edit"|"deleted", mine, theirs }
+        pulling: false, pushing: false, resolving: false,
+      };
 
       function nowISO() { return new Date().toISOString(); }
       function genId() {
@@ -6099,6 +6139,8 @@ const webAppHTML = `<!doctype html>
         if (!window.confirm("이 메모를 삭제할까요?")) return;
         m.memos = m.memos.filter(function (x) { return x.id !== id; });
         m.dirty.delete(id);
+        delete m.base[id];
+        delete m.conflicts[id];
         if (m.activeId === id) m.activeId = m.memos[0] ? m.memos[0].id : null;
         persistLocal();
         renderList();
@@ -6124,11 +6166,13 @@ const webAppHTML = `<!doctype html>
         const batch = [];
         const sentAt = {};
         for (const id of ids) {
+          if (m.conflicts[id]) continue;     // held until the user resolves the conflict
           const memo = getMemo(id);
           if (memo) { batch.push(memo); sentAt[id] = memo.updatedAt; }
           else m.dirty.delete(id); // gone (deleted) — drop from dirty
         }
         if (!batch.length) return;
+        m.pushing = true;
         try {
           const r = await fetch("/api/memos/save", {
             method: "POST",
@@ -6136,51 +6180,291 @@ const webAppHTML = `<!doctype html>
             body: JSON.stringify({ memos: batch }),
           });
           if (!r.ok) throw new Error("save failed");
-          // Clear dirty only for memos untouched since we sent them.
+          // Clear dirty only for memos untouched since we sent them, and
+          // advance the conflict baseline to what the server now holds.
           for (const id of ids) {
             const memo = getMemo(id);
-            if (!memo || sentAt[id] === memo.updatedAt) m.dirty.delete(id);
+            if (!memo || sentAt[id] === memo.updatedAt) {
+              m.dirty.delete(id);
+              if (sentAt[id]) m.base[id] = sentAt[id];
+            }
           }
           setSyncState("저장됨 · " + relTime(nowISO()));
         } catch (e) {
           setSyncState("저장 대기 중…"); // periodic flush retries
+        } finally {
+          m.pushing = false;
         }
       }
 
-      async function syncFromServer() {
-        let serverMemos = [];
+      function cloneMemo(x) {
+        return { id: x.id, title: x.title || "", body: x.body || "", pinned: !!x.pinned, createdAt: x.createdAt || "", updatedAt: x.updatedAt || "" };
+      }
+      function assignMemo(target, src) {
+        target.title = src.title || "";
+        target.body = src.body || "";
+        target.pinned = !!src.pinned;
+        target.createdAt = src.createdAt || target.createdAt;
+        target.updatedAt = src.updatedAt || "";
+      }
+      function sameContent(a, b) {
+        return (a.title || "") === (b.title || "") && (a.body || "") === (b.body || "") && !!a.pinned === !!b.pinned;
+      }
+      function removeLocal(id) {
+        m.memos = m.memos.filter(function (x) { return x.id !== id; });
+        m.dirty.delete(id);
+        delete m.base[id];
+      }
+
+      // Pull the server's copy and merge it into local state. Non-conflicting
+      // remote changes apply automatically; concurrent edits to a memo this
+      // session has unsaved changes on are queued for the conflict popup.
+      async function pullAndReconcile(isInitial) {
+        if (m.pushing || m.resolving || m.pulling) return;
+        m.pulling = true;
+        let serverMemos;
         try {
           const r = await fetch("/api/memos");
           if (!r.ok) throw new Error("load failed");
-          const data = await r.json();
-          serverMemos = (data && data.memos) || [];
-        } catch (e) { return; } // offline: keep local as-is
+          serverMemos = ((await r.json()) || {}).memos || [];
+        } catch (e) { m.pulling = false; return; } // offline: keep local as-is
+        try {
+          reconcile(serverMemos, !!isInitial);
+        } finally {
+          m.pulling = false;
+        }
+      }
+
+      function reconcile(serverMemos, isInitial) {
+        const serverById = {};
+        for (const sm of serverMemos) if (sm.id) serverById[sm.id] = sm;
         const localById = {};
         for (const lm of m.memos) localById[lm.id] = lm;
-        const serverById = {};
-        for (const sm of serverMemos) serverById[sm.id] = sm;
-        // Adopt server memos that are new or newer than local.
+
+        let autoChanges = 0;
+        const toPush = [];
+        const newConflicts = [];
+        let editorNeedsRefresh = false;
+
+        // Server memos: adopt new ones / newer non-dirty ones; flag conflicts.
         for (const sm of serverMemos) {
           if (!sm.id) continue;
           const lm = localById[sm.id];
-          if (!lm || (sm.updatedAt || "") > (lm.updatedAt || "")) {
-            localById[sm.id] = sm;
+          const sU = sm.updatedAt || "";
+          if (!lm) {
+            m.memos.push(cloneMemo(sm));
+            m.base[sm.id] = sU;
+            autoChanges++;
+            continue;
+          }
+          if (m.conflicts[sm.id]) continue; // already pending resolution
+          if (!m.dirty.has(sm.id)) {
+            const lU = lm.updatedAt || "";
+            if (sU > lU) {
+              assignMemo(lm, sm);
+              m.base[sm.id] = sU;
+              autoChanges++;
+              if (sm.id === m.activeId) editorNeedsRefresh = true;
+            } else if (lU > sU) {
+              if (!(sm.id in m.base)) m.base[sm.id] = sU;
+              toPush.push(sm.id); // local is ahead (e.g. offline edit) — push it
+            } else if (!(sm.id in m.base)) {
+              m.base[sm.id] = sU;
+            }
+          } else {
+            // Local has unsaved edits.
+            const base = m.base[sm.id] || "";
+            if (sU === base) {
+              toPush.push(sm.id);              // server unchanged → our edit wins later
+            } else if (sameContent(lm, sm)) {
+              m.dirty.delete(sm.id);           // converged → nothing to do
+              m.base[sm.id] = sU;
+            } else {
+              newConflicts.push({ id: sm.id, kind: "edit", mine: cloneMemo(lm), theirs: cloneMemo(sm) });
+            }
           }
         }
-        // Push local memos the server is missing or has older copies of.
-        const toPush = [];
-        for (const lm of m.memos) {
-          const sm = serverById[lm.id];
-          if (!sm || (lm.updatedAt || "") > (sm.updatedAt || "")) toPush.push(lm.id);
+
+        // Local-only memos (absent from server).
+        for (const lm of m.memos.slice()) {
+          if (serverById[lm.id] || m.conflicts[lm.id]) continue;
+          const known = (lm.id in m.base);
+          if (!known) {
+            toPush.push(lm.id);                // brand-new local, never pushed
+          } else if (m.dirty.has(lm.id)) {
+            newConflicts.push({ id: lm.id, kind: "deleted", mine: cloneMemo(lm) });
+          } else {
+            removeLocal(lm.id);                // deleted elsewhere, no local edits
+            autoChanges++;
+          }
         }
-        m.memos = Object.keys(localById).map(function (id) { return localById[id]; });
-        sortMemos();
+
+        // Hold conflicted memos out of the push queue until resolved.
+        for (const c of newConflicts) {
+          m.dirty.delete(c.id);
+          if (!m.conflicts[c.id]) m.conflicts[c.id] = c;
+        }
+
         if (!getMemo(m.activeId)) m.activeId = m.memos[0] ? m.memos[0].id : null;
         persistLocal();
         renderList();
+        if (editorNeedsRefresh) syncActiveEditor();
+
+        for (const id of toPush) if (!m.conflicts[id]) m.dirty.add(id);
+        if (toPush.some(function (id) { return !m.conflicts[id]; })) flushDirty();
+
+        if (!isInitial && autoChanges > 0) {
+          showToast("다른 세션 변경 " + autoChanges + "건 반영됨", { kind: "ok", icon: "🔄" });
+        }
+        if (Object.keys(m.conflicts).length) openConflictPopup();
+      }
+
+      // ── conflict resolution ──
+      function pendingConflict() {
+        const ids = Object.keys(m.conflicts);
+        return ids.length ? m.conflicts[ids[0]] : null;
+      }
+      function finishConflict(id) {
+        delete m.conflicts[id];
+        persistLocal();
+        renderList();
+        renderConflictPopup(); // advance to next or close
+      }
+      function resolveKeepMine(id) {
+        const c = m.conflicts[id];
+        if (!c) return;
+        let memo = getMemo(id);
+        if (!memo) { memo = cloneMemo(c.mine); m.memos.push(memo); } // deleted-kind: re-create
+        else assignMemo(memo, c.mine);
+        memo.updatedAt = nowISO();             // bump so our version wins on the server
+        m.dirty.add(id);
+        if (id === m.activeId) syncActiveEditor();
+        finishConflict(id);
+        flushDirty();
+      }
+      function resolveTakeServer(id) {
+        const c = m.conflicts[id];
+        if (!c) return;
+        if (c.kind === "deleted") {
+          removeLocal(id);                     // accept the remote deletion
+          if (m.activeId === id) m.activeId = m.memos[0] ? m.memos[0].id : null;
+        } else {
+          const memo = getMemo(id);
+          if (memo) assignMemo(memo, c.theirs);
+          m.dirty.delete(id);
+          m.base[id] = (c.theirs && c.theirs.updatedAt) || "";
+          if (id === m.activeId) syncActiveEditor();
+        }
+        finishConflict(id);
+      }
+      function resolveKeepBoth(id) {
+        const c = m.conflicts[id];
+        if (!c || c.kind !== "edit") return;
+        // Fork my version into a new memo; original takes the server version.
+        const t = nowISO();
+        const mineTitle = (c.mine.title || "").trim();
+        const fork = {
+          id: genId(),
+          title: mineTitle ? (mineTitle + " (내 버전)") : "(내 버전)",
+          body: c.mine.body || "",
+          pinned: false,
+          createdAt: t, updatedAt: t,
+        };
+        m.memos.unshift(fork);
+        m.dirty.add(fork.id);
+        const memo = getMemo(id);
+        if (memo) assignMemo(memo, c.theirs);
+        m.dirty.delete(id);
+        m.base[id] = (c.theirs && c.theirs.updatedAt) || "";
+        m.activeId = fork.id;
         syncActiveEditor();
-        for (const id of toPush) m.dirty.add(id);
-        if (toPush.length) flushDirty();
+        finishConflict(id);
+        flushDirty();
+      }
+
+      function conflictPreview(memo) {
+        if (!memo) return "(없음)";
+        const t = (memo.title || "").trim();
+        const full = (t ? t + "\n" : "") + (memo.body || "");
+        return full.length > 800 ? full.slice(0, 800) + "…" : (full || "(빈 메모)");
+      }
+      function makeConflictBtn(label, primary, onClick) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "action" + (primary ? " primary" : "");
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+      function openConflictPopup() { renderConflictPopup(); }
+      function renderConflictPopup() {
+        const modal = document.getElementById("memoConflictModal");
+        const bodyEl = document.getElementById("memoConflictBody");
+        const countEl = document.getElementById("memoConflictCount");
+        if (!modal || !bodyEl) return;
+        const c = pendingConflict();
+        if (!c) {
+          modal.hidden = true;
+          m.resolving = false;
+          pullAndReconcile(); // catch anything that changed while resolving
+          return;
+        }
+        m.resolving = true;
+        modal.hidden = false;
+        const remaining = Object.keys(m.conflicts).length;
+        if (countEl) countEl.textContent = remaining > 1 ? "(" + remaining + "건 남음)" : "";
+
+        bodyEl.innerHTML = "";
+        const name = document.createElement("div");
+        name.className = "memo-conflict-name";
+        name.textContent = displayName(c.mine).text;
+        bodyEl.appendChild(name);
+
+        const note = document.createElement("div");
+        note.className = "memo-conflict-note";
+        const actions = document.createElement("div");
+        actions.className = "memo-conflict-actions";
+
+        if (c.kind === "deleted") {
+          note.textContent = "이 메모를 편집하는 동안 다른 세션에서 삭제되었습니다.";
+          bodyEl.appendChild(note);
+          const col = document.createElement("div");
+          col.className = "memo-conflict-col";
+          const lbl = document.createElement("div");
+          lbl.className = "memo-conflict-col-label";
+          lbl.textContent = "내 버전";
+          const pre = document.createElement("div");
+          pre.className = "memo-conflict-preview";
+          pre.textContent = conflictPreview(c.mine);
+          col.appendChild(lbl); col.appendChild(pre);
+          bodyEl.appendChild(col);
+          actions.appendChild(makeConflictBtn("다시 생성", true, function () { resolveKeepMine(c.id); }));
+          actions.appendChild(makeConflictBtn("삭제 수용", false, function () { resolveTakeServer(c.id); }));
+        } else {
+          note.textContent = "이 메모를 편집하는 동안 다른 세션에서도 다르게 수정되었습니다.";
+          bodyEl.appendChild(note);
+          const cols = document.createElement("div");
+          cols.className = "memo-conflict-cols";
+          const mk = function (label, memo) {
+            const col = document.createElement("div");
+            col.className = "memo-conflict-col";
+            const lbl = document.createElement("div");
+            lbl.className = "memo-conflict-col-label";
+            lbl.textContent = label;
+            const pre = document.createElement("div");
+            pre.className = "memo-conflict-preview";
+            pre.textContent = conflictPreview(memo);
+            col.appendChild(lbl); col.appendChild(pre);
+            return col;
+          };
+          cols.appendChild(mk("내 버전", c.mine));
+          cols.appendChild(mk("서버 버전", c.theirs));
+          bodyEl.appendChild(cols);
+          actions.appendChild(makeConflictBtn("내 버전 유지", true, function () { resolveKeepMine(c.id); }));
+          actions.appendChild(makeConflictBtn("서버 버전 적용", false, function () { resolveTakeServer(c.id); }));
+          actions.appendChild(makeConflictBtn("둘 다 보관", false, function () { resolveKeepBoth(c.id); }));
+        }
+        bodyEl.appendChild(actions);
       }
 
       function flushBeacon() {
@@ -6275,8 +6559,12 @@ const webAppHTML = `<!doctype html>
       m.activeId = m.memos[0] ? m.memos[0].id : null;
       applyMemoSort(m.sort); // sets active toggle button + renders
       syncActiveEditor();
-      syncFromServer();
-      setInterval(flushDirty, 15000);
+      pullAndReconcile(true);             // initial load: silent merge
+      setInterval(flushDirty, 15000);     // push safety net
+      setInterval(function () { pullAndReconcile(false); }, 10000); // pull other sessions' changes
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") pullAndReconcile(false);
+      });
       window.addEventListener("beforeunload", flushBeacon);
     })();
 
