@@ -2567,10 +2567,11 @@ const webAppHTML = `<!doctype html>
       color: var(--muted);
     }
     .search-section-title {
-      font-size: 11px;
+      font-size: 12.5px;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: .18em;
-      color: var(--muted);
+      letter-spacing: .12em;
+      color: var(--text);
     }
     .search-hit-list {
       display: flex;
