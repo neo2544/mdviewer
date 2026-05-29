@@ -2566,6 +2566,34 @@ const webAppHTML = `<!doctype html>
       flex-direction: column;
       gap: 14px;
     }
+    .panel-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 3px;
+      border-radius: 10px;
+      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 45%, transparent);
+    }
+    .panel-tab {
+      flex: 1 1 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 6px;
+      border-radius: 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    .panel-tab:hover { color: var(--text); }
+    .panel-tab.active {
+      background: color-mix(in oklab, var(--accent) 22%, var(--panel-2));
+      color: var(--text);
+    }
+    .panel-pane { display: flex; flex-direction: column; gap: 14px; }
+    .panel-pane[hidden] { display: none; }
     .search-input {
       width: 100%;
       padding: 7px 10px;
@@ -3316,38 +3344,52 @@ const webAppHTML = `<!doctype html>
     <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
       <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
       <div class="search-panel-body">
-        <input type="search" class="search-input" id="searchPanelInput" placeholder="&#x1F50D; Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
-        <div class="outline-section" id="outlineSection" hidden>
-          <div class="search-section-head">
-            <div class="search-section-title"><span class="sec-ico">&#x1F4D1;</span>Outline</div>
-            <div class="memo-actions">
-              <button type="button" class="search-sort-btn" id="outlineLevel" title="표시할 헤딩 레벨 (클릭하여 변경)">H1–3</button>
-              <button type="button" class="search-sort-btn" id="outlineToggle" title="Collapse outline">&#x25BE;</button>
-            </div>
-          </div>
-          <div class="outline-list" id="outlineList"></div>
+        <div class="panel-tabs" role="tablist" aria-label="Panel sections">
+          <button type="button" class="panel-tab" id="panelTabOutline" data-tab="outline" role="tab">📑 Outline</button>
+          <button type="button" class="panel-tab active" id="panelTabSearch" data-tab="search" role="tab">🔍 Search</button>
+          <button type="button" class="panel-tab" id="panelTabMemo" data-tab="memo" role="tab">📝 Memo</button>
         </div>
-        <div>
-          <div class="search-section-head">
-            <div class="search-section-title"><span class="sec-ico">&#x1F4C4;</span>In this file</div>
-            <div class="search-sort" role="group" aria-label="Sort hits">
-              <button type="button" class="search-sort-btn active" id="searchSortLine" data-sort="line" title="Sort by line position">Line</button>
-              <button type="button" class="search-sort-btn" id="searchSortPriority" data-sort="priority" title="Sort by importance (heading first)">Priority</button>
+
+        <div class="panel-pane" data-pane="outline" hidden>
+          <div class="outline-section" id="outlineSection" hidden>
+            <div class="search-section-head">
+              <div class="search-section-title"><span class="sec-ico">&#x1F4D1;</span>Outline</div>
+              <div class="memo-actions">
+                <button type="button" class="search-sort-btn" id="outlineLevel" title="표시할 헤딩 레벨 (클릭하여 변경)">H1–3</button>
+                <button type="button" class="search-sort-btn" id="outlineToggle" title="Collapse outline">&#x25BE;</button>
+              </div>
             </div>
+            <div class="outline-list" id="outlineList"></div>
           </div>
-          <div class="search-summary" id="searchInFileSummary">Type to search.</div>
-          <div class="search-hit-list" id="searchInFileHits"></div>
+          <div class="search-empty" id="outlineEmpty">이 문서에는 헤딩이 없습니다.</div>
         </div>
-        <div>
-          <div class="search-section-head">
-            <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span><span id="searchFolderTitle">Same folder</span></div>
-            <div class="search-sort" role="group" aria-label="Search scope">
-              <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" title="현재 폴더만 검색">이 폴더</button>
-              <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" title="상위 Git 저장소 전체 검색">Git 전체</button>
+
+        <div class="panel-pane" data-pane="search">
+          <input type="search" class="search-input" id="searchPanelInput" placeholder="&#x1F50D; Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
+          <div>
+            <div class="search-section-head">
+              <div class="search-section-title"><span class="sec-ico">&#x1F4C4;</span>In this file</div>
+              <div class="search-sort" role="group" aria-label="Sort hits">
+                <button type="button" class="search-sort-btn active" id="searchSortLine" data-sort="line" title="Sort by line position">Line</button>
+                <button type="button" class="search-sort-btn" id="searchSortPriority" data-sort="priority" title="Sort by importance (heading first)">Priority</button>
+              </div>
             </div>
+            <div class="search-summary" id="searchInFileSummary">Type to search.</div>
+            <div class="search-hit-list" id="searchInFileHits"></div>
           </div>
-          <div class="search-hit-list" id="searchFolderHits"></div>
+          <div>
+            <div class="search-section-head">
+              <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span><span id="searchFolderTitle">Same folder</span></div>
+              <div class="search-sort" role="group" aria-label="Search scope">
+                <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" title="현재 폴더만 검색">이 폴더</button>
+                <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" title="상위 Git 저장소 전체 검색">Git 전체</button>
+              </div>
+            </div>
+            <div class="search-hit-list" id="searchFolderHits"></div>
+          </div>
         </div>
+
+        <div class="panel-pane" data-pane="memo" hidden>
         <div class="memo-section">
           <div class="search-section-head">
             <div class="search-section-title"><span class="sec-ico">&#x1F4DD;</span>Memo</div>
@@ -3374,6 +3416,7 @@ const webAppHTML = `<!doctype html>
             <a class="memo-backlink" id="memoBacklink" hidden></a>
             <div class="memo-sync-state" id="memoSyncState"></div>
           </div>
+        </div>
         </div>
       </div>
     </aside>
@@ -3804,12 +3847,18 @@ const webAppHTML = `<!doctype html>
 
     function buildOutline(headings) {
       const sectionEl = document.getElementById("outlineSection");
+      const emptyEl = document.getElementById("outlineEmpty");
       if (!sectionEl) return;
       outlineState.all = Array.prototype.slice.call(headings || []).map(function (h) {
         return { id: h.id, el: h, level: parseInt(h.tagName.slice(1), 10) || 1, text: (h.textContent || "").trim() };
       });
-      if (outlineState.all.length < 2) { sectionEl.hidden = true; return; } // not worth an outline
+      if (outlineState.all.length < 2) { // not worth an outline
+        sectionEl.hidden = true;
+        if (emptyEl) emptyEl.hidden = false;
+        return;
+      }
       sectionEl.hidden = false;
+      if (emptyEl) emptyEl.hidden = true;
       renderOutlineItems();
     }
     // (Re)render the visible items honoring the level cap. Deeper headings are
@@ -6255,6 +6304,29 @@ const webAppHTML = `<!doctype html>
       if (btnFolder) btnFolder.addEventListener("click", function () { applyFolderScope("folder"); });
       if (btnGit) btnGit.addEventListener("click", function () { applyFolderScope("git"); });
       applyFolderScope(state.folderSearchScope); // set initial active button + title
+    }
+
+    // Right-panel tabs: Outline / Search / Memo.
+    function setPanelTab(name) {
+      const tab = (name === "outline" || name === "memo") ? name : "search";
+      try { localStorage.setItem("mdviewer.panelTab", tab); } catch (e) {}
+      const tabs = document.querySelectorAll(".panel-tab");
+      for (const t of tabs) t.classList.toggle("active", t.dataset.tab === tab);
+      const panes = document.querySelectorAll(".panel-pane");
+      for (const p of panes) p.hidden = (p.dataset.pane !== tab);
+      if (tab === "search") {
+        const inp = document.getElementById("searchPanelInput");
+        if (inp) setTimeout(function () { try { inp.focus(); } catch (e) {} }, 0);
+      }
+    }
+    {
+      const tabBtns = document.querySelectorAll(".panel-tab");
+      for (const btn of tabBtns) {
+        btn.addEventListener("click", function () { setPanelTab(btn.dataset.tab); });
+      }
+      let initial = "search";
+      try { initial = localStorage.getItem("mdviewer.panelTab") || "search"; } catch (e) {}
+      setPanelTab(initial);
     }
 
     // Resolve whether the current folder is inside a git repo, then enable or
