@@ -2573,6 +2573,12 @@ const webAppHTML = `<!doctype html>
       letter-spacing: .12em;
       color: var(--text);
     }
+    .sec-ico {
+      margin-right: .45em;
+      letter-spacing: normal;
+      font-size: 1.05em;
+      filter: grayscale(0.15);
+    }
     .search-hit-list {
       display: flex;
       flex-direction: column;
@@ -3204,10 +3210,10 @@ const webAppHTML = `<!doctype html>
     <aside id="searchPanel" class="shell search-panel" aria-label="Search panel">
       <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide search panel">&#x203A;</button>
       <div class="search-panel-body">
-        <input type="search" class="search-input" id="searchPanelInput" placeholder="Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
+        <input type="search" class="search-input" id="searchPanelInput" placeholder="&#x1F50D; Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
         <div>
           <div class="search-section-head">
-            <div class="search-section-title">In this file</div>
+            <div class="search-section-title"><span class="sec-ico">&#x1F4C4;</span>In this file</div>
             <div class="search-sort" role="group" aria-label="Sort hits">
               <button type="button" class="search-sort-btn active" id="searchSortLine" data-sort="line" title="Sort by line position">Line</button>
               <button type="button" class="search-sort-btn" id="searchSortPriority" data-sort="priority" title="Sort by importance (heading first)">Priority</button>
@@ -3217,16 +3223,16 @@ const webAppHTML = `<!doctype html>
           <div class="search-hit-list" id="searchInFileHits"></div>
         </div>
         <div>
-          <div class="search-section-title">Same folder</div>
+          <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span>Same folder</div>
           <div class="search-hit-list" id="searchFolderHits"></div>
         </div>
         <div class="memo-section">
           <div class="search-section-head">
-            <div class="search-section-title">Memo</div>
+            <div class="search-section-title"><span class="sec-ico">&#x1F4DD;</span>Memo</div>
             <div class="memo-actions">
               <button type="button" class="search-sort-btn" id="memoNewBtn" title="New memo">＋ New</button>
               <button type="button" class="search-sort-btn" id="memoCopyBtn" title="Copy with filename header">📋 Copy</button>
-              <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear this memo's body">Clear</button>
+              <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear this memo's body">🧹 Clear</button>
             </div>
           </div>
           <div class="memo-controls" id="memoControls" hidden>
