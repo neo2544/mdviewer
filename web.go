@@ -1828,6 +1828,12 @@ const webAppHTML = `<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    #previewTitle.copyable { cursor: pointer; }
+    #previewTitle.copyable:hover {
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 3px;
+    }
     .preview-body h1, .preview-body h2, .preview-body h3 { line-height: 1.15; }
     .preview-body blockquote {
       margin: 0;
@@ -3500,6 +3506,15 @@ const webAppHTML = `<!doctype html>
     const cwdEl = document.getElementById("cwd");
     const gitRemoteLinkEl = document.getElementById("gitRemoteLink");
     const previewTitleEl = document.getElementById("previewTitle");
+    // Click the file name in the preview header to copy it to the clipboard.
+    previewTitleEl.addEventListener("click", async () => {
+      if (!previewTitleEl.classList.contains("copyable")) return;
+      const name = (previewTitleEl.textContent || "").trim();
+      if (!name) return;
+      const ok = await copyTextToClipboard(name);
+      if (ok) showToast("파일 이름을 복사했어요: " + name, { kind: "ok", icon: "📋" });
+      else showToast("클립보드 복사 실패", { kind: "err", icon: "⚠️" });
+    });
     const previewMetaEl = document.getElementById("previewMeta");
     const previewBodyEl = document.getElementById("previewBody");
     const kindChipEl = document.getElementById("kindChip");
@@ -4712,6 +4727,8 @@ const webAppHTML = `<!doctype html>
       addRecentFile(path, data.name, data.kind, data.mod_time);
       renderFiles(state.entries);
       previewTitleEl.textContent = data.name;
+      previewTitleEl.classList.add("copyable");
+      previewTitleEl.title = "클릭하면 파일 이름 복사";
       previewMetaEl.textContent = new Date(data.mod_time).toLocaleString() + " · " + humanSize(data.size);
       kindChipEl.textContent = data.kind;
       kindChipEl.setAttribute("data-kind", data.kind || "idle");
@@ -4793,6 +4810,8 @@ const webAppHTML = `<!doctype html>
         decorateRenderedMarkdown();
         try { attachZoomToPreview(); } catch (e) {}
         previewTitleEl.textContent = "Markdown Browser";
+        previewTitleEl.classList.remove("copyable");
+        previewTitleEl.removeAttribute("title");
         previewMetaEl.textContent = "Usage guide";
         kindChipEl.textContent = "Help";
         kindChipEl.setAttribute("data-kind", "help");
