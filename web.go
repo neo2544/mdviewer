@@ -2445,6 +2445,29 @@ const webAppHTML = `<!doctype html>
       color: var(--accent);
       font-weight: 600;
     }
+    .memo-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .memo-actions { display: inline-flex; gap: 4px; }
+    .memo-area {
+      width: 100%;
+      min-height: 140px;
+      resize: vertical;
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 86%, transparent);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: 13px/1.55 ui-monospace, SFMono-Regular, monospace;
+      outline: none;
+    }
+    .memo-area::placeholder { color: var(--muted); }
+    .memo-area:focus {
+      border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2));
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+    }
     .search-section-head {
       display: flex;
       align-items: center;
@@ -2896,6 +2919,16 @@ const webAppHTML = `<!doctype html>
         <div>
           <div class="search-section-title">Same folder</div>
           <div class="search-hit-list" id="searchFolderHits"></div>
+        </div>
+        <div class="memo-section">
+          <div class="search-section-head">
+            <div class="search-section-title">Memo</div>
+            <div class="memo-actions">
+              <button type="button" class="search-sort-btn" id="memoCopyBtn" title="Copy with filename header">📋 Copy</button>
+              <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear memo">Clear</button>
+            </div>
+          </div>
+          <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
         </div>
       </div>
     </aside>
@@ -5579,6 +5612,62 @@ const webAppHTML = `<!doctype html>
         runFolderSearch(state.searchQueryRight);
       }, 120);
     });
+    // ── Memo pad in the right panel ──────────────────────────────
+    // Quick scratch space for jotting things to remember while reading.
+    // Persisted in localStorage so it survives reloads. The Copy button
+    // produces "<filename>\n\n<memo>" so a paste into another doc has
+    // the source pinned at the top.
+    const memoAreaEl = document.getElementById("memoArea");
+    const memoCopyBtnEl = document.getElementById("memoCopyBtn");
+    const memoClearBtnEl = document.getElementById("memoClearBtn");
+    if (memoAreaEl) {
+      try { memoAreaEl.value = localStorage.getItem("mdviewer.memo") || ""; } catch (e) {}
+      let memoDebounce = null;
+      memoAreaEl.addEventListener("input", function () {
+        clearTimeout(memoDebounce);
+        memoDebounce = setTimeout(function () {
+          try { localStorage.setItem("mdviewer.memo", memoAreaEl.value || ""); } catch (e) {}
+        }, 250);
+      });
+    }
+    if (memoCopyBtnEl && memoAreaEl) {
+      memoCopyBtnEl.addEventListener("click", async function () {
+        const memo = memoAreaEl.value || "";
+        if (!memo.trim()) {
+          showToast("메모가 비어 있어요", { kind: "err", icon: "⚠️" });
+          return;
+        }
+        const header = state.selectedPath
+          ? (state.selectedPath.split("/").pop() + "  (" + state.selectedPath + ")")
+          : "(no file open)";
+        const payload = header + "\n" + "─".repeat(Math.min(header.length, 60)) + "\n\n" + memo;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(payload);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = payload;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+          }
+          showToast("메모를 파일명과 함께 복사했어요", { kind: "ok", icon: "📋" });
+        } catch (e) {
+          showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+        }
+      });
+    }
+    if (memoClearBtnEl && memoAreaEl) {
+      memoClearBtnEl.addEventListener("click", function () {
+        if (!memoAreaEl.value) return;
+        if (!window.confirm("메모를 모두 지울까요?")) return;
+        memoAreaEl.value = "";
+        try { localStorage.removeItem("mdviewer.memo"); } catch (e) {}
+        memoAreaEl.focus();
+      });
+    }
+
     // Sort-mode toggle for the in-file search list.
     function applySearchSortMode(mode) {
       state.searchSortMode = (mode === "priority") ? "priority" : "line";
