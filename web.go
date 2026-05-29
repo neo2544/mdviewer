@@ -2825,14 +2825,16 @@ const webAppHTML = `<!doctype html>
       gap: 4px;
       padding: 4px;
       border-radius: 10px;
-      background: color-mix(in oklab, var(--panel-2) 92%, transparent);
-      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+      background: color-mix(in oklab, var(--panel-2) 32%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 35%, transparent);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
     }
     .memo-selection-bar[hidden] { display: none; }
     .memo-selection-btn {
-      border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
-      background: color-mix(in oklab, var(--accent) 20%, var(--panel-2));
+      border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+      background: color-mix(in oklab, var(--accent) 14%, transparent);
       color: var(--text);
       font-size: 12px;
       padding: 6px 10px;
@@ -2840,7 +2842,7 @@ const webAppHTML = `<!doctype html>
       cursor: pointer;
       white-space: nowrap;
     }
-    .memo-selection-btn:hover { background: color-mix(in oklab, var(--accent) 36%, var(--panel-2)); }
+    .memo-selection-btn:hover { background: color-mix(in oklab, var(--accent) 30%, transparent); }
     .memo-conflict-count { font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0; }
     .memo-conflict-body { padding: 4px 16px 16px; overflow-y: auto; }
     .memo-conflict-name { font-size: 13px; font-weight: 600; color: var(--text); margin: 6px 0 4px; }
@@ -3363,7 +3365,7 @@ const webAppHTML = `<!doctype html>
   <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show search panel" hidden>&#x1F50D; Search</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
   <div class="memo-selection-bar" id="memoSelectionBar" hidden>
-    <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모로 저장</button>
+    <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모</button>
     <button type="button" class="memo-selection-btn" id="memoSelectionCopyBtn">📋 복사</button>
   </div>
   <div class="popup-modal" id="listPopup" hidden>
