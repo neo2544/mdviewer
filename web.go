@@ -3328,7 +3328,13 @@ const webAppHTML = `<!doctype html>
           <div class="search-hit-list" id="searchInFileHits"></div>
         </div>
         <div>
-          <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span>Same folder</div>
+          <div class="search-section-head">
+            <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span><span id="searchFolderTitle">Same folder</span></div>
+            <div class="search-sort" role="group" aria-label="Search scope">
+              <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" title="현재 폴더만 검색">이 폴더</button>
+              <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" title="상위 Git 저장소 전체 검색">Git 전체</button>
+            </div>
+          </div>
           <div class="search-hit-list" id="searchFolderHits"></div>
         </div>
         <div class="memo-section">
@@ -3588,6 +3594,7 @@ const webAppHTML = `<!doctype html>
       editBaseModTime: "",
       editDirty: false,
       restoringHistory: false,
+      folderSearchScope: (localStorage.getItem("mdviewer.folderSearchScope") === "git") ? "git" : "folder",
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
@@ -4860,7 +4867,8 @@ const webAppHTML = `<!doctype html>
       let results = [];
       try {
         const url = "/api/search?dir=" + encodeURIComponent(state.cwd || "") +
-                    "&q=" + encodeURIComponent(needle);
+                    "&q=" + encodeURIComponent(needle) +
+                    (state.folderSearchScope === "git" ? "&scope=git" : "");
         const r = await fetch(url, { signal: ctrl.signal });
         if (!r.ok) throw new Error(String(r.status));
         results = await r.json();
@@ -6199,6 +6207,26 @@ const webAppHTML = `<!doctype html>
         runFolderSearch(state.searchQueryRight);
       }, 120);
     });
+
+    // Folder-search scope: current folder vs the whole enclosing git repo.
+    function applyFolderScope(scope) {
+      state.folderSearchScope = (scope === "git") ? "git" : "folder";
+      try { localStorage.setItem("mdviewer.folderSearchScope", state.folderSearchScope); } catch (e) {}
+      const btnFolder = document.getElementById("searchScopeFolder");
+      const btnGit = document.getElementById("searchScopeGit");
+      const titleEl = document.getElementById("searchFolderTitle");
+      if (btnFolder) btnFolder.classList.toggle("active", state.folderSearchScope === "folder");
+      if (btnGit) btnGit.classList.toggle("active", state.folderSearchScope === "git");
+      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? "Git repo" : "Same folder";
+      if (state.searchQueryRight) runFolderSearch(state.searchQueryRight);
+    }
+    {
+      const btnFolder = document.getElementById("searchScopeFolder");
+      const btnGit = document.getElementById("searchScopeGit");
+      if (btnFolder) btnFolder.addEventListener("click", function () { applyFolderScope("folder"); });
+      if (btnGit) btnGit.addEventListener("click", function () { applyFolderScope("git"); });
+      applyFolderScope(state.folderSearchScope); // set initial active button + title
+    }
     // ── Multi-memo notebook in the right panel ───────────────────
     // A global notebook (not tied to the open file). Memos live in memory,
     // are mirrored to localStorage for instant load/offline, and sync to the
@@ -9387,6 +9415,89 @@ func isProbablyText(b []byte) bool {
 	return true
 }
 
+// searchMaxGitFiles bounds how many files a scope=git search will scan, so a
+// huge repository can't hang the request.
+const searchMaxGitFiles = 4000
+
+// gitRoot resolves the enclosing git repository root for dir, or "" if dir is
+// not inside a repo (or git is unavailable).
+func (s *webServer) gitRoot(ctx context.Context, dir string) string {
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(c, "git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+// searchFileForNeedle returns a searchResult for full when it contains needle.
+func searchFileForNeedle(full, needle string) (searchResult, bool) {
+	info, err := os.Stat(full)
+	if err != nil || info.Size() > searchMaxFileBytes {
+		return searchResult{}, false
+	}
+	data, err := os.ReadFile(full)
+	if err != nil || !isProbablyText(data) {
+		return searchResult{}, false
+	}
+	lower := strings.ToLower(string(data))
+	count := strings.Count(lower, needle)
+	if count == 0 {
+		return searchResult{}, false
+	}
+	return searchResult{Path: full, Count: count, Snippets: collectSnippets(string(data), lower, needle, searchMaxSnippets)}, true
+}
+
+// searchDirShallow searches only the immediate files of dir (the "Same folder"
+// scope). searchTreeRecursive walks the whole tree under root (the "Git repo"
+// scope), skipping hidden / heavy directories and capping the files scanned.
+func searchDirShallow(dir, needle string) []searchResult {
+	out := []searchResult{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if res, ok := searchFileForNeedle(filepath.Join(dir, e.Name()), needle); ok {
+			out = append(out, res)
+		}
+	}
+	return out
+}
+
+func searchTreeRecursive(root, needle string, maxFiles int) []searchResult {
+	out := []searchResult{}
+	scanned := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		if scanned >= maxFiles {
+			return filepath.SkipAll
+		}
+		scanned++
+		if res, ok := searchFileForNeedle(path, needle); ok {
+			out = append(out, res)
+		}
+		return nil
+	})
+	return out
+}
+
 func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	if dir == "" {
@@ -9402,34 +9513,20 @@ func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid dir", http.StatusBadRequest)
 		return
 	}
-	entries, err := os.ReadDir(abs)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	needle := strings.ToLower(q)
-	out := []searchResult{}
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
+
+	var out []searchResult
+	if r.URL.Query().Get("scope") == "git" {
+		// Recurse from the enclosing git repo root (fall back to dir).
+		root := s.gitRoot(r.Context(), abs)
+		if root == "" {
+			root = abs
 		}
-		info, err := e.Info()
-		if err != nil || info.Size() > searchMaxFileBytes {
-			continue
-		}
-		full := filepath.Join(abs, e.Name())
-		data, err := os.ReadFile(full)
-		if err != nil || !isProbablyText(data) {
-			continue
-		}
-		lower := strings.ToLower(string(data))
-		count := strings.Count(lower, needle)
-		if count == 0 {
-			continue
-		}
-		snippets := collectSnippets(string(data), lower, needle, searchMaxSnippets)
-		out = append(out, searchResult{Path: full, Count: count, Snippets: snippets})
+		out = searchTreeRecursive(root, needle, searchMaxGitFiles)
+	} else {
+		out = searchDirShallow(abs, needle)
 	}
+
 	// Most matches first.
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
 	s.writeJSON(w, http.StatusOK, out)
