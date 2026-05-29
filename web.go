@@ -2817,22 +2817,30 @@ const webAppHTML = `<!doctype html>
     }
     .memo-backlink[hidden] { display: none; }
     .memo-backlink:hover { text-decoration: underline; }
-    .memo-selection-btn {
+    .memo-selection-bar {
       position: fixed;
       z-index: 2600;
       transform: translate(-50%, 6px);
-      border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
-      background: color-mix(in oklab, var(--accent) 26%, var(--panel-2));
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border-radius: 10px;
+      background: color-mix(in oklab, var(--panel-2) 92%, transparent);
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+    }
+    .memo-selection-bar[hidden] { display: none; }
+    .memo-selection-btn {
+      border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+      background: color-mix(in oklab, var(--accent) 20%, var(--panel-2));
       color: var(--text);
       font-size: 12px;
       padding: 6px 10px;
-      border-radius: 8px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+      border-radius: 7px;
       cursor: pointer;
       white-space: nowrap;
     }
-    .memo-selection-btn[hidden] { display: none; }
-    .memo-selection-btn:hover { background: color-mix(in oklab, var(--accent) 38%, var(--panel-2)); }
+    .memo-selection-btn:hover { background: color-mix(in oklab, var(--accent) 36%, var(--panel-2)); }
     .memo-conflict-count { font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0; }
     .memo-conflict-body { padding: 4px 16px 16px; overflow-y: auto; }
     .memo-conflict-name { font-size: 13px; font-weight: 600; color: var(--text); margin: 6px 0 4px; }
@@ -3354,7 +3362,10 @@ const webAppHTML = `<!doctype html>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
   <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show search panel" hidden>&#x1F50D; Search</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
-  <button type="button" class="memo-selection-btn" id="memoSelectionBtn" hidden>📝 메모로 저장</button>
+  <div class="memo-selection-bar" id="memoSelectionBar" hidden>
+    <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모로 저장</button>
+    <button type="button" class="memo-selection-btn" id="memoSelectionCopyBtn">📋 복사</button>
+  </div>
   <div class="popup-modal" id="listPopup" hidden>
     <div class="popup-card">
       <div class="popup-head">
@@ -6209,7 +6220,9 @@ const webAppHTML = `<!doctype html>
       const copyBtnEl = document.getElementById("memoCopyBtn");
       const clearBtnEl = document.getElementById("memoClearBtn");
       const backlinkEl = document.getElementById("memoBacklink");
-      const selectionBtnEl = document.getElementById("memoSelectionBtn");
+      const selectionBarEl = document.getElementById("memoSelectionBar");
+      const selectionMemoBtnEl = document.getElementById("memoSelectionMemoBtn");
+      const selectionCopyBtnEl = document.getElementById("memoSelectionCopyBtn");
       if (!listEl || !areaEl || !titleEl) return;
 
       const LS_KEY = "mdviewer.memos";
@@ -6818,37 +6831,50 @@ const webAppHTML = `<!doctype html>
         if (!node || !previewBodyEl.contains(node)) return null;
         return { text: text, range: range };
       }
-      function hideSelectionBtn() { if (selectionBtnEl) selectionBtnEl.hidden = true; }
+      function hideSelectionBtn() { if (selectionBarEl) selectionBarEl.hidden = true; }
       function maybeShowSelectionBtn() {
-        if (!selectionBtnEl) return;
+        if (!selectionBarEl) return;
         const s = currentPreviewSelection();
         if (!s) { hideSelectionBtn(); return; }
         let rect;
         try { rect = s.range.getBoundingClientRect(); } catch (e) { hideSelectionBtn(); return; }
         if (!rect || (!rect.width && !rect.height)) { hideSelectionBtn(); return; }
-        selectionBtnEl.style.left = (rect.left + rect.width / 2) + "px";
-        selectionBtnEl.style.top = rect.bottom + "px";
-        selectionBtnEl.hidden = false;
+        selectionBarEl.style.left = (rect.left + rect.width / 2) + "px";
+        selectionBarEl.style.top = rect.bottom + "px";
+        selectionBarEl.hidden = false;
       }
-      if (selectionBtnEl) {
+      if (selectionBarEl) {
         document.addEventListener("mouseup", function () { setTimeout(maybeShowSelectionBtn, 0); });
         document.addEventListener("keyup", function (e) {
           if (e.shiftKey || e.key === "Shift") setTimeout(maybeShowSelectionBtn, 0);
         });
         previewBodyEl.addEventListener("scroll", hideSelectionBtn);
-        // mousedown elsewhere hides it (but not when pressing the button itself).
+        // mousedown outside the bar hides it (but not when pressing a bar button).
         document.addEventListener("mousedown", function (e) {
-          if (e.target !== selectionBtnEl) hideSelectionBtn();
+          if (!selectionBarEl.contains(e.target)) hideSelectionBtn();
         });
-        selectionBtnEl.addEventListener("click", function () {
-          const s = currentPreviewSelection();
-          if (!s) { hideSelectionBtn(); return; }
-          const src = nearestHeadingForRange(s.range) || {};
-          src.path = state.selectedPath || "";
-          createMemoFromSelection(s.text, src);
-          hideSelectionBtn();
-          if (window.getSelection) window.getSelection().removeAllRanges();
-        });
+        if (selectionMemoBtnEl) {
+          selectionMemoBtnEl.addEventListener("click", function () {
+            const s = currentPreviewSelection();
+            if (!s) { hideSelectionBtn(); return; }
+            const src = nearestHeadingForRange(s.range) || {};
+            src.path = state.selectedPath || "";
+            createMemoFromSelection(s.text, src);
+            hideSelectionBtn();
+            if (window.getSelection) window.getSelection().removeAllRanges();
+          });
+        }
+        if (selectionCopyBtnEl) {
+          selectionCopyBtnEl.addEventListener("click", async function () {
+            const s = currentPreviewSelection();
+            if (!s) { hideSelectionBtn(); return; }
+            const ok = await copyTextToClipboard(s.text);
+            showToast(ok ? "선택한 내용을 복사했어요" : "복사 실패",
+              ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
+            hideSelectionBtn();
+            if (window.getSelection) window.getSelection().removeAllRanges();
+          });
+        }
       }
 
       if (filterEl) {
