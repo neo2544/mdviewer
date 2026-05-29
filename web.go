@@ -1134,14 +1134,33 @@ const webAppHTML = `<!doctype html>
     }
     .favorite-row:hover { background: color-mix(in oklab, var(--panel-2) 80%, transparent); }
     .favorite-row.active { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); }
-    .favorite-row[draggable="true"] { cursor: grab; }
     .fav-dragging {
       opacity: 0.5;
       outline: 2px dashed color-mix(in oklab, var(--accent) 60%, transparent);
       outline-offset: -2px;
       border-radius: 8px;
     }
-    .popup-item[draggable="true"] { cursor: grab; }
+    /* Absolute so it never disturbs the row's flex/grid layout. */
+    .fav-reorderable { position: relative; padding-left: 18px; }
+    .fav-grip {
+      position: absolute;
+      left: 1px; top: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1;
+      cursor: grab;
+      user-select: none;
+      opacity: 0;
+      transition: opacity 120ms ease;
+      z-index: 2;
+    }
+    .fav-reorderable:hover .fav-grip { opacity: 0.55; }
+    .fav-grip:hover { opacity: 1; color: var(--text); }
+    .fav-grip:active { cursor: grabbing; }
     .favorite-main {
       flex: 1 1 auto;
       min-width: 0;
@@ -4684,7 +4703,7 @@ const webAppHTML = `<!doctype html>
     // ── Drag-to-reorder favorites (sidebar + All-favorites modal) ──
     let _favDragEl = null;
     function favDragAfter(container, y) {
-      const els = Array.from(container.querySelectorAll("[draggable='true']:not(.fav-dragging)"));
+      const els = Array.from(container.querySelectorAll(".fav-reorderable:not(.fav-dragging)"));
       let closest = { offset: -Infinity, el: null };
       for (const el of els) {
         const box = el.getBoundingClientRect();
@@ -4693,8 +4712,21 @@ const webAppHTML = `<!doctype html>
       }
       return closest.el;
     }
-    // Make a list's rows (each with dataset.path) drag-sortable. Container-level
-    // handlers bind once; rows are (re)marked draggable on every render.
+    // Give a row a dedicated drag handle (⠿). Dragging the whole row conflicts
+    // with the row's click/button, so only the grip initiates a reorder.
+    function ensureFavGrip(row) {
+      let grip = row.querySelector(":scope > .fav-grip");
+      if (grip) return grip;
+      grip = document.createElement("span");
+      grip.className = "fav-grip";
+      grip.textContent = "⠿";
+      grip.title = "드래그하여 순서 변경";
+      grip.setAttribute("draggable", "true");
+      row.insertBefore(grip, row.firstChild);
+      return grip;
+    }
+    // Make a list's rows (each with dataset.path) drag-sortable via their grip.
+    // Container-level handlers bind once; grips are (re)wired each render.
     function setupFavReorder(containerEl, onReorder) {
       containerEl._favOnReorder = onReorder;
       if (!containerEl._favReorderBound) {
@@ -4702,6 +4734,7 @@ const webAppHTML = `<!doctype html>
         containerEl.addEventListener("dragover", function (e) {
           if (!_favDragEl || _favDragEl.parentNode !== containerEl) return;
           e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
           const after = favDragAfter(containerEl, e.clientY);
           if (after == null) containerEl.appendChild(_favDragEl);
           else if (after !== _favDragEl) containerEl.insertBefore(_favDragEl, after);
@@ -4717,14 +4750,15 @@ const webAppHTML = `<!doctype html>
       }
       Array.from(containerEl.children).forEach(function (row) {
         if (!row.dataset || !row.dataset.path) return;
-        row.draggable = true;
-        row.addEventListener("dragstart", function (e) {
+        row.classList.add("fav-reorderable");
+        const grip = ensureFavGrip(row);
+        grip.addEventListener("dragstart", function (e) {
           _favDragEl = row;
           row.classList.add("fav-dragging");
           e.dataTransfer.effectAllowed = "move";
           try { e.dataTransfer.setData("text/plain", row.dataset.path); } catch (_) {}
         });
-        row.addEventListener("dragend", function () {
+        grip.addEventListener("dragend", function () {
           if (_favDragEl) _favDragEl.classList.remove("fav-dragging");
           _favDragEl = null;
         });
