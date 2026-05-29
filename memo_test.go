@@ -114,6 +114,32 @@ func TestMemosRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMemosPinnedRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := &webServer{appRoot: dir}
+	want := []memo{
+		{ID: "p", Title: "pinned one", Body: "x", Pinned: true, CreatedAt: "2026-05-29T00:00:00Z", UpdatedAt: "2026-05-29T00:00:00Z"},
+		{ID: "u", Title: "unpinned", Body: "y", Pinned: false, CreatedAt: "2026-05-29T00:00:00Z", UpdatedAt: "2026-05-29T00:00:00Z"},
+	}
+	if err := s.saveMemos(want); err != nil {
+		t.Fatal(err)
+	}
+	got := s.loadMemos()
+	if len(got) != 2 || !got[0].Pinned || got[1].Pinned {
+		t.Fatalf("pinned not preserved across save/load: %+v", got)
+	}
+}
+
+func TestMergeMemosPreservesPinned(t *testing.T) {
+	existing := []memo{{ID: "a", Body: "a", Pinned: false, UpdatedAt: "2026-05-29T00:00:00Z"}}
+	// Newer write flips pin on; must replace and keep Pinned=true.
+	incoming := []memo{{ID: "a", Body: "a", Pinned: true, UpdatedAt: "2026-05-29T01:00:00Z"}}
+	got := mergeMemos(existing, incoming)
+	if len(got) != 1 || !got[0].Pinned {
+		t.Fatalf("merge did not carry pin state: %+v", got)
+	}
+}
+
 func TestLoadMemosMissingFile(t *testing.T) {
 	s := &webServer{appRoot: t.TempDir()}
 	if got := s.loadMemos(); got != nil {

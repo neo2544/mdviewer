@@ -226,6 +226,7 @@ type memo struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	Body      string `json:"body"`
+	Pinned    bool   `json:"pinned"`
 	CreatedAt string `json:"createdAt"`
 	UpdatedAt string `json:"updatedAt"`
 }
@@ -2619,9 +2620,26 @@ const webAppHTML = `<!doctype html>
       overflow-y: auto;
       margin: 2px 0;
     }
+    .memo-controls { display: flex; flex-direction: column; gap: 5px; margin: 2px 0; }
+    .memo-controls[hidden] { display: none; }
+    .memo-filter {
+      width: 100%;
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 86%, transparent);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 5px 9px;
+      font: 12px/1.4 system-ui, -apple-system, sans-serif;
+      outline: none;
+    }
+    .memo-filter::placeholder { color: var(--muted); }
+    .memo-filter:focus {
+      border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2));
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+    }
     .memo-list-item {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 6px;
       padding: 6px 8px;
       border-radius: 8px;
@@ -2636,6 +2654,21 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, var(--accent) 16%, transparent);
       border-color: color-mix(in oklab, var(--accent) 40%, transparent);
     }
+    .memo-item-pin {
+      flex: 0 0 auto;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1.3;
+      padding: 1px 2px;
+      border-radius: 6px;
+      opacity: 0;
+      filter: grayscale(1);
+    }
+    .memo-list-item:hover .memo-item-pin { opacity: 0.55; }
+    .memo-item-pin.pinned { opacity: 1; filter: none; }
+    .memo-item-pin:hover { opacity: 1; background: color-mix(in oklab, var(--line) 50%, transparent); }
     .memo-item-main { flex: 1 1 auto; min-width: 0; }
     .memo-item-title {
       font-size: 12.5px;
@@ -2645,7 +2678,25 @@ const webAppHTML = `<!doctype html>
       text-overflow: ellipsis;
     }
     .memo-item-title.untitled { color: var(--muted); font-style: italic; }
-    .memo-item-time { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+    .memo-item-snippet {
+      font-size: 11px;
+      line-height: 1.35;
+      color: var(--muted);
+      margin-top: 1px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+    .memo-item-right {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+    }
+    .memo-item-time { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
     .memo-item-del {
       flex: 0 0 auto;
       border: none;
@@ -2654,7 +2705,7 @@ const webAppHTML = `<!doctype html>
       cursor: pointer;
       font-size: 14px;
       line-height: 1;
-      padding: 2px 4px;
+      padding: 0 3px;
       border-radius: 6px;
       opacity: 0;
     }
@@ -2666,6 +2717,7 @@ const webAppHTML = `<!doctype html>
       padding: 8px 4px;
       text-align: center;
     }
+    .memo-empty[hidden] { display: none; }
     .memo-title-input {
       width: 100%;
       border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
@@ -3144,8 +3196,17 @@ const webAppHTML = `<!doctype html>
               <button type="button" class="search-sort-btn" id="memoClearBtn" title="Clear this memo's body">Clear</button>
             </div>
           </div>
+          <div class="memo-controls" id="memoControls" hidden>
+            <input type="search" class="memo-filter" id="memoFilter" placeholder="🔍 메모 검색…" spellcheck="false" autocomplete="off" />
+            <div class="search-sort" role="group" aria-label="Sort memos">
+              <button type="button" class="search-sort-btn active" id="memoSortUpdated" data-sort="updated" title="Sort by last modified">Updated</button>
+              <button type="button" class="search-sort-btn" id="memoSortCreated" data-sort="created" title="Sort by created">Created</button>
+              <button type="button" class="search-sort-btn" id="memoSortTitle" data-sort="title" title="Sort by title A–Z">Title</button>
+            </div>
+          </div>
           <div class="memo-list" id="memoList"></div>
           <div class="memo-empty" id="memoEmpty" hidden>메모가 없습니다. ＋ New로 추가하세요.</div>
+          <div class="memo-empty" id="memoNoMatch" hidden>검색 결과 없음</div>
           <div class="memo-editor" id="memoEditor" hidden>
             <input type="text" class="memo-title-input" id="memoTitleInput" spellcheck="false" placeholder="제목(선택)" />
             <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
@@ -5843,6 +5904,12 @@ const webAppHTML = `<!doctype html>
     (function setupMemos() {
       const listEl = document.getElementById("memoList");
       const emptyEl = document.getElementById("memoEmpty");
+      const noMatchEl = document.getElementById("memoNoMatch");
+      const controlsEl = document.getElementById("memoControls");
+      const filterEl = document.getElementById("memoFilter");
+      const sortUpdatedEl = document.getElementById("memoSortUpdated");
+      const sortCreatedEl = document.getElementById("memoSortCreated");
+      const sortTitleEl = document.getElementById("memoSortTitle");
       const editorEl = document.getElementById("memoEditor");
       const titleEl = document.getElementById("memoTitleInput");
       const areaEl = document.getElementById("memoArea");
@@ -5854,7 +5921,8 @@ const webAppHTML = `<!doctype html>
 
       const LS_KEY = "mdviewer.memos";
       const LS_LEGACY = "mdviewer.memo";
-      const m = { memos: [], activeId: null, dirty: new Set(), syncTimer: null };
+      const LS_SORT = "mdviewer.memoSort";
+      const m = { memos: [], activeId: null, dirty: new Set(), syncTimer: null, filter: "", sort: "updated" };
 
       function nowISO() { return new Date().toISOString(); }
       function genId() {
@@ -5889,6 +5957,33 @@ const webAppHTML = `<!doctype html>
       function sortMemos() {
         m.memos.sort(function (a, b) { return (b.updatedAt || "").localeCompare(a.updatedAt || ""); });
       }
+      // Body preview for the list: drops the line already shown as the title
+      // (when the memo has no explicit title) and collapses whitespace.
+      function snippet(memo) {
+        let body = memo.body || "";
+        if (!(memo.title || "").trim()) {
+          const lines = body.split("\n");
+          let i = 0;
+          while (i < lines.length && !lines[i].trim()) i++; // skip leading blanks
+          if (i < lines.length) i++;                        // drop the first non-empty (used as title)
+          body = lines.slice(i).join("\n");
+        }
+        return body.replace(/\s+/g, " ").trim();
+      }
+      function matchesFilter(memo) {
+        const q = m.filter.trim().toLowerCase();
+        if (!q) return true;
+        return ((memo.title || "") + "\n" + (memo.body || "")).toLowerCase().indexOf(q) !== -1;
+      }
+      // View order: pinned memos first, then the selected sort key.
+      function compareMemos(a, b) {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        if (m.sort === "created") return (b.createdAt || "").localeCompare(a.createdAt || "");
+        if (m.sort === "title") {
+          return displayName(a).text.localeCompare(displayName(b).text, undefined, { sensitivity: "base" });
+        }
+        return (b.updatedAt || "").localeCompare(a.updatedAt || "");
+      }
       function persistLocal() {
         try { localStorage.setItem(LS_KEY, JSON.stringify(m.memos)); } catch (e) {}
       }
@@ -5900,35 +5995,58 @@ const webAppHTML = `<!doctype html>
 
       function renderList() {
         listEl.innerHTML = "";
-        sortMemos();
-        for (const memo of m.memos) {
+        const view = m.memos.filter(matchesFilter).slice().sort(compareMemos);
+        for (const memo of view) {
           const row = document.createElement("div");
           row.className = "memo-list-item" + (memo.id === m.activeId ? " active" : "");
+
+          const pin = document.createElement("button");
+          pin.type = "button";
+          pin.className = "memo-item-pin" + (memo.pinned ? " pinned" : "");
+          pin.title = memo.pinned ? "Unpin" : "Pin to top";
+          pin.textContent = "📌";
+          pin.addEventListener("click", function (ev) { ev.stopPropagation(); togglePin(memo.id); });
+
           const main = document.createElement("div");
           main.className = "memo-item-main";
           const name = displayName(memo);
           const title = document.createElement("div");
           title.className = "memo-item-title" + (name.untitled ? " untitled" : "");
           title.textContent = name.text;
+          main.appendChild(title);
+          const snip = snippet(memo);
+          if (snip) {
+            const sn = document.createElement("div");
+            sn.className = "memo-item-snippet";
+            sn.textContent = snip;
+            main.appendChild(sn);
+          }
+
+          const right = document.createElement("div");
+          right.className = "memo-item-right";
           const time = document.createElement("div");
           time.className = "memo-item-time";
-          time.textContent = relTime(memo.updatedAt);
-          main.appendChild(title);
-          main.appendChild(time);
+          time.textContent = relTime(m.sort === "created" ? memo.createdAt : memo.updatedAt);
           const del = document.createElement("button");
           del.type = "button";
           del.className = "memo-item-del";
           del.title = "Delete memo";
           del.textContent = "×";
           del.addEventListener("click", function (ev) { ev.stopPropagation(); deleteMemo(memo.id); });
+          right.appendChild(time);
+          right.appendChild(del);
+
+          row.appendChild(pin);
           row.appendChild(main);
-          row.appendChild(del);
+          row.appendChild(right);
           row.addEventListener("click", function () { setActive(memo.id); });
           listEl.appendChild(row);
         }
         const has = m.memos.length > 0;
+        if (controlsEl) controlsEl.hidden = !has;
         if (emptyEl) emptyEl.hidden = has;
         if (editorEl) editorEl.hidden = !has;
+        if (noMatchEl) noMatchEl.hidden = !(has && view.length === 0);
       }
 
       function syncActiveEditor() {
@@ -5956,12 +6074,24 @@ const webAppHTML = `<!doctype html>
       }
 
       function newMemo() {
-        const memo = { id: genId(), title: "", body: "", createdAt: nowISO(), updatedAt: nowISO() };
+        const t = nowISO();
+        const memo = { id: genId(), title: "", body: "", pinned: false, createdAt: t, updatedAt: t };
         m.memos.unshift(memo);
         m.dirty.add(memo.id);
         persistLocal();
         setActive(memo.id);
         titleEl.focus();
+        scheduleSync();
+      }
+
+      function togglePin(id) {
+        const memo = getMemo(id);
+        if (!memo) return;
+        memo.pinned = !memo.pinned;
+        memo.updatedAt = nowISO(); // bump so the pin state reliably syncs
+        m.dirty.add(memo.id);
+        persistLocal();
+        renderList();
         scheduleSync();
       }
 
@@ -6069,6 +6199,21 @@ const webAppHTML = `<!doctype html>
       areaEl.addEventListener("input", function () { onEdit("body", areaEl.value); });
       if (newBtnEl) newBtnEl.addEventListener("click", newMemo);
 
+      if (filterEl) {
+        filterEl.addEventListener("input", function () { m.filter = filterEl.value; renderList(); });
+      }
+      function applyMemoSort(mode) {
+        m.sort = (mode === "created" || mode === "title") ? mode : "updated";
+        try { localStorage.setItem(LS_SORT, m.sort); } catch (e) {}
+        if (sortUpdatedEl) sortUpdatedEl.classList.toggle("active", m.sort === "updated");
+        if (sortCreatedEl) sortCreatedEl.classList.toggle("active", m.sort === "created");
+        if (sortTitleEl) sortTitleEl.classList.toggle("active", m.sort === "title");
+        renderList();
+      }
+      if (sortUpdatedEl) sortUpdatedEl.addEventListener("click", function () { applyMemoSort("updated"); });
+      if (sortCreatedEl) sortCreatedEl.addEventListener("click", function () { applyMemoSort("created"); });
+      if (sortTitleEl) sortTitleEl.addEventListener("click", function () { applyMemoSort("title"); });
+
       if (copyBtnEl) {
         copyBtnEl.addEventListener("click", async function () {
           const memo = getMemo(m.activeId);
@@ -6111,6 +6256,8 @@ const webAppHTML = `<!doctype html>
       }
 
       // ── init ──
+      try { m.sort = localStorage.getItem(LS_SORT) || "updated"; } catch (e) {}
+      if (m.sort !== "created" && m.sort !== "title") m.sort = "updated";
       m.memos = loadLocal();
       // One-time migration of the old single-memo scratchpad.
       if (!m.memos.length) {
@@ -6118,7 +6265,7 @@ const webAppHTML = `<!doctype html>
         try { legacy = localStorage.getItem(LS_LEGACY) || ""; } catch (e) {}
         if (legacy.trim()) {
           const t = nowISO();
-          m.memos.push({ id: genId(), title: "", body: legacy, createdAt: t, updatedAt: t });
+          m.memos.push({ id: genId(), title: "", body: legacy, pinned: false, createdAt: t, updatedAt: t });
           m.dirty.add(m.memos[0].id);
           try { localStorage.removeItem(LS_LEGACY); } catch (e) {}
           persistLocal();
@@ -6126,7 +6273,7 @@ const webAppHTML = `<!doctype html>
       }
       sortMemos();
       m.activeId = m.memos[0] ? m.memos[0].id : null;
-      renderList();
+      applyMemoSort(m.sort); // sets active toggle button + renders
       syncActiveEditor();
       syncFromServer();
       setInterval(flushDirty, 15000);
