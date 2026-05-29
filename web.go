@@ -2847,6 +2847,16 @@ const webAppHTML = `<!doctype html>
       border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2));
       box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
     }
+    .memo-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 11px;
+      background: color-mix(in oklab, var(--accent) 7%, var(--panel-2));
+      border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--line));
+    }
     .memo-editor[hidden] { display: none; }
     .memo-sync-state { font-size: 10.5px; color: var(--muted); min-height: 13px; }
     .memo-backlink {
