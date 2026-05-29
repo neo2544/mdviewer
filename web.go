@@ -8156,6 +8156,35 @@ const webAppHTML = `<!doctype html>
     const POSTIT_PAD = 10;
     const POSTIT_FONT = 14;
     const POSTIT_LH = 18;
+    // Measure text in post-it user units (font-size renders 1:1 with px at the
+    // SVG's natural scale) so the rendered note wraps exactly like the editor.
+    let _postitMeasureCtx = null;
+    function measurePostitText(s) {
+      if (!_postitMeasureCtx) {
+        _postitMeasureCtx = document.createElement("canvas").getContext("2d");
+        _postitMeasureCtx.font = POSTIT_FONT + "px system-ui, -apple-system, sans-serif";
+      }
+      return _postitMeasureCtx.measureText(s).width;
+    }
+    // Word-wrap a single logical line to maxW user units, breaking at spaces
+    // when possible and per-character otherwise (handles spaceless CJK runs).
+    function wrapPostitLine(line, maxW) {
+      if (!line) return [""];
+      const out = [];
+      let cur = "";
+      for (const ch of line) {
+        const test = cur + ch;
+        if (cur && measurePostitText(test) > maxW) {
+          const sp = cur.lastIndexOf(" ");
+          if (sp > 0) { out.push(cur.slice(0, sp)); cur = cur.slice(sp + 1) + ch; }
+          else { out.push(cur); cur = ch; }
+        } else {
+          cur = test;
+        }
+      }
+      if (cur) out.push(cur);
+      return out.length ? out : [""];
+    }
     function fitLightboxContent() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) return;
@@ -8451,7 +8480,16 @@ const webAppHTML = `<!doctype html>
       const textEl = g.querySelector(".lb-postit-text");
       while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
       const raw = (text == null ? "" : String(text));
-      const lines = raw.length ? raw.split("\n") : [""];
+      // Wrap to the note's content width so the rendered text never spills past
+      // the box edge (matches how the editor textarea wraps).
+      const boxW = parseFloat(g.dataset.w) || POSTIT_W;
+      const maxW = Math.max(20, boxW - POSTIT_PAD * 2);
+      const lines = [];
+      const srcLines = raw.length ? raw.split("\n") : [""];
+      for (const sl of srcLines) {
+        const wrapped = wrapPostitLine(sl, maxW);
+        for (const w of wrapped) lines.push(w);
+      }
       const ns = "http://www.w3.org/2000/svg";
       for (let i = 0; i < lines.length; i++) {
         const tspan = document.createElementNS(ns, "tspan");
@@ -8463,9 +8501,10 @@ const webAppHTML = `<!doctype html>
         textEl.appendChild(tspan);
       }
       g.setAttribute("data-text", raw);
-      // Auto-grow vertically unless the user has manually resized.
+      // Auto-grow vertically unless the user has manually resized. Keep the
+      // current width (manual or default) so wrapping stays consistent.
       if (!g.dataset.manualSize) {
-        setPostitSize(g, POSTIT_W, POSTIT_PAD * 2 + lines.length * POSTIT_LH);
+        setPostitSize(g, boxW, POSTIT_PAD * 2 + lines.length * POSTIT_LH);
       }
     }
 
@@ -8575,6 +8614,14 @@ const webAppHTML = `<!doctype html>
       editor.style.top = tl.y + "px";
       editor.style.width = Math.max(40, br.x - tl.x) + "px";
       editor.style.height = Math.max(28, br.y - tl.y) + "px";
+      // Match the rendered note's on-screen metrics (font/line/padding scale
+      // with the lightbox zoom) so the editor wraps exactly where the SVG
+      // text will, and the size doesn't jump when editing ends.
+      const scale = lbState.scale || 1;
+      editor.style.boxSizing = "border-box";
+      editor.style.fontSize = (POSTIT_FONT * scale) + "px";
+      editor.style.lineHeight = (POSTIT_LH * scale) + "px";
+      editor.style.padding = (POSTIT_PAD * scale) + "px";
       document.body.appendChild(editor);
       editor.focus();
       editor.select();
