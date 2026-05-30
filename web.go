@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -77,6 +78,9 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/list-recursive", s.handleListRecursive)
 	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
 	mux.HandleFunc("/api/git/root", s.handleGitRoot)
+	mux.HandleFunc("/api/version", s.handleVersion)
+	mux.HandleFunc("/api/version/check", s.handleVersionCheck)
+	mux.HandleFunc("/api/update", s.handleUpdate)
 	mux.HandleFunc("/api/memos", s.handleMemos)
 	mux.HandleFunc("/api/memos/save", s.handleSaveMemos)
 	mux.HandleFunc("/api/memos/delete", s.handleDeleteMemo)
@@ -2952,6 +2956,55 @@ const webAppHTML = `<!doctype html>
     }
     .memo-backlink[hidden] { display: none; }
     .memo-backlink:hover { text-decoration: underline; }
+    .update-btn[hidden] { display: none; }
+    .update-btn {
+      background: color-mix(in oklab, var(--accent) 22%, var(--panel-2));
+      border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+      color: var(--text);
+      font-weight: 600;
+      animation: updatePulse 2.2s ease infinite;
+    }
+    .update-btn:hover { background: color-mix(in oklab, var(--accent) 36%, var(--panel-2)); }
+    @keyframes updatePulse {
+      0%, 100% { box-shadow: 0 0 0 0 transparent; }
+      50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 28%, transparent); }
+    }
+    .update-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 3000;
+      background: color-mix(in oklab, black 50%, transparent);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .update-overlay[hidden] { display: none; }
+    .update-overlay-card {
+      background: var(--panel-2);
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      border-radius: 14px;
+      padding: 26px 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      color: var(--text);
+      font-size: 13px;
+      max-width: 70vw;
+      text-align: center;
+      white-space: pre-wrap;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    .update-spinner {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 3px solid color-mix(in oklab, var(--accent) 30%, transparent);
+      border-top-color: var(--accent);
+      animation: updateSpin 0.8s linear infinite;
+    }
+    @keyframes updateSpin { to { transform: rotate(360deg); } }
     .memo-selection-bar {
       position: fixed;
       z-index: 2600;
@@ -3423,6 +3476,7 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
           </button>
+          <button class="action update-btn" id="updateBtn" type="button" title="" hidden>⬆ Update</button>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
@@ -3525,6 +3579,12 @@ const webAppHTML = `<!doctype html>
   <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
   <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show panel (Outline · Search · Memo)" hidden>&#x25A4; Panel</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
+  <div class="update-overlay" id="updateOverlay" hidden>
+    <div class="update-overlay-card">
+      <div class="update-spinner"></div>
+      <div id="updateOverlayMsg">업데이트 중…</div>
+    </div>
+  </div>
   <div class="memo-selection-bar" id="memoSelectionBar" hidden>
     <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모</button>
     <button type="button" class="memo-selection-btn" id="memoSelectionCopyBtn">📋 복사</button>
@@ -6558,6 +6618,88 @@ const webAppHTML = `<!doctype html>
       try { initial = localStorage.getItem("mdviewer.panelTab") || "search"; } catch (e) {}
       setPanelTab(initial);
     }
+
+    // ── App self-update (git pull + rebuild + restart) ──
+    (function setupSelfUpdate() {
+      const btn = document.getElementById("updateBtn");
+      const overlay = document.getElementById("updateOverlay");
+      const overlayMsg = document.getElementById("updateOverlayMsg");
+      if (!btn) return;
+      let canUpdate = false;
+
+      function fmtVersion(v) {
+        if (!v) return "";
+        return (v.hash || "") + (v.subject ? (" · " + v.subject) : "");
+      }
+      function showOverlay(msg, spinning) {
+        if (overlayMsg) overlayMsg.textContent = msg || "";
+        const sp = overlay.querySelector(".update-spinner");
+        if (sp) sp.style.display = spinning === false ? "none" : "";
+        overlay.hidden = false;
+      }
+      function hideOverlay() { overlay.hidden = true; }
+
+      async function loadVersion() {
+        try {
+          const r = await fetch("/api/version");
+          const v = await r.json();
+          canUpdate = !!v.canUpdate;
+          if (v.current) {
+            btn.title = "현재 버전: " + fmtVersion(v.current) +
+              (v.branch ? ("\n브랜치: " + v.branch) : "");
+          }
+        } catch (e) {}
+      }
+      async function checkForUpdate() {
+        if (!canUpdate) return;
+        try {
+          const r = await fetch("/api/version/check");
+          const d = await r.json();
+          const behind = d && d.behind ? d.behind : 0;
+          if (behind > 0) {
+            btn.textContent = "⬆ Update (" + behind + ")";
+            btn.title = "새 버전 " + behind + "개 사용 가능" +
+              (d.latest && d.latest.subject ? ("\n최신: " + d.latest.subject) : "") +
+              "\n클릭하면 pull · 빌드 · 재시작합니다.";
+            btn.hidden = false;
+          } else {
+            btn.hidden = true;
+          }
+        } catch (e) {}
+      }
+      async function pollUntilBack() {
+        // The server re-execs; wait for it to answer again, then reload.
+        for (let i = 0; i < 120; i++) {
+          await new Promise(function (r) { setTimeout(r, 1000); });
+          try {
+            const r = await fetch("/api/version", { cache: "no-store" });
+            if (r.ok) { location.reload(); return; }
+          } catch (e) { /* still restarting */ }
+        }
+        showOverlay("재시작 확인에 실패했어요. 수동으로 새로고침 해주세요.", false);
+      }
+      btn.addEventListener("click", async function () {
+        if (!window.confirm("최신 버전으로 업데이트하고 앱을 재시작할까요?\n(git pull · go build · 자동 재시작)")) return;
+        showOverlay("업데이트 중… (pull · 빌드)\n잠시만 기다려 주세요.", true);
+        try {
+          const r = await fetch("/api/update", { method: "POST" });
+          const d = await r.json();
+          if (!d.ok) {
+            showOverlay("업데이트 실패\n\n" + (d.message || "알 수 없는 오류"), false);
+            setTimeout(hideOverlay, 6000);
+            return;
+          }
+          showOverlay("업데이트 완료 — 재시작 중…\n자동으로 새로고침됩니다.", true);
+          pollUntilBack();
+        } catch (e) {
+          // Connection may drop exactly as the server re-execs — treat as restarting.
+          showOverlay("재시작 중…\n자동으로 새로고침됩니다.", true);
+          pollUntilBack();
+        }
+      });
+
+      loadVersion().then(checkForUpdate);
+    })();
 
     // Resolve whether the current folder is inside a git repo, then enable or
     // disable the "Git" scope toggles accordingly. Cached per cwd.
@@ -9926,6 +10068,142 @@ func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	root := s.gitRoot(r.Context(), abs)
 	s.writeJSON(w, http.StatusOK, map[string]any{"root": root, "isRepo": root != ""})
+}
+
+// ── Self-update (mdviewer app) ──────────────────────────────────────────
+// The running binary lives inside its own git checkout, so it can pull the
+// latest source, rebuild itself, and re-exec the new binary.
+
+// appRepoRoot returns the git checkout the running binary was built from, and
+// the resolved executable path. devMode is true when we can't self-update
+// (e.g. `go run`, or the binary isn't inside a git repo / go.mod project).
+func (s *webServer) appRepoRoot(ctx context.Context) (repo, exe string, devMode bool) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", "", true
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	repo = s.gitRoot(ctx, filepath.Dir(exe))
+	if repo == "" {
+		return "", exe, true
+	}
+	// Need a go.mod to rebuild, and a temp-build dir we can write to.
+	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
+		return repo, exe, true
+	}
+	// `go run` builds into a temp dir — not something we can replace in place.
+	if strings.Contains(exe, string(os.PathSeparator)+"go-build") || strings.HasPrefix(filepath.Dir(exe), os.TempDir()) {
+		return repo, exe, true
+	}
+	return repo, exe, false
+}
+
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func (s *webServer) handleVersion(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	repo, _, devMode := s.appRepoRoot(ctx)
+	resp := map[string]any{"devMode": devMode, "canUpdate": !devMode}
+	if repo != "" {
+		hash, _ := gitOutput(ctx, repo, "rev-parse", "--short", "HEAD")
+		subject, _ := gitOutput(ctx, repo, "log", "-1", "--format=%s")
+		date, _ := gitOutput(ctx, repo, "log", "-1", "--format=%cI")
+		branch, _ := gitOutput(ctx, repo, "rev-parse", "--abbrev-ref", "HEAD")
+		resp["current"] = map[string]string{"hash": hash, "subject": subject, "date": date}
+		resp["branch"] = branch
+	}
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// upstreamRef returns the branch's tracking ref (e.g. origin/main), or "" .
+func upstreamRef(ctx context.Context, repo string) string {
+	if u, err := gitOutput(ctx, repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil && u != "" {
+		return u
+	}
+	return ""
+}
+
+func (s *webServer) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	repo, _, devMode := s.appRepoRoot(ctx)
+	if devMode || repo == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"behind": 0, "devMode": true})
+		return
+	}
+	if _, err := gitOutput(ctx, repo, "fetch", "--quiet"); err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"behind": 0, "error": "fetch failed (offline?)"})
+		return
+	}
+	up := upstreamRef(ctx, repo)
+	if up == "" {
+		up = "origin/main"
+	}
+	behindStr, err := gitOutput(ctx, repo, "rev-list", "--count", "HEAD.."+up)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"behind": 0, "error": "no upstream"})
+		return
+	}
+	behind := 0
+	fmt.Sscanf(behindStr, "%d", &behind)
+	latestSubject, _ := gitOutput(ctx, repo, "log", "-1", "--format=%s", up)
+	latestHash, _ := gitOutput(ctx, repo, "rev-parse", "--short", up)
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"behind":   behind,
+		"upstream": up,
+		"latest":   map[string]string{"hash": latestHash, "subject": latestSubject},
+	})
+}
+
+func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	repo, exe, devMode := s.appRepoRoot(ctx)
+	if devMode || repo == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "self-update unavailable (dev mode or not a git checkout)"})
+		return
+	}
+	// 1) Fast-forward pull — refuses if there are local commits / conflicts.
+	if out, err := gitOutput(ctx, repo, "pull", "--ff-only"); err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "git pull 실패:\n" + out})
+		return
+	}
+	// 2) Rebuild to a temp file next to the binary, then swap it in.
+	tmp := exe + ".new"
+	build := exec.CommandContext(ctx, "go", "build", "-o", tmp, ".")
+	build.Dir = repo
+	if out, err := build.CombinedOutput(); err != nil {
+		_ = os.Remove(tmp)
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "go build 실패:\n" + strings.TrimSpace(string(out))})
+		return
+	}
+	if err := os.Chmod(tmp, 0o755); err == nil {
+		_ = err
+	}
+	if err := os.Rename(tmp, exe); err != nil {
+		_ = os.Remove(tmp)
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "바이너리 교체 실패: " + err.Error()})
+		return
+	}
+	// 3) Respond, then re-exec the freshly built binary (same args/port).
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "업데이트 완료 — 재시작합니다", "restarting": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		_ = syscall.Exec(exe, os.Args, os.Environ())
+	}()
 }
 
 // searchFileForNeedle returns a searchResult for full when it contains needle.
