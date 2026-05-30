@@ -149,3 +149,10 @@ scripts/uninstall.sh                                   # 제거
 - **`.md` 파일 우클릭 → 다음으로 열기 → MD Viewer** → 브라우저에서 해당 파일이 바로 열림 (Apple Event `kAEOpenDocuments` 핸들러로 처리)
 - **`http://127.0.0.1:8421/`** 가 항상 활성 — 즐겨찾기로 두면 편함
 - 로그: `~/Library/Logs/MdViewer/mdviewer.{out,err}.log`
+
+## 버전 & 자가 업데이트
+
+- 헤더 우측과 왼쪽 사이드바 하단에 **현재 버전**(브랜치 + 짧은 커밋 해시)이 표시됩니다.
+- repo 안에서 빌드한 바이너리로 실행하면, 원격(origin)에 새 커밋이 있을 때 **`⬆ Update (N)`** 버튼이 나타납니다. 누르면 `git pull --ff-only → go build → 새 바이너리로 자동 재시작`까지 처리합니다.
+- `install.sh`로 설치한 메뉴바 앱은 빌드 시점 버전을 표시하지만 자가 업데이트는 비활성입니다 — 갱신은 `git pull && scripts/install.sh`로 재설치하세요.
+- `go run`(`run.sh`/`run-web.sh`)으로 실행하면 버전은 표시되되 자가 업데이트는 비활성입니다.
