@@ -2980,11 +2980,31 @@ const webAppHTML = `<!doctype html>
     .memo-backlink[hidden] { display: none; }
     .memo-backlink:hover { text-decoration: underline; }
     .sidebar-version {
+      display: flex;
+      align-items: center;
+      gap: 4px;
       margin: 6px 4px 4px;
-      padding: 7px 10px;
+      padding: 6px 6px;
       width: calc(100% - 8px);
-      border: 0;
       border-top: 1px solid color-mix(in oklab, var(--line) 40%, transparent);
+    }
+    .sidebar-version[hidden] { display: none; }
+    .version-repo-link {
+      flex: 0 0 auto;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      padding: 2px 3px;
+      border-radius: 5px;
+      opacity: 0.8;
+    }
+    .version-repo-link:hover { opacity: 1; background: color-mix(in oklab, var(--line) 45%, transparent); }
+    .version-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      border: 0;
       background: transparent;
       color: var(--muted);
       font: 600 10.5px/1.3 ui-monospace, SFMono-Regular, monospace;
@@ -2994,9 +3014,8 @@ const webAppHTML = `<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .sidebar-version:hover { color: var(--text); }
-    .sidebar-version[hidden] { display: none; }
-    .sidebar-version.update-available { color: var(--accent); font-weight: 700; }
+    .version-text:hover { color: var(--text); }
+    .version-text.update-available { color: var(--accent); font-weight: 700; }
     .update-overlay {
       position: fixed;
       inset: 0;
@@ -3468,7 +3487,10 @@ const webAppHTML = `<!doctype html>
         </div>
         <div class="section-list" id="favorites"></div>
       </div>
-      <button type="button" class="sidebar-version" id="sidebarVersion" title="" hidden></button>
+      <div class="sidebar-version" id="sidebarVersionWrap" hidden>
+        <button type="button" class="version-repo-link" id="versionRepoLink" title="저장소 페이지 열기">🏷</button>
+        <button type="button" class="version-text" id="sidebarVersion" title=""></button>
+      </div>
     </aside>
     <div class="splitter" id="splitter" aria-hidden="true"></div>
 
@@ -6673,12 +6695,15 @@ const webAppHTML = `<!doctype html>
     // ── App self-update (git pull + rebuild + restart) ──
     (function setupSelfUpdate() {
       // Single version/update display — the sidebar footer.
+      const wrap = document.getElementById("sidebarVersionWrap");
       const el = document.getElementById("sidebarVersion");
+      const repoLink = document.getElementById("versionRepoLink");
       const overlay = document.getElementById("updateOverlay");
       const overlayMsg = document.getElementById("updateOverlayMsg");
-      if (!el) return;
+      if (!el || !wrap) return;
       let canUpdate = false;       // self-update possible (real/installed binary)
       let updateBehind = 0;        // commits available; >0 → clicking updates
+      let repoURL = "";            // origin remote browser URL (for the 🏷 link)
 
       function fmtDate(iso) {
         if (!iso) return "";
@@ -6700,10 +6725,15 @@ const webAppHTML = `<!doctype html>
           const r = await fetch("/api/version");
           const v = await r.json();
           canUpdate = !!v.canUpdate;
+          repoURL = v.repoURL || "";
+          if (repoLink) {
+            repoLink.title = repoURL ? ("저장소 열기: " + repoURL) : "저장소 주소 없음";
+            repoLink.style.cursor = repoURL ? "pointer" : "default";
+          }
           if (v.current) {
             const date = fmtDate(v.current.date);
-            // "🏷 버전 main bc463f2 · 2026-05-31"
-            el.dataset.base = "🏷 버전 " + (v.branch ? (v.branch + " ") : "") +
+            // "버전 main bc463f2 · 2026-05-31" (🏷 emoji is the separate repo link)
+            el.dataset.base = "버전 " + (v.branch ? (v.branch + " ") : "") +
               v.current.hash + (date ? (" · " + date) : "");
             el.textContent = el.dataset.base;
             let tip = "현재 버전: " + (v.branch ? (v.branch + " ") : "") + v.current.hash +
@@ -6715,12 +6745,12 @@ const webAppHTML = `<!doctype html>
               for (const c of v.log) tip += "\n" + (c.date || "") + "  " + (c.hash || "") + "  " + (c.subject || "");
             }
             el.title = tip;
-            el.hidden = false;
+            wrap.hidden = false;
           } else {
-            el.dataset.base = v.devMode ? "🏷 버전 dev" : "";
+            el.dataset.base = v.devMode ? "버전 dev" : "";
             el.textContent = el.dataset.base;
             el.title = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
-            el.hidden = !v.devMode;
+            wrap.hidden = !v.devMode;
           }
         } catch (e) {}
       }
@@ -6774,11 +6804,18 @@ const webAppHTML = `<!doctype html>
         }
       }
 
-      // Click: update if one is available, otherwise re-check.
+      // Text click: update if one is available, otherwise re-check.
       el.addEventListener("click", function () {
         if (updateBehind > 0) runUpdate();
         else checkForUpdate();
       });
+      // 🏷 click: open the repository page.
+      if (repoLink) {
+        repoLink.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (repoURL) window.open(repoURL, "_blank", "noopener");
+        });
+      }
 
       loadVersion().then(checkForUpdate);
     })();
@@ -10265,6 +10302,14 @@ func (s *webServer) handleVersion(w http.ResponseWriter, r *http.Request) {
 	// their dates and subjects.
 	if log := recentLog(ctx, repo, 8); len(log) > 0 {
 		resp["log"] = log
+	}
+	// Origin remote → browser URL, for the repo link.
+	if repo != "" {
+		if u, err := gitOutput(ctx, repo, "remote", "get-url", "origin"); err == nil {
+			if web := gitToWebURL(u); web != "" {
+				resp["repoURL"] = web
+			}
+		}
 	}
 	s.writeJSON(w, http.StatusOK, resp)
 }
