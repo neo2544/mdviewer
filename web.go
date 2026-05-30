@@ -1145,26 +1145,49 @@ const webAppHTML = `<!doctype html>
       border-radius: 8px;
     }
     /* Absolute so it never disturbs the row's flex/grid layout. */
-    .fav-reorderable { position: relative; padding-left: 18px; }
+    .fav-reorderable { position: relative; padding-left: 20px; }
     .fav-grip {
       position: absolute;
-      left: 1px; top: 0; bottom: 0;
+      left: 0; top: 0; bottom: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
+      width: 20px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1;
       cursor: grab;
       user-select: none;
-      opacity: 0;
-      transition: opacity 120ms ease;
+      opacity: 0.5;                /* always visible so the handle is discoverable */
+      transition: opacity 120ms ease, color 120ms ease;
       z-index: 2;
     }
-    .fav-reorderable:hover .fav-grip { opacity: 0.55; }
-    .fav-grip:hover { opacity: 1; color: var(--text); }
+    .fav-reorderable:hover .fav-grip { opacity: 0.85; }
+    .fav-grip:hover { opacity: 1; color: var(--accent); }
     .fav-grip:active { cursor: grabbing; }
+    .fav-move {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+    .favorite-row:hover .fav-move,
+    .popup-item:hover .fav-move { opacity: 1; }
+    .fav-move-btn {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 8px;
+      line-height: 1.1;
+      padding: 0 4px;
+      border-radius: 3px;
+    }
+    .fav-move-btn:hover { color: var(--accent); background: color-mix(in oklab, var(--line) 50%, transparent); }
     .favorite-main {
       flex: 1 1 auto;
       min-width: 0;
@@ -4829,6 +4852,28 @@ const webAppHTML = `<!doctype html>
         });
       });
     }
+    // Move a favorite up/down one slot — reliable alternative to drag.
+    function moveFavorite(path, delta) {
+      const arr = state.favorites.slice();
+      const i = arr.indexOf(path);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= arr.length) return;
+      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+      commitFavoritesOrder(arr);
+    }
+    // Small ▲▼ reorder control appended to a favorite row.
+    function buildFavMoveControl(path) {
+      const wrap = document.createElement("div");
+      wrap.className = "fav-move";
+      const up = document.createElement("button");
+      up.type = "button"; up.className = "fav-move-btn"; up.textContent = "▲"; up.title = "위로 이동";
+      up.addEventListener("click", function (e) { e.stopPropagation(); moveFavorite(path, -1); });
+      const down = document.createElement("button");
+      down.type = "button"; down.className = "fav-move-btn"; down.textContent = "▼"; down.title = "아래로 이동";
+      down.addEventListener("click", function (e) { e.stopPropagation(); moveFavorite(path, +1); });
+      wrap.appendChild(up); wrap.appendChild(down);
+      return wrap;
+    }
     async function commitFavoritesOrder(order) {
       const seen = {};
       order.forEach(function (p) { seen[p] = true; });
@@ -4893,7 +4938,8 @@ const webAppHTML = `<!doctype html>
       }
       row.appendChild(main);
 
-      // Edit alias (✎) button — visible on hover.
+      // Reorder ▲▼ + Edit alias (✎) — visible on hover.
+      row.appendChild(buildFavMoveControl(favorite));
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "favorite-edit";
@@ -7937,8 +7983,9 @@ const webAppHTML = `<!doctype html>
         if (s.state === "unknown") statusEl.title = "Folder not visited this session — can't tell";
         row.appendChild(statusEl);
 
-        // For favorites, expose an inline edit-alias button.
+        // For favorites, expose reorder ▲▼ + an inline edit-alias button.
         if (it._kind === "favorite") {
+          if (!q) row.appendChild(buildFavMoveControl(it.path)); // only on the full list
           const editBtn = document.createElement("button");
           editBtn.type = "button";
           editBtn.className = "popup-edit";
