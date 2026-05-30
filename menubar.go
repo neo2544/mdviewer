@@ -106,7 +106,31 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 		mAddrInfo.Disable()
 
 		systray.AddSeparator()
+		mVersion := systray.AddMenuItem("Version  "+server.versionString(context.Background()), "Current app version")
+		mVersion.Disable()
+		mUpdate := systray.AddMenuItem("⬆ Update & Restart", "Pull the latest, rebuild, and restart")
+		mUpdate.Hide()
+		mCheck := systray.AddMenuItem("Check for Updates", "Check origin for newer commits")
+
+		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("Quit MD Viewer", "Stop the server and quit")
+
+		// Reflect available updates in the menu: show the Update item when the
+		// checkout is behind its upstream.
+		refreshUpdate := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			behind, latest := server.updateBehind(ctx)
+			if behind > 0 {
+				mUpdate.SetTitle(fmt.Sprintf("⬆ Update & Restart (%d)", behind))
+				if latest != "" {
+					mUpdate.SetTooltip("Latest: " + latest)
+				}
+				mUpdate.Show()
+			} else {
+				mUpdate.Hide()
+			}
+		}
 
 		// Menu-item event loop
 		go func() {
@@ -118,10 +142,42 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 					_ = exec.Command("open", startDir).Start()
 				case <-mCopy.ClickedCh:
 					_ = writeClipboard(serverURL + "/")
+				case <-mCheck.ClickedCh:
+					mCheck.SetTitle("Checking…")
+					go func() {
+						refreshUpdate()
+						mCheck.SetTitle("Check for Updates")
+					}()
+				case <-mUpdate.ClickedCh:
+					mUpdate.SetTitle("Updating…")
+					mUpdate.Disable()
+					go func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+						defer cancel()
+						exe, ok, msg := server.selfUpdateBuild(ctx)
+						if ok {
+							_ = syscall.Exec(exe, os.Args, os.Environ()) // replaces this process
+							return
+						}
+						fmt.Fprintln(os.Stderr, "mdviewer update failed:", msg)
+						mUpdate.SetTitle("Update failed — see logs")
+						mUpdate.Enable()
+					}()
 				case <-mQuit.ClickedCh:
 					systray.Quit()
 					return
 				}
+			}
+		}()
+
+		// Check for updates shortly after launch, then periodically.
+		go func() {
+			time.Sleep(3 * time.Second)
+			refreshUpdate()
+			t := time.NewTicker(30 * time.Minute)
+			defer t.Stop()
+			for range t.C {
+				refreshUpdate()
 			}
 		}()
 

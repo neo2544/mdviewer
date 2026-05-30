@@ -6689,10 +6689,16 @@ const webAppHTML = `<!doctype html>
           canUpdate = !!v.canUpdate;
           if (v.current) {
             const short = (v.branch ? (v.branch + " ") : "") + v.current.hash;
-            const tip = "현재 버전: " + fmtVersion(v.current) +
+            let tip = "현재 버전: " + fmtVersion(v.current) +
               (v.current.date ? ("\n날짜: " + fmtDate(v.current.date)) : "") +
               (v.branch ? ("\n브랜치: " + v.branch) : "") +
               "\n클릭: 업데이트 확인";
+            if (Array.isArray(v.log) && v.log.length) {
+              tip += "\n\n최근 변경:";
+              for (const c of v.log) {
+                tip += "\n" + (c.date || "") + "  " + (c.hash || "") + "  " + (c.subject || "");
+              }
+            }
             if (label) { label.textContent = short; label.title = tip; label.hidden = false; }
             if (sideLabel) {
               sideLabel.dataset.base = "⎇ " + short;
@@ -10257,6 +10263,11 @@ func (s *webServer) handleVersion(w http.ResponseWriter, r *http.Request) {
 	} else {
 		resp["devMode"] = true
 	}
+	// Recent commit history (for the hover tooltip): last few commits with
+	// their dates and subjects.
+	if log := recentLog(ctx, repo, 8); len(log) > 0 {
+		resp["log"] = log
+	}
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
@@ -10300,27 +10311,73 @@ func (s *webServer) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+// versionString returns a compact "branch hash" label for the running app,
+// preferring the build-time embedded values (works for the installed .app).
+func (s *webServer) versionString(ctx context.Context) string {
+	if buildCommit != "" {
+		return strings.TrimSpace(buildBranch + " " + buildCommit)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	if repo, _, _ := s.appRepoRoot(ctx); repo != "" {
+		h, _ := gitOutput(ctx, repo, "rev-parse", "--short", "HEAD")
+		br, _ := gitOutput(ctx, repo, "rev-parse", "--abbrev-ref", "HEAD")
+		return strings.TrimSpace(br + " " + h)
+	}
+	return "dev"
+}
+
+// recentLog returns the last n commits of repo as {hash,date,subject} maps.
+func recentLog(ctx context.Context, repo string, n int) []map[string]string {
+	if repo == "" {
+		return nil
+	}
+	out, err := gitOutput(ctx, repo, "log", fmt.Sprintf("-n%d", n), "--format=%h%x1f%cs%x1f%s")
+	if err != nil {
+		return nil
+	}
+	var res []map[string]string
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, "\x1f", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		res = append(res, map[string]string{"hash": parts[0], "date": parts[1], "subject": parts[2]})
+	}
+	return res
+}
+
+// updateBehind fetches and reports how many commits the checkout is behind its
+// upstream, plus the latest upstream subject.
+func (s *webServer) updateBehind(ctx context.Context) (behind int, latest string) {
+	repo, _, _ := s.appRepoRoot(ctx)
+	if repo == "" {
+		return 0, ""
+	}
+	if _, err := gitOutput(ctx, repo, "fetch", "--quiet"); err != nil {
+		return 0, ""
+	}
+	up := upstreamRef(ctx, repo)
+	if up == "" {
+		up = "origin/main"
+	}
+	if b, err := gitOutput(ctx, repo, "rev-list", "--count", "HEAD.."+up); err == nil {
+		fmt.Sscanf(b, "%d", &behind)
+	}
+	latest, _ = gitOutput(ctx, repo, "log", "-1", "--format=%s", up)
+	return behind, latest
+}
+
+// selfUpdateBuild pulls (ff-only), rebuilds with version ldflags re-embedded,
+// and swaps the running binary in place. On success it returns the executable
+// path to re-exec; otherwise ok=false with a user-facing message. Shared by the
+// /api/update handler and the menu-bar "Update" item.
+func (s *webServer) selfUpdateBuild(ctx context.Context) (exe string, ok bool, message string) {
 	repo, exe, canUpdate := s.appRepoRoot(ctx)
 	if !canUpdate || repo == "" {
-		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "자동 업데이트는 빌드된 바이너리에서만 가능합니다.\n(go run 모드 등) — `go build -o mdviewer .` 후 ./mdviewer 로 실행하세요."})
-		return
+		return exe, false, "자동 업데이트는 빌드된 바이너리/설치 앱에서만 가능합니다 (go run 모드 불가)."
 	}
-	// 1) Fast-forward pull — refuses if there are local commits / conflicts.
 	if out, err := gitOutput(ctx, repo, "pull", "--ff-only"); err != nil {
-		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "git pull 실패:\n" + out})
-		return
+		return exe, false, "git pull 실패:\n" + out
 	}
-	// 2) Rebuild — embedding the new version metadata so the binary still
-	// reports its version after re-exec (essential for the installed .app,
-	// which runs from outside the checkout). buildRepo is single-quoted so a
-	// path with spaces survives ldflags parsing.
 	nCommit, _ := gitOutput(ctx, repo, "rev-parse", "--short", "HEAD")
 	nDate, _ := gitOutput(ctx, repo, "log", "-1", "--format=%cI")
 	nBranch, _ := gitOutput(ctx, repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -10332,18 +10389,29 @@ func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	build.Env = append(os.Environ(), "CGO_ENABLED=1")
 	if out, err := build.CombinedOutput(); err != nil {
 		_ = os.Remove(tmp)
-		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "go build 실패:\n" + strings.TrimSpace(string(out))})
-		return
+		return exe, false, "go build 실패:\n" + strings.TrimSpace(string(out))
 	}
-	if err := os.Chmod(tmp, 0o755); err == nil {
-		_ = err
-	}
+	_ = os.Chmod(tmp, 0o755)
 	if err := os.Rename(tmp, exe); err != nil {
 		_ = os.Remove(tmp)
-		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "바이너리 교체 실패: " + err.Error()})
+		return exe, false, "바이너리 교체 실패: " + err.Error()
+	}
+	return exe, true, "업데이트 완료"
+}
+
+func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// 3) Respond, then re-exec the freshly built binary (same args/port).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	exe, ok, msg := s.selfUpdateBuild(ctx)
+	if !ok {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": msg})
+		return
+	}
+	// Respond, then re-exec the freshly built binary (same args/port).
 	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "업데이트 완료 — 재시작합니다", "restarting": true})
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
