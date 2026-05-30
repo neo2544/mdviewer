@@ -10175,6 +10175,14 @@ func goModModule(dir string) string {
 // checkout — `go run` compiles a throwaway binary into a temp dir, so it can
 // still show the version (resolved via the working directory) but can't
 // rebuild-and-re-exec in place.
+// appRepoRoot locates the mdviewer source checkout (for version + update), the
+// resolved executable path, and whether the app can self-update.
+//
+// The checkout is resolved from, in order: the binary's own directory (plain
+// build), the embedded buildRepo (the installed .app, whose binary lives in
+// ~/Applications), then the working directory (`go run`). Self-update needs the
+// checkout AND a replaceable on-disk binary — true for both a plain build and
+// the installed .app, but not for `go run` (its binary is a temp build).
 func (s *webServer) appRepoRoot(ctx context.Context) (repo, exe string, canUpdate bool) {
 	exe, _ = os.Executable()
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil && resolved != "" {
@@ -10184,20 +10192,26 @@ func (s *webServer) appRepoRoot(ctx context.Context) (repo, exe string, canUpdat
 	inTemp := strings.Contains(exe, string(os.PathSeparator)+"go-build") ||
 		(os.TempDir() != "" && strings.HasPrefix(exeDir, os.TempDir()))
 
-	// Real binary sitting inside its checkout → version + self-update.
+	candidates := make([]string, 0, 3)
 	if exe != "" && !inTemp {
-		if r := s.gitRoot(ctx, exeDir); r != "" && goModModule(r) == "mdviewer" {
-			return r, exe, true
-		}
+		candidates = append(candidates, exeDir)
 	}
-	// `go run` (temp binary) or a binary copied elsewhere: fall back to the
-	// working directory if it's the mdviewer checkout — version only.
+	if buildRepo != "" {
+		candidates = append(candidates, buildRepo)
+	}
 	if wd, err := os.Getwd(); err == nil {
-		if r := s.gitRoot(ctx, wd); r != "" && goModModule(r) == "mdviewer" {
-			return r, exe, false
+		candidates = append(candidates, wd)
+	}
+	for _, c := range candidates {
+		if r := s.gitRoot(ctx, c); r != "" && goModModule(r) == "mdviewer" {
+			repo = r
+			break
 		}
 	}
-	return "", exe, false
+	// Updatable when we found the checkout and the binary is a real file we can
+	// rebuild over (a `go run` temp binary is not).
+	canUpdate = repo != "" && exe != "" && !inTemp
+	return repo, exe, canUpdate
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
@@ -10303,10 +10317,19 @@ func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "git pull 실패:\n" + out})
 		return
 	}
-	// 2) Rebuild to a temp file next to the binary, then swap it in.
+	// 2) Rebuild — embedding the new version metadata so the binary still
+	// reports its version after re-exec (essential for the installed .app,
+	// which runs from outside the checkout). buildRepo is single-quoted so a
+	// path with spaces survives ldflags parsing.
+	nCommit, _ := gitOutput(ctx, repo, "rev-parse", "--short", "HEAD")
+	nDate, _ := gitOutput(ctx, repo, "log", "-1", "--format=%cI")
+	nBranch, _ := gitOutput(ctx, repo, "rev-parse", "--abbrev-ref", "HEAD")
+	ldflags := fmt.Sprintf("-X main.buildCommit=%s -X main.buildDate=%s -X main.buildBranch=%s -X 'main.buildRepo=%s'",
+		nCommit, nDate, nBranch, repo)
 	tmp := exe + ".new"
-	build := exec.CommandContext(ctx, "go", "build", "-o", tmp, ".")
+	build := exec.CommandContext(ctx, "go", "build", "-ldflags", ldflags, "-o", tmp, ".")
 	build.Dir = repo
+	build.Env = append(os.Environ(), "CGO_ENABLED=1")
 	if out, err := build.CombinedOutput(); err != nil {
 		_ = os.Remove(tmp)
 		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "go build 실패:\n" + strings.TrimSpace(string(out))})
