@@ -2969,6 +2969,24 @@ const webAppHTML = `<!doctype html>
     }
     .version-label:hover { color: var(--text); border-color: color-mix(in oklab, var(--line) 70%, transparent); }
     .version-label[hidden] { display: none; }
+    .sidebar-version {
+      margin: 6px 4px 4px;
+      padding: 7px 10px;
+      width: calc(100% - 8px);
+      border: 0;
+      border-top: 1px solid color-mix(in oklab, var(--line) 40%, transparent);
+      background: transparent;
+      color: var(--muted);
+      font: 600 10.5px/1.3 ui-monospace, SFMono-Regular, monospace;
+      text-align: left;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sidebar-version:hover { color: var(--text); }
+    .sidebar-version[hidden] { display: none; }
+    .sidebar-version.update-available { color: var(--accent); }
     .version-label.update-available { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
     .update-btn[hidden] { display: none; }
     .update-btn {
@@ -3454,6 +3472,7 @@ const webAppHTML = `<!doctype html>
         </div>
         <div class="section-list" id="favorites"></div>
       </div>
+      <button type="button" class="sidebar-version" id="sidebarVersion" title="" hidden></button>
     </aside>
     <div class="splitter" id="splitter" aria-hidden="true"></div>
 
@@ -6638,6 +6657,7 @@ const webAppHTML = `<!doctype html>
     (function setupSelfUpdate() {
       const btn = document.getElementById("updateBtn");
       const label = document.getElementById("versionLabel");
+      const sideLabel = document.getElementById("sidebarVersion");
       const overlay = document.getElementById("updateOverlay");
       const overlayMsg = document.getElementById("updateOverlayMsg");
       if (!btn) return;
@@ -6667,21 +6687,26 @@ const webAppHTML = `<!doctype html>
           const r = await fetch("/api/version");
           const v = await r.json();
           canUpdate = !!v.canUpdate;
-          if (v.current && label) {
-            label.textContent = (v.branch ? (v.branch + " ") : "") + v.current.hash;
-            label.title = "현재 버전: " + fmtVersion(v.current) +
+          if (v.current) {
+            const short = (v.branch ? (v.branch + " ") : "") + v.current.hash;
+            const tip = "현재 버전: " + fmtVersion(v.current) +
               (v.current.date ? ("\n날짜: " + fmtDate(v.current.date)) : "") +
               (v.branch ? ("\n브랜치: " + v.branch) : "") +
               "\n클릭: 업데이트 확인";
-            label.hidden = false;
-          } else if (label) {
-            label.textContent = v.devMode ? "dev" : "";
-            label.title = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
-            label.hidden = !v.devMode;
-          }
-          if (v.current) {
-            btn.title = "현재 버전: " + fmtVersion(v.current) +
-              (v.branch ? ("\n브랜치: " + v.branch) : "");
+            if (label) { label.textContent = short; label.title = tip; label.hidden = false; }
+            if (sideLabel) {
+              sideLabel.dataset.base = "⎇ " + short;
+              sideLabel.textContent = sideLabel.dataset.base;
+              sideLabel.title = tip;
+              sideLabel.hidden = false;
+            }
+            btn.title = tip;
+          } else {
+            // Dev mode (or not a git checkout) — show a 'dev' marker.
+            const txt = v.devMode ? "dev" : "";
+            const tip = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
+            if (label) { label.textContent = txt; label.title = tip; label.hidden = !v.devMode; }
+            if (sideLabel) { sideLabel.textContent = v.devMode ? "⎇ dev" : ""; sideLabel.title = tip; sideLabel.hidden = !v.devMode; }
           }
         } catch (e) {}
       }
@@ -6698,9 +6723,17 @@ const webAppHTML = `<!doctype html>
               "\n클릭하면 pull · 빌드 · 재시작합니다.";
             btn.hidden = false;
             if (label) label.classList.add("update-available");
+            if (sideLabel) {
+              sideLabel.classList.add("update-available");
+              sideLabel.textContent = "⬆ 업데이트 " + behind + "개 · " + (sideLabel.dataset.base || "");
+            }
           } else {
             btn.hidden = true;
             if (label) label.classList.remove("update-available");
+            if (sideLabel) {
+              sideLabel.classList.remove("update-available");
+              if (sideLabel.dataset.base) sideLabel.textContent = sideLabel.dataset.base;
+            }
           }
         } catch (e) {}
       }
@@ -6735,13 +6768,14 @@ const webAppHTML = `<!doctype html>
         }
       });
 
-      if (label) {
-        label.addEventListener("click", function () {
-          const old = label.textContent;
-          label.textContent = "확인 중…";
-          checkForUpdate().finally(function () { label.textContent = old; });
-        });
+      // Clicking either version display: if an update is available, run it;
+      // otherwise re-check.
+      function onVersionClick() {
+        if (!btn.hidden) { btn.click(); return; }
+        checkForUpdate();
       }
+      if (label) label.addEventListener("click", onVersionClick);
+      if (sideLabel) sideLabel.addEventListener("click", onVersionClick);
 
       loadVersion().then(checkForUpdate);
     })();
