@@ -2956,6 +2956,20 @@ const webAppHTML = `<!doctype html>
     }
     .memo-backlink[hidden] { display: none; }
     .memo-backlink:hover { text-decoration: underline; }
+    .version-label {
+      border: 1px solid color-mix(in oklab, var(--line) 45%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 60%, transparent);
+      color: var(--muted);
+      font: 600 10.5px/1 ui-monospace, SFMono-Regular, monospace;
+      letter-spacing: 0.02em;
+      padding: 4px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .version-label:hover { color: var(--text); border-color: color-mix(in oklab, var(--line) 70%, transparent); }
+    .version-label[hidden] { display: none; }
+    .version-label.update-available { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
     .update-btn[hidden] { display: none; }
     .update-btn {
       background: color-mix(in oklab, var(--accent) 22%, var(--panel-2));
@@ -3476,6 +3490,7 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
           </button>
+          <button type="button" class="version-label" id="versionLabel" title="" hidden></button>
           <button class="action update-btn" id="updateBtn" type="button" title="" hidden>⬆ Update</button>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
@@ -6622,6 +6637,7 @@ const webAppHTML = `<!doctype html>
     // ── App self-update (git pull + rebuild + restart) ──
     (function setupSelfUpdate() {
       const btn = document.getElementById("updateBtn");
+      const label = document.getElementById("versionLabel");
       const overlay = document.getElementById("updateOverlay");
       const overlayMsg = document.getElementById("updateOverlayMsg");
       if (!btn) return;
@@ -6630,6 +6646,13 @@ const webAppHTML = `<!doctype html>
       function fmtVersion(v) {
         if (!v) return "";
         return (v.hash || "") + (v.subject ? (" · " + v.subject) : "");
+      }
+      function fmtDate(iso) {
+        if (!iso) return "";
+        const t = Date.parse(iso);
+        if (isNaN(t)) return iso;
+        const d = new Date(t);
+        return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
       }
       function showOverlay(msg, spinning) {
         if (overlayMsg) overlayMsg.textContent = msg || "";
@@ -6644,6 +6667,18 @@ const webAppHTML = `<!doctype html>
           const r = await fetch("/api/version");
           const v = await r.json();
           canUpdate = !!v.canUpdate;
+          if (v.current && label) {
+            label.textContent = (v.branch ? (v.branch + " ") : "") + v.current.hash;
+            label.title = "현재 버전: " + fmtVersion(v.current) +
+              (v.current.date ? ("\n날짜: " + fmtDate(v.current.date)) : "") +
+              (v.branch ? ("\n브랜치: " + v.branch) : "") +
+              "\n클릭: 업데이트 확인";
+            label.hidden = false;
+          } else if (label) {
+            label.textContent = v.devMode ? "dev" : "";
+            label.title = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
+            label.hidden = !v.devMode;
+          }
           if (v.current) {
             btn.title = "현재 버전: " + fmtVersion(v.current) +
               (v.branch ? ("\n브랜치: " + v.branch) : "");
@@ -6662,8 +6697,10 @@ const webAppHTML = `<!doctype html>
               (d.latest && d.latest.subject ? ("\n최신: " + d.latest.subject) : "") +
               "\n클릭하면 pull · 빌드 · 재시작합니다.";
             btn.hidden = false;
+            if (label) label.classList.add("update-available");
           } else {
             btn.hidden = true;
+            if (label) label.classList.remove("update-available");
           }
         } catch (e) {}
       }
@@ -6697,6 +6734,14 @@ const webAppHTML = `<!doctype html>
           pollUntilBack();
         }
       });
+
+      if (label) {
+        label.addEventListener("click", function () {
+          const old = label.textContent;
+          label.textContent = "확인 중…";
+          checkForUpdate().finally(function () { label.textContent = old; });
+        });
+      }
 
       loadVersion().then(checkForUpdate);
     })();
