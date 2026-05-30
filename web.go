@@ -4825,8 +4825,9 @@ const webAppHTML = `<!doctype html>
       }
       return closest.el;
     }
-    // Give a row a dedicated drag handle (⠿). Dragging the whole row conflicts
-    // with the row's click/button, so only the grip initiates a reorder.
+    // Give a row a visible drag handle (⠿) as an affordance. The WHOLE row is
+    // draggable (see setupFavReorder) — the grip is just a hint, not the only
+    // grab target, so users don't have to hit a 20px sliver to reorder.
     function ensureFavGrip(row) {
       let grip = row.querySelector(":scope > .fav-grip");
       if (grip) return grip;
@@ -4837,47 +4838,60 @@ const webAppHTML = `<!doctype html>
       row.insertBefore(grip, row.firstChild);
       return grip;
     }
-    // Pointer-drag a single row within its container, committing on release.
-    function startFavPointerDrag(container, row, grip, downEv) {
-      row.classList.add("fav-dragging");
-      let moved = false;
-      try { grip.setPointerCapture(downEv.pointerId); } catch (_) {}
+    // Pointer-drag a row within its container. Listeners live on the document so
+    // a fast pointer that outruns the row still drives the drag; a small distance
+    // threshold distinguishes a reorder from a plain click (which opens the dir).
+    function startFavPointerDrag(container, row, downEv) {
+      const startX = downEv.clientX, startY = downEv.clientY;
+      let dragging = false;
       function onMove(e) {
-        moved = true;
+        if (!dragging) {
+          if (Math.abs(e.clientX - startX) < 4 && Math.abs(e.clientY - startY) < 4) return;
+          dragging = true;
+          row.classList.add("fav-dragging");
+        }
+        e.preventDefault();
         const after = favDragAfter(container, e.clientY);
         if (after == null) container.appendChild(row);
         else if (after !== row) container.insertBefore(row, after);
       }
       function onUp() {
-        grip.removeEventListener("pointermove", onMove);
-        grip.removeEventListener("pointerup", onUp);
-        grip.removeEventListener("pointercancel", onUp);
-        try { grip.releasePointerCapture(downEv.pointerId); } catch (_) {}
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.removeEventListener("pointercancel", onUp);
+        if (!dragging) return; // never crossed the threshold → it was a click
         row.classList.remove("fav-dragging");
-        if (!moved) return; // a plain click on the grip — nothing to reorder
+        // Swallow the click that fires right after this drag (would open the dir).
+        row._favSuppressClick = true;
+        setTimeout(function () { row._favSuppressClick = false; }, 0);
         const order = Array.from(container.children)
           .map(function (c) { return c.dataset && c.dataset.path; })
           .filter(Boolean);
         if (typeof container._favOnReorder === "function") container._favOnReorder(order);
       }
-      grip.addEventListener("pointermove", onMove);
-      grip.addEventListener("pointerup", onUp);
-      grip.addEventListener("pointercancel", onUp);
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onUp);
     }
-    // Make a list's rows (each with dataset.path) drag-sortable via their grip.
+    // Make a list's rows (each with dataset.path) drag-sortable. The entire row
+    // is a grab target; action buttons (✎ edit, ▲▼ move) keep their own clicks.
     function setupFavReorder(containerEl, onReorder) {
       containerEl._favOnReorder = onReorder;
       Array.from(containerEl.children).forEach(function (row) {
         if (!row.dataset || !row.dataset.path) return;
         row.classList.add("fav-reorderable");
-        const grip = ensureFavGrip(row);
-        if (grip._favBound) return; // rows are rebuilt per render, but guard anyway
-        grip._favBound = true;
-        grip.addEventListener("pointerdown", function (e) {
+        ensureFavGrip(row);
+        if (row._favBound) return; // rows are rebuilt per render, but guard anyway
+        row._favBound = true;
+        row.addEventListener("pointerdown", function (e) {
           if (e.button !== 0) return; // left/primary only
-          e.preventDefault();
-          startFavPointerDrag(containerEl, row, grip, e);
+          // Let the small action controls handle their own clicks, not a drag.
+          if (e.target.closest(".favorite-edit, .fav-move, .popup-edit, .popup-status")) return;
+          startFavPointerDrag(containerEl, row, e);
         });
+        row.addEventListener("click", function (e) {
+          if (row._favSuppressClick) { e.stopPropagation(); e.preventDefault(); }
+        }, true);
       });
     }
     // Move a favorite up/down one slot — reliable alternative to drag.
