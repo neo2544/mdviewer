@@ -2956,19 +2956,6 @@ const webAppHTML = `<!doctype html>
     }
     .memo-backlink[hidden] { display: none; }
     .memo-backlink:hover { text-decoration: underline; }
-    .version-label {
-      border: 1px solid color-mix(in oklab, var(--line) 45%, transparent);
-      background: color-mix(in oklab, var(--panel-2) 60%, transparent);
-      color: var(--muted);
-      font: 600 10.5px/1 ui-monospace, SFMono-Regular, monospace;
-      letter-spacing: 0.02em;
-      padding: 4px 8px;
-      border-radius: 999px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .version-label:hover { color: var(--text); border-color: color-mix(in oklab, var(--line) 70%, transparent); }
-    .version-label[hidden] { display: none; }
     .sidebar-version {
       margin: 6px 4px 4px;
       padding: 7px 10px;
@@ -2986,21 +2973,7 @@ const webAppHTML = `<!doctype html>
     }
     .sidebar-version:hover { color: var(--text); }
     .sidebar-version[hidden] { display: none; }
-    .sidebar-version.update-available { color: var(--accent); }
-    .version-label.update-available { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
-    .update-btn[hidden] { display: none; }
-    .update-btn {
-      background: color-mix(in oklab, var(--accent) 22%, var(--panel-2));
-      border-color: color-mix(in oklab, var(--accent) 55%, transparent);
-      color: var(--text);
-      font-weight: 600;
-      animation: updatePulse 2.2s ease infinite;
-    }
-    .update-btn:hover { background: color-mix(in oklab, var(--accent) 36%, var(--panel-2)); }
-    @keyframes updatePulse {
-      0%, 100% { box-shadow: 0 0 0 0 transparent; }
-      50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 28%, transparent); }
-    }
+    .sidebar-version.update-available { color: var(--accent); font-weight: 700; }
     .update-overlay {
       position: fixed;
       inset: 0;
@@ -3509,8 +3482,6 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
           </button>
-          <button type="button" class="version-label" id="versionLabel" title="" hidden></button>
-          <button class="action update-btn" id="updateBtn" type="button" title="" hidden>⬆ Update</button>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
@@ -6655,18 +6626,14 @@ const webAppHTML = `<!doctype html>
 
     // ── App self-update (git pull + rebuild + restart) ──
     (function setupSelfUpdate() {
-      const btn = document.getElementById("updateBtn");
-      const label = document.getElementById("versionLabel");
-      const sideLabel = document.getElementById("sidebarVersion");
+      // Single version/update display — the sidebar footer.
+      const el = document.getElementById("sidebarVersion");
       const overlay = document.getElementById("updateOverlay");
       const overlayMsg = document.getElementById("updateOverlayMsg");
-      if (!btn) return;
-      let canUpdate = false;
+      if (!el) return;
+      let canUpdate = false;       // self-update possible (real/installed binary)
+      let updateBehind = 0;        // commits available; >0 → clicking updates
 
-      function fmtVersion(v) {
-        if (!v) return "";
-        return (v.hash || "") + (v.subject ? (" · " + v.subject) : "");
-      }
       function fmtDate(iso) {
         if (!iso) return "";
         const t = Date.parse(iso);
@@ -6688,63 +6655,50 @@ const webAppHTML = `<!doctype html>
           const v = await r.json();
           canUpdate = !!v.canUpdate;
           if (v.current) {
-            const short = (v.branch ? (v.branch + " ") : "") + v.current.hash;
-            let tip = "현재 버전: " + fmtVersion(v.current) +
-              (v.current.date ? ("\n날짜: " + fmtDate(v.current.date)) : "") +
-              (v.branch ? ("\n브랜치: " + v.branch) : "") +
+            const date = fmtDate(v.current.date);
+            // "🏷 버전 main bc463f2 · 2026-05-31"
+            el.dataset.base = "🏷 버전 " + (v.branch ? (v.branch + " ") : "") +
+              v.current.hash + (date ? (" · " + date) : "");
+            el.textContent = el.dataset.base;
+            let tip = "현재 버전: " + (v.branch ? (v.branch + " ") : "") + v.current.hash +
+              (v.current.subject ? ("\n" + v.current.subject) : "") +
+              (date ? ("\n업데이트 날짜: " + date) : "") +
               "\n클릭: 업데이트 확인";
             if (Array.isArray(v.log) && v.log.length) {
               tip += "\n\n최근 변경:";
-              for (const c of v.log) {
-                tip += "\n" + (c.date || "") + "  " + (c.hash || "") + "  " + (c.subject || "");
-              }
+              for (const c of v.log) tip += "\n" + (c.date || "") + "  " + (c.hash || "") + "  " + (c.subject || "");
             }
-            if (label) { label.textContent = short; label.title = tip; label.hidden = false; }
-            if (sideLabel) {
-              sideLabel.dataset.base = "⎇ " + short;
-              sideLabel.textContent = sideLabel.dataset.base;
-              sideLabel.title = tip;
-              sideLabel.hidden = false;
-            }
-            btn.title = tip;
+            el.title = tip;
+            el.hidden = false;
           } else {
-            // Dev mode (or not a git checkout) — show a 'dev' marker.
-            const txt = v.devMode ? "dev" : "";
-            const tip = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
-            if (label) { label.textContent = txt; label.title = tip; label.hidden = !v.devMode; }
-            if (sideLabel) { sideLabel.textContent = v.devMode ? "⎇ dev" : ""; sideLabel.title = tip; sideLabel.hidden = !v.devMode; }
+            el.dataset.base = v.devMode ? "🏷 버전 dev" : "";
+            el.textContent = el.dataset.base;
+            el.title = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
+            el.hidden = !v.devMode;
           }
         } catch (e) {}
       }
+
       async function checkForUpdate() {
         if (!canUpdate) return;
         try {
           const r = await fetch("/api/version/check");
           const d = await r.json();
-          const behind = d && d.behind ? d.behind : 0;
-          if (behind > 0) {
-            btn.textContent = "⬆ Update (" + behind + ")";
-            btn.title = "새 버전 " + behind + "개 사용 가능" +
+          updateBehind = (d && d.behind) ? d.behind : 0;
+          if (updateBehind > 0) {
+            el.classList.add("update-available");
+            el.textContent = "⬆ 업데이트 " + updateBehind + "개 · " + (el.dataset.base || "");
+            el.title = "새 버전 " + updateBehind + "개 사용 가능" +
               (d.latest && d.latest.subject ? ("\n최신: " + d.latest.subject) : "") +
               "\n클릭하면 pull · 빌드 · 재시작합니다.";
-            btn.hidden = false;
-            if (label) label.classList.add("update-available");
-            if (sideLabel) {
-              sideLabel.classList.add("update-available");
-              sideLabel.textContent = "⬆ 업데이트 " + behind + "개 · " + (sideLabel.dataset.base || "");
-            }
           } else {
-            btn.hidden = true;
-            if (label) label.classList.remove("update-available");
-            if (sideLabel) {
-              sideLabel.classList.remove("update-available");
-              if (sideLabel.dataset.base) sideLabel.textContent = sideLabel.dataset.base;
-            }
+            el.classList.remove("update-available");
+            if (el.dataset.base) el.textContent = el.dataset.base;
           }
         } catch (e) {}
       }
+
       async function pollUntilBack() {
-        // The server re-execs; wait for it to answer again, then reload.
         for (let i = 0; i < 120; i++) {
           await new Promise(function (r) { setTimeout(r, 1000); });
           try {
@@ -6754,7 +6708,8 @@ const webAppHTML = `<!doctype html>
         }
         showOverlay("재시작 확인에 실패했어요. 수동으로 새로고침 해주세요.", false);
       }
-      btn.addEventListener("click", async function () {
+
+      async function runUpdate() {
         if (!window.confirm("최신 버전으로 업데이트하고 앱을 재시작할까요?\n(git pull · go build · 자동 재시작)")) return;
         showOverlay("업데이트 중… (pull · 빌드)\n잠시만 기다려 주세요.", true);
         try {
@@ -6768,20 +6723,16 @@ const webAppHTML = `<!doctype html>
           showOverlay("업데이트 완료 — 재시작 중…\n자동으로 새로고침됩니다.", true);
           pollUntilBack();
         } catch (e) {
-          // Connection may drop exactly as the server re-execs — treat as restarting.
           showOverlay("재시작 중…\n자동으로 새로고침됩니다.", true);
           pollUntilBack();
         }
-      });
-
-      // Clicking either version display: if an update is available, run it;
-      // otherwise re-check.
-      function onVersionClick() {
-        if (!btn.hidden) { btn.click(); return; }
-        checkForUpdate();
       }
-      if (label) label.addEventListener("click", onVersionClick);
-      if (sideLabel) sideLabel.addEventListener("click", onVersionClick);
+
+      // Click: update if one is available, otherwise re-check.
+      el.addEventListener("click", function () {
+        if (updateBehind > 0) runUpdate();
+        else checkForUpdate();
+      });
 
       loadVersion().then(checkForUpdate);
     })();
