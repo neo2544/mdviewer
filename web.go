@@ -10153,30 +10153,51 @@ func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
 // The running binary lives inside its own git checkout, so it can pull the
 // latest source, rebuild itself, and re-exec the new binary.
 
-// appRepoRoot returns the git checkout the running binary was built from, and
-// the resolved executable path. devMode is true when we can't self-update
-// (e.g. `go run`, or the binary isn't inside a git repo / go.mod project).
-func (s *webServer) appRepoRoot(ctx context.Context) (repo, exe string, devMode bool) {
-	exe, err := os.Executable()
+// goModModule returns the module path declared in dir/go.mod, or "".
+func goModModule(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
-		return "", "", true
+		return ""
 	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(line[len("module "):])
+		}
+	}
+	return ""
+}
+
+// appRepoRoot locates the mdviewer source checkout (for version display), the
+// resolved executable path, and whether the app can self-update.
+//
+// canUpdate is true only when running a real binary that lives inside the
+// checkout — `go run` compiles a throwaway binary into a temp dir, so it can
+// still show the version (resolved via the working directory) but can't
+// rebuild-and-re-exec in place.
+func (s *webServer) appRepoRoot(ctx context.Context) (repo, exe string, canUpdate bool) {
+	exe, _ = os.Executable()
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil && resolved != "" {
 		exe = resolved
 	}
-	repo = s.gitRoot(ctx, filepath.Dir(exe))
-	if repo == "" {
-		return "", exe, true
+	exeDir := filepath.Dir(exe)
+	inTemp := strings.Contains(exe, string(os.PathSeparator)+"go-build") ||
+		(os.TempDir() != "" && strings.HasPrefix(exeDir, os.TempDir()))
+
+	// Real binary sitting inside its checkout → version + self-update.
+	if exe != "" && !inTemp {
+		if r := s.gitRoot(ctx, exeDir); r != "" && goModModule(r) == "mdviewer" {
+			return r, exe, true
+		}
 	}
-	// Need a go.mod to rebuild, and a temp-build dir we can write to.
-	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
-		return repo, exe, true
+	// `go run` (temp binary) or a binary copied elsewhere: fall back to the
+	// working directory if it's the mdviewer checkout — version only.
+	if wd, err := os.Getwd(); err == nil {
+		if r := s.gitRoot(ctx, wd); r != "" && goModModule(r) == "mdviewer" {
+			return r, exe, false
+		}
 	}
-	// `go run` builds into a temp dir — not something we can replace in place.
-	if strings.Contains(exe, string(os.PathSeparator)+"go-build") || strings.HasPrefix(filepath.Dir(exe), os.TempDir()) {
-		return repo, exe, true
-	}
-	return repo, exe, false
+	return "", exe, false
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
@@ -10187,8 +10208,8 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 func (s *webServer) handleVersion(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	repo, _, devMode := s.appRepoRoot(ctx)
-	resp := map[string]any{"devMode": devMode, "canUpdate": !devMode}
+	repo, _, canUpdate := s.appRepoRoot(ctx)
+	resp := map[string]any{"devMode": repo == "", "canUpdate": canUpdate}
 	if repo != "" {
 		hash, _ := gitOutput(ctx, repo, "rev-parse", "--short", "HEAD")
 		subject, _ := gitOutput(ctx, repo, "log", "-1", "--format=%s")
@@ -10211,8 +10232,8 @@ func upstreamRef(ctx context.Context, repo string) string {
 func (s *webServer) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	repo, _, devMode := s.appRepoRoot(ctx)
-	if devMode || repo == "" {
+	repo, _, _ := s.appRepoRoot(ctx)
+	if repo == "" {
 		s.writeJSON(w, http.StatusOK, map[string]any{"behind": 0, "devMode": true})
 		return
 	}
@@ -10247,9 +10268,9 @@ func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	repo, exe, devMode := s.appRepoRoot(ctx)
-	if devMode || repo == "" {
-		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "self-update unavailable (dev mode or not a git checkout)"})
+	repo, exe, canUpdate := s.appRepoRoot(ctx)
+	if !canUpdate || repo == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "자동 업데이트는 빌드된 바이너리에서만 가능합니다.\n(go run 모드 등) — `go build -o mdviewer .` 후 ./mdviewer 로 실행하세요."})
 		return
 	}
 	// 1) Fast-forward pull — refuses if there are local commits / conflicts.
