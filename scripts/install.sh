@@ -60,7 +60,14 @@ echo ">> agent:   $LAUNCH_AGENT_PLIST"
 
 echo ">> building mdviewer binary…"
 cd "$REPO_ROOT"
-CGO_ENABLED=1 "$GO" build -o "$REPO_ROOT/mdviewer" .
+# Embed version metadata so the installed .app (which runs from ~/Applications,
+# outside this checkout, via launchd) can still report its version. Single-quote
+# buildRepo so a path containing spaces survives ldflags parsing.
+B_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo '')"
+B_DATE="$(git -C "$REPO_ROOT" log -1 --format=%cI 2>/dev/null || echo '')"
+B_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+LDFLAGS="-X main.buildCommit=${B_COMMIT} -X main.buildDate=${B_DATE} -X main.buildBranch=${B_BRANCH} -X 'main.buildRepo=${REPO_ROOT}'"
+CGO_ENABLED=1 "$GO" build -ldflags "$LDFLAGS" -o "$REPO_ROOT/mdviewer" .
 
 # ---- assemble .app bundle ----------------------------------------------
 

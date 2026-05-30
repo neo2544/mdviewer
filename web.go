@@ -10205,18 +10205,43 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 	return strings.TrimSpace(string(out)), err
 }
 
+// Version metadata optionally injected at build time via
+//   -ldflags "-X main.buildCommit=… -X main.buildDate=… …"
+// so a binary running outside its checkout (e.g. the installed .app launched
+// by launchd) can still report its version. Empty in plain `go build`/`go run`,
+// where we fall back to reading the surrounding git checkout at runtime.
+var (
+	buildCommit string
+	buildDate   string
+	buildBranch string
+	buildRepo   string
+)
+
 func (s *webServer) handleVersion(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	repo, _, canUpdate := s.appRepoRoot(ctx)
-	resp := map[string]any{"devMode": repo == "", "canUpdate": canUpdate}
-	if repo != "" {
+	resp := map[string]any{"canUpdate": canUpdate}
+
+	if buildCommit != "" {
+		// Built-in version (authoritative, location-independent).
+		subject := ""
+		if buildRepo != "" {
+			subject, _ = gitOutput(ctx, buildRepo, "log", "-1", "--format=%s", buildCommit)
+		}
+		resp["current"] = map[string]string{"hash": buildCommit, "subject": subject, "date": buildDate}
+		resp["branch"] = buildBranch
+		resp["devMode"] = false
+	} else if repo != "" {
 		hash, _ := gitOutput(ctx, repo, "rev-parse", "--short", "HEAD")
 		subject, _ := gitOutput(ctx, repo, "log", "-1", "--format=%s")
 		date, _ := gitOutput(ctx, repo, "log", "-1", "--format=%cI")
 		branch, _ := gitOutput(ctx, repo, "rev-parse", "--abbrev-ref", "HEAD")
 		resp["current"] = map[string]string{"hash": hash, "subject": subject, "date": date}
 		resp["branch"] = branch
+		resp["devMode"] = false
+	} else {
+		resp["devMode"] = true
 	}
 	s.writeJSON(w, http.StatusOK, resp)
 }
