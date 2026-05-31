@@ -497,7 +497,7 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 		resp.Kind = "html"
 		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
 	case ".txt", ".log", ".csv", ".tsv",
-		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
 		".ps1", ".psm1", ".bat", ".cmd",
 		".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".cfg", ".env", ".properties",
@@ -575,7 +575,7 @@ func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	switch ext {
 	case ".md", ".markdown", ".mdx",
 		".txt", ".log", ".csv", ".tsv",
-		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
 		".ps1", ".psm1", ".bat", ".cmd",
 		".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".cfg", ".env", ".properties",
@@ -5905,6 +5905,7 @@ const webAppHTML = `<!doctype html>
       ".swift": "swift",
       ".py": "python", ".pyw": "python",
       ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript",
+      ".gs": "javascript",
       ".ts": "typescript", ".tsx": "typescript",
       ".dart": "dart",
       ".lua": "lua",
