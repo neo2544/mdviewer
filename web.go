@@ -3068,6 +3068,26 @@ const webAppHTML = `<!doctype html>
       -webkit-backdrop-filter: blur(7px);
     }
     .memo-selection-bar[hidden] { display: none; }
+    /* Floating copy button shown when text is selected inside the lightbox
+       (⌥+Drag select). Positioned just below the selection in JS. */
+    .lb-copy-sel-btn {
+      position: fixed;
+      z-index: 2602;             /* above the lightbox (2000) and its toolbars */
+      transform: translate(-50%, 6px);
+      border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+      background: color-mix(in oklab, var(--accent) 20%, var(--panel-2));
+      color: var(--text);
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.28);
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
+    }
+    .lb-copy-sel-btn:hover { background: color-mix(in oklab, var(--accent) 36%, var(--panel-2)); }
+    .lb-copy-sel-btn[hidden] { display: none; }
     .memo-selection-btn {
       border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
       background: color-mix(in oklab, var(--accent) 14%, transparent);
@@ -3737,6 +3757,7 @@ const webAppHTML = `<!doctype html>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
     <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
+    <button type="button" class="lb-copy-sel-btn" id="lbCopySelBtn" hidden>📋 복사</button>
   </div>
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
@@ -9474,6 +9495,8 @@ const webAppHTML = `<!doctype html>
       setDrawControlsVisible(false);
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
+      const lbCopySel = document.getElementById("lbCopySelBtn");
+      if (lbCopySel) lbCopySel.hidden = true;
       document.body.classList.remove("lightbox-open");
       // Reset the cached baseline so the NEXT opened diagram re-measures
       // from scratch (different content size).
@@ -9805,6 +9828,58 @@ const webAppHTML = `<!doctype html>
       if (event.altKey && !state.altKey) setMermaidAltSelect(true);
       else if (!event.altKey && state.altKey) setMermaidAltSelect(false);
     }, { passive: true });
+
+    // ----- Lightbox: floating "복사" button for ⌥+Drag text selection -----
+    // The preview's memo-selection bar is scoped to previewBodyEl, so a
+    // selection inside the lightbox stage gets no copy affordance. Show a
+    // dedicated button positioned under the selection while the lightbox is open.
+    const lbCopySelBtn = document.getElementById("lbCopySelBtn");
+    function lightboxSelectionText() {
+      if (lightboxEl.hidden) return null;
+      const sel = window.getSelection && window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+      const text = sel.toString().trim();
+      if (!text) return null;
+      const range = sel.getRangeAt(0);
+      const anc = range.commonAncestorContainer;
+      const node = anc.nodeType === 1 ? anc : anc.parentNode;
+      if (!node || !lightboxStageEl.contains(node)) return null;
+      return { text: text, range: range };
+    }
+    function hideLbCopySel() { if (lbCopySelBtn) lbCopySelBtn.hidden = true; }
+    function maybeShowLbCopySel() {
+      if (!lbCopySelBtn) return;
+      const s = lightboxSelectionText();
+      if (!s) { hideLbCopySel(); return; }
+      let rect;
+      try { rect = s.range.getBoundingClientRect(); } catch (e) { hideLbCopySel(); return; }
+      if (!rect || (!rect.width && !rect.height)) { hideLbCopySel(); return; }
+      lbCopySelBtn.style.left = (rect.left + rect.width / 2) + "px";
+      lbCopySelBtn.style.top = rect.bottom + "px";
+      lbCopySelBtn.hidden = false;
+    }
+    if (lbCopySelBtn) {
+      document.addEventListener("mouseup", function () { setTimeout(maybeShowLbCopySel, 0); });
+      document.addEventListener("keyup", function (e) {
+        if (e.shiftKey || e.key === "Shift") setTimeout(maybeShowLbCopySel, 0);
+      });
+      // Clicking the button must not clear the selection before we read it.
+      lbCopySelBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      lbCopySelBtn.addEventListener("click", async function () {
+        const s = lightboxSelectionText();
+        if (!s) { hideLbCopySel(); return; }
+        const ok = await copyTextToClipboard(s.text);
+        showToast(ok ? "선택한 내용을 복사했어요" : "복사 실패",
+          ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
+        hideLbCopySel();
+        if (window.getSelection) window.getSelection().removeAllRanges();
+      });
+      // A mousedown elsewhere (starting a new drag / pan) dismisses it.
+      document.addEventListener("mousedown", function (e) {
+        if (!lbCopySelBtn.contains(e.target)) hideLbCopySel();
+      });
+      lightboxEl.addEventListener("wheel", hideLbCopySel, { passive: true });
+    }
 
     // ----- Copy diagram text to clipboard -----
     function extractMermaidText(svg) {
