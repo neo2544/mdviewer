@@ -8149,13 +8149,17 @@ const webAppHTML = `<!doctype html>
 
     async function openFolderBrowse() {
       folderBrowseModalEl.hidden = false;
-      fbSearchEl.value = "";
+      // Carry over whatever the user already typed in the sidebar file search
+      // so the recursive browser opens pre-filtered to the same query.
+      const seed = (searchInputEl && searchInputEl.value) ? searchInputEl.value.trim() : "";
+      fbSearchEl.value = seed;
       fbResultsEl.innerHTML = '<div class="fb-loading">불러오는 중…</div>';
       const cwd = state.cwd || "";
       const shortCwd = cwd ? cwd.replace(/.*\//, "") || cwd : "";
       folderBrowseTitleEl.textContent = shortCwd ? shortCwd + " 하위 폴더 탐색" : "하위 폴더 탐색";
       fbAllGroups = [];
-      setTimeout(() => { try { fbSearchEl.focus(); } catch (e) {} }, 50);
+      // Focus and select the seeded text so the user can refine or replace it.
+      setTimeout(() => { try { fbSearchEl.focus(); fbSearchEl.select(); } catch (e) {} }, 50);
       await refreshGitScope();   // resolve git availability → gates the Git toggle
       fbApplyScope(state.fbScope);
       loadFolderBrowse();
