@@ -695,9 +695,9 @@ func (s *webServer) handleToggleFavorite(w http.ResponseWriter, r *http.Request)
 	if found >= 0 {
 		favorites = append(favorites[:found], favorites[found+1:]...)
 	} else {
-		// Append in add-order; the user controls ordering via drag-reorder
-		// (/api/favorites/reorder) rather than a forced alphabetical sort.
-		favorites = append(favorites, dir)
+		// Prepend so a just-added favorite shows at the TOP of the list; the
+		// user can still reorder via drag (/api/favorites/reorder).
+		favorites = append([]string{dir}, favorites...)
 	}
 
 	if err := s.saveFavorites(favorites); err != nil {
@@ -1502,6 +1502,26 @@ const webAppHTML = `<!doctype html>
         box-shadow 140ms ease;
     }
     .action { cursor: pointer; }
+    /* Favorite toggle: accent "Add" vs red "Remove" — element+2-class
+       selectors beat the generic .action.active rule below. */
+    button.action.fav-add {
+      color: var(--accent);
+      border-color: color-mix(in oklab, var(--accent) 50%, var(--line));
+      background: color-mix(in oklab, var(--accent) 12%, var(--panel-2));
+    }
+    button.action.fav-add:hover {
+      background: color-mix(in oklab, var(--accent) 22%, var(--panel-2));
+      border-color: var(--accent);
+    }
+    button.action.fav-remove {
+      color: #c0392b;
+      border-color: color-mix(in oklab, #c0392b 45%, var(--line));
+      background: color-mix(in oklab, #c0392b 10%, var(--panel-2));
+    }
+    button.action.fav-remove:hover {
+      background: color-mix(in oklab, #c0392b 18%, var(--panel-2));
+      border-color: #c0392b;
+    }
     .action:hover:not(:disabled):not(.is-primary) {
       background: color-mix(in oklab, var(--panel-2) 92%, var(--text) 8%);
       border-color: color-mix(in oklab, var(--line) 60%, var(--text) 12%);
@@ -4770,6 +4790,10 @@ const webAppHTML = `<!doctype html>
       const isFav = !!state.cwd && list.indexOf(state.cwd) !== -1;
       el.textContent = isFav ? "★ Remove favorite" : "Add to favorites";
       el.classList.toggle("active", isFav);
+      // Distinct colors: accent "add" vs red "remove" so the two states read
+      // clearly differently at a glance.
+      el.classList.toggle("fav-remove", isFav);
+      el.classList.toggle("fav-add", !isFav);
       el.title = isFav
         ? "Remove " + state.cwd + " from favorites"
         : "Add " + (state.cwd || "current folder") + " to favorites";
