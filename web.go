@@ -2564,6 +2564,9 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, var(--panel) 92%, transparent);
     }
     .vcompare-title { font-size: 13px; font-weight: 700; color: var(--text); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vcompare-nav { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+    .vcompare-nav .action { padding: 5px 8px; }
+    .vcompare-nav-count { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; white-space: nowrap; }
     .vcompare-close { flex: 0 0 auto; }
     .vcompare-body {
       flex: 1 1 auto;
@@ -2623,6 +2626,11 @@ const webAppHTML = `<!doctype html>
     .vcompare-pane-body.side-r .vcd-chg-block {
       background: color-mix(in oklab, #3fb950 15%, transparent);
       box-shadow: inset 3px 0 0 color-mix(in oklab, #3fb950 60%, transparent);
+    }
+    .vcompare-pane-body .vcd-flash { animation: vcdFlash 0.95s ease; border-radius: 4px; }
+    @keyframes vcdFlash {
+      0% { outline: 2px solid color-mix(in oklab, var(--accent) 75%, transparent); outline-offset: 2px; }
+      100% { outline: 2px solid transparent; outline-offset: 2px; }
     }
     .vcd-rawwrap { font: 12.5px/1.55 ui-monospace, SFMono-Regular, monospace; tab-size: 4; }
     .vcd-rawline { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; padding: 0 6px; }
@@ -4071,6 +4079,11 @@ const webAppHTML = `<!doctype html>
   <div class="vcompare" id="vcompare" hidden>
     <div class="vcompare-head">
       <div class="vcompare-title" id="vcompareTitle">버전 비교</div>
+      <div class="vcompare-nav">
+        <button type="button" class="action icon-only" id="vcomparePrev" title="이전 변경점 (↑)" aria-label="이전 변경점">▲</button>
+        <span class="vcompare-nav-count" id="vcompareNavCount">변경 없음</span>
+        <button type="button" class="action icon-only" id="vcompareNext" title="다음 변경점 (↓)" aria-label="다음 변경점">▼</button>
+      </div>
       <button type="button" class="action icon-only vcompare-close" id="vcompareClose" title="닫기 (Esc)" aria-label="Close">✕</button>
     </div>
     <div class="vcompare-body">
@@ -7376,11 +7389,16 @@ const webAppHTML = `<!doctype html>
       const selRight = document.getElementById("vcompareSelRight");
       const leftBody = document.getElementById("vcompareLeft");
       const rightBody = document.getElementById("vcompareRight");
+      const prevBtn = document.getElementById("vcomparePrev");
+      const nextBtn = document.getElementById("vcompareNext");
+      const countEl = document.getElementById("vcompareNavCount");
       if (!overlay || !btn) return;
 
       let entries = [];          // [{value, label}] incl. an optional WORKING row
       let contentCache = {};     // rev -> content string (or null on failure)
       let renderToken = 0;       // guards against overlapping async renders
+      let groups = [];           // ordered change anchors {left, right} (0-based lines)
+      let navIdx = -1;           // current change index for ▲/▼ navigation
 
       async function fetchContent(rev) {
         if (rev in contentCache) return contentCache[rev];
@@ -7432,14 +7450,27 @@ const webAppHTML = `<!doctype html>
         let sa = a.length, sb = b.length;
         while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
         const left = new Set(), right = new Set();
+        const groups = [];          // each maximal run of changes → one nav anchor
         const ops = diffMiddle(a.slice(p, sa), b.slice(p, sb));
-        let lLine = p, rLine = p;
+        let lLine = p, rLine = p, cur = null;
         for (const op of ops) {
-          if (op.t === "same") { lLine++; rLine++; }
-          else if (op.t === "del") { left.add(lLine); lLine++; }
-          else { right.add(rLine); rLine++; }
+          if (op.t === "same") {
+            if (cur) { groups.push(cur); cur = null; }
+            lLine++; rLine++;
+          } else if (op.t === "del") {
+            left.add(lLine);
+            if (!cur) cur = { left: null, right: null };
+            if (cur.left === null) cur.left = lLine;
+            lLine++;
+          } else {
+            right.add(rLine);
+            if (!cur) cur = { left: null, right: null };
+            if (cur.right === null) cur.right = rLine;
+            rLine++;
+          }
         }
-        return { left: left, right: right };
+        if (cur) groups.push(cur);
+        return { left: left, right: right, groups: groups };
       }
 
       // Tint each top-level rendered block whose source-line range overlaps a
@@ -7464,6 +7495,8 @@ const webAppHTML = `<!doctype html>
         if (kind === "markdown" || kind === "text") {
           await renderMarkdownInto(bodyEl, content, kind, { trackSourceLines: true });
           applyBlockHighlight(bodyEl, changedSet);
+          // Make diagrams/images zoomable just like the main viewer.
+          try { attachZoomToPreview(bodyEl); } catch (e) {}
         } else {
           // Code / other: render as plain lines, tinting the changed ones.
           bodyEl.innerHTML = "";
@@ -7492,16 +7525,22 @@ const webAppHTML = `<!doctype html>
           return;
         }
         const changed = computeChanged(lc, rc);
+        groups = changed.groups;
+        navIdx = -1;
         await renderSide(leftBody, lc, changed.left);
         if (token !== renderToken) return;
         await renderSide(rightBody, rc, changed.right);
         leftBody.scrollTop = 0;
         rightBody.scrollTop = 0;
+        updateNavUI();
       }
 
-      // Proportional bidirectional scroll sync (reentrancy-guarded).
+      // Proportional bidirectional scroll sync (reentrancy-guarded). Suspended
+      // while we jump to a change so each pane lands on its own anchor.
       let vcSyncSrc = null;
+      let vcProgrammatic = false;
       function vcSync(src, dst) {
+        if (vcProgrammatic) return;
         if (vcSyncSrc && vcSyncSrc !== src) return;
         vcSyncSrc = src;
         const range = src.scrollHeight - src.clientHeight;
@@ -7511,6 +7550,53 @@ const webAppHTML = `<!doctype html>
       }
       leftBody.addEventListener("scroll", () => vcSync(leftBody, rightBody));
       rightBody.addEventListener("scroll", () => vcSync(rightBody, leftBody));
+
+      // ── Change navigation (▲ prev / ▼ next) ──
+      function anchorForLine(body, line) {
+        if (line === null || line === undefined) return null;
+        const raw = body.querySelector(".vcd-rawwrap");
+        if (raw) { const ch = raw.children; return ch[Math.min(line, ch.length - 1)] || null; }
+        const blocks = Array.from(body.querySelectorAll(":scope > [data-source-line]"))
+          .map((el) => ({ el: el, line: parseInt(el.getAttribute("data-source-line"), 10) }))
+          .filter((b) => !isNaN(b.line)).sort((a, b) => a.line - b.line);
+        if (!blocks.length) return null;
+        let lo = 0, hi = blocks.length - 1, idx = 0;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (blocks[mid].line <= line) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+        return blocks[idx].el;
+      }
+      function scrollBodyTo(body, el) {
+        if (!el) return;
+        const br = body.getBoundingClientRect(), er = el.getBoundingClientRect();
+        body.scrollTop += (er.top - br.top) - 16;
+      }
+      function flash(el) {
+        if (!el) return;
+        el.classList.remove("vcd-flash");
+        void el.offsetWidth; // restart the animation
+        el.classList.add("vcd-flash");
+        setTimeout(() => { try { el.classList.remove("vcd-flash"); } catch (e) {} }, 950);
+      }
+      function updateNavUI() {
+        const n = groups.length;
+        if (countEl) countEl.textContent = n ? ((navIdx >= 0 ? (navIdx + 1) : "–") + " / " + n + " 변경") : "변경 없음";
+        if (prevBtn) prevBtn.disabled = !n;
+        if (nextBtn) nextBtn.disabled = !n;
+      }
+      function goToChange(i) {
+        if (!groups.length) return;
+        navIdx = (i % groups.length + groups.length) % groups.length;
+        const g = groups[navIdx];
+        const la = anchorForLine(leftBody, g.left);
+        const ra = anchorForLine(rightBody, g.right);
+        vcProgrammatic = true;
+        scrollBodyTo(leftBody, la);
+        scrollBodyTo(rightBody, ra);
+        setTimeout(() => { vcProgrammatic = false; }, 120);
+        flash(la); flash(ra);
+        updateNavUI();
+      }
+      if (prevBtn) prevBtn.addEventListener("click", () => goToChange(navIdx - 1));
+      if (nextBtn) nextBtn.addEventListener("click", () => goToChange(navIdx + 1));
 
       function buildOptions(selectEl, selectedValue) {
         selectEl.innerHTML = "";
@@ -7562,7 +7648,15 @@ const webAppHTML = `<!doctype html>
       if (selLeft) selLeft.addEventListener("change", render);
       if (selRight) selRight.addEventListener("change", render);
       document.addEventListener("keydown", function (e) {
-        if (!overlay.hidden && e.key === "Escape") { e.preventDefault(); close(); }
+        if (overlay.hidden) return;
+        // A diagram lightbox can sit on top of the compare view — let it own
+        // the keyboard (Esc/etc.) so closing it doesn't also close compare.
+        const lbEl = document.getElementById("lightbox");
+        if (lbEl && !lbEl.hidden) return;
+        if (e.key === "Escape") { e.preventDefault(); close(); return; }
+        if (e.target && e.target.tagName === "SELECT") return; // let selects use arrows
+        if (e.key === "ArrowDown") { e.preventDefault(); goToChange(navIdx + 1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); goToChange(navIdx - 1); }
       });
     })();
 
@@ -11145,8 +11239,9 @@ const webAppHTML = `<!doctype html>
       });
     }
 
-    function attachZoomToPreview() {
-      const targets = previewBodyEl.querySelectorAll("img, .mermaid");
+    function attachZoomToPreview(root) {
+      const scope = root || previewBodyEl;
+      const targets = scope.querySelectorAll("img, .mermaid");
       targets.forEach((el) => {
         attachInlineZoom(el);
         if (el.classList.contains("mermaid")) attachMermaidToolbar(el);
