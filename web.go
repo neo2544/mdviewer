@@ -78,6 +78,8 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/list-recursive", s.handleListRecursive)
 	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
 	mux.HandleFunc("/api/git/root", s.handleGitRoot)
+	mux.HandleFunc("/api/git/filelog", s.handleGitFileLog)
+	mux.HandleFunc("/api/git/show", s.handleGitShow)
 	mux.HandleFunc("/api/aidlc", s.handleAidlc)
 	mux.HandleFunc("/api/version", s.handleVersion)
 	mux.HandleFunc("/api/version/check", s.handleVersionCheck)
@@ -2542,6 +2544,81 @@ const webAppHTML = `<!doctype html>
     }
     .palette-match { color: oklch(0.78 0.16 200); font-weight: 700; }
 
+    /* ── Git version compare: full-screen split before/after ── */
+    .vcompare {
+      position: fixed;
+      inset: 0;
+      z-index: 1800;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+    .vcompare[hidden] { display: none; }
+    .vcompare-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in oklab, var(--panel) 92%, transparent);
+    }
+    .vcompare-title { font-size: 13px; font-weight: 700; color: var(--text); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vcompare-close { flex: 0 0 auto; }
+    .vcompare-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .vcompare-pane {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--line);
+    }
+    .vcompare-pane:last-child { border-right: none; }
+    .vcompare-pane-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 50%, transparent);
+    }
+    .vcompare-pane-label { font-size: 11px; font-weight: 700; letter-spacing: .03em; flex: 0 0 auto; }
+    .vcompare-pane-label.before { color: color-mix(in oklab, #e6604f 70%, var(--muted)); }
+    .vcompare-pane-label.after { color: color-mix(in oklab, var(--accent-2) 80%, var(--muted)); }
+    .vcompare-select {
+      flex: 1 1 auto;
+      min-width: 0;
+      border: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 86%, transparent);
+      color: var(--text);
+      border-radius: 7px;
+      padding: 4px 8px;
+      font: 12px/1.4 system-ui, -apple-system, sans-serif;
+      outline: none;
+    }
+    .vcompare-select:focus { border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2)); }
+    .vcompare-pane-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      height: auto;
+      overflow: auto;
+    }
+    .vcompare-pane-body pre.vcompare-raw {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 12.5px/1.6 ui-monospace, SFMono-Regular, monospace;
+    }
+    .vcompare-empty { color: var(--muted); font-size: 12px; padding: 12px; }
+    /* .action sets display:inline-flex, which would defeat the [hidden] attr. */
+    #versionButton[hidden] { display: none; }
+
     body.lightbox-open { overflow: hidden; }
     .lightbox {
       position: fixed;
@@ -3627,7 +3704,7 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="pane">
         <div class="file-header">
-          <button class="aidlc-toggle" id="aidlcToggle" type="button" role="switch" aria-checked="false" hidden title="AI-DLC 문서 전체를 최근 수정순으로 보기"><span class="aidlc-switch"><span class="aidlc-knob"></span></span><span class="aidlc-toggle-text">AI-DLC</span><span class="aidlc-toggle-state">OFF</span></button>
+          <button class="aidlc-toggle" id="aidlcToggle" type="button" role="switch" aria-checked="false" hidden title="AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)"><span class="aidlc-switch"><span class="aidlc-knob"></span></span><span class="aidlc-toggle-text">AI-DLC</span><span class="aidlc-toggle-state">OFF</span></button>
           <button class="header-button active" id="sortName" data-direction="asc" type="button">Name</button>
           <button class="header-button size-col" id="sortMod" data-direction="asc" type="button">Updated</button>
         </div>
@@ -3685,6 +3762,10 @@ const webAppHTML = `<!doctype html>
           <div class="subtle" id="previewMeta"></div>
         </div>
         <div class="actions">
+          <button class="action" id="versionButton" type="button" title="이 파일의 git 변경 이력을 버전별로 골라 좌/우로 비교" hidden>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a3 3 0 0 1-3 3H9"/><circle cx="18" cy="6" r="3"/></svg>
+            <span>Version</span>
+          </button>
           <div class="seg" role="tablist" aria-label="View mode">
             <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -3903,6 +3984,28 @@ const webAppHTML = `<!doctype html>
       <input type="text" id="paletteInput" placeholder="Search recent files & folders… (Cmd/Ctrl+K)" autocomplete="off" spellcheck="false" />
       <div class="palette-hint">↑↓ navigate · Enter open · Esc close</div>
       <div id="paletteResults" class="palette-results"></div>
+    </div>
+  </div>
+  <div class="vcompare" id="vcompare" hidden>
+    <div class="vcompare-head">
+      <div class="vcompare-title" id="vcompareTitle">버전 비교</div>
+      <button type="button" class="action icon-only vcompare-close" id="vcompareClose" title="닫기 (Esc)" aria-label="Close">✕</button>
+    </div>
+    <div class="vcompare-body">
+      <div class="vcompare-pane">
+        <div class="vcompare-pane-head">
+          <span class="vcompare-pane-label before">◀ 이전 (Before)</span>
+          <select class="vcompare-select" id="vcompareSelLeft" aria-label="비교할 이전 버전"></select>
+        </div>
+        <div class="vcompare-pane-body preview-body" id="vcompareLeft"></div>
+      </div>
+      <div class="vcompare-pane">
+        <div class="vcompare-pane-head">
+          <span class="vcompare-pane-label after">이후 (After) ▶</span>
+          <select class="vcompare-select" id="vcompareSelRight" aria-label="비교할 이후 버전"></select>
+        </div>
+        <div class="vcompare-pane-body preview-body" id="vcompareRight"></div>
+      </div>
     </div>
   </div>
   <div class="lightbox" id="lightbox" hidden>
@@ -5704,6 +5807,7 @@ const webAppHTML = `<!doctype html>
       previewMetaEl.textContent = new Date(data.mod_time).toLocaleString() + " · " + humanSize(data.size);
       kindChipEl.textContent = data.kind;
       kindChipEl.setAttribute("data-kind", data.kind || "idle");
+      updateVersionButton();
       await renderCurrentView(data);
       if (prevScrollTop !== null) {
         // Auto-refresh path: keep the user where they were and flash
@@ -7158,7 +7262,118 @@ const webAppHTML = `<!doctype html>
         fbGitBtn.title = isRepo ? "Git 저장소 전체 탐색" : "현재 폴더가 Git 저장소가 아닙니다";
       }
       if (!isRepo && state.fbScope === "git") { state.fbScope = "folder"; }
+      updateVersionButton();
     }
+    // The Version button needs both a git repo and an open file.
+    function updateVersionButton() {
+      const btn = document.getElementById("versionButton");
+      if (!btn) return;
+      btn.hidden = !(state.gitRepoRoot && state.selectedPath);
+    }
+
+    // ── Git version compare (before/after split) ──
+    // Pick any two revisions of the open file (working copy + each commit) and
+    // view them side by side. Backed by /api/git/filelog and /api/git/show.
+    (function setupVersionCompare() {
+      const overlay = document.getElementById("vcompare");
+      const btn = document.getElementById("versionButton");
+      const closeBtn = document.getElementById("vcompareClose");
+      const titleEl = document.getElementById("vcompareTitle");
+      const selLeft = document.getElementById("vcompareSelLeft");
+      const selRight = document.getElementById("vcompareSelRight");
+      const leftBody = document.getElementById("vcompareLeft");
+      const rightBody = document.getElementById("vcompareRight");
+      if (!overlay || !btn) return;
+
+      let entries = [];          // [{value, label}] incl. an optional WORKING row
+      let contentCache = {};     // rev -> content string (or null on failure)
+
+      async function fetchContent(rev) {
+        if (rev in contentCache) return contentCache[rev];
+        let c = null;
+        try {
+          const r = await fetch("/api/git/show?path=" + encodeURIComponent(state.selectedPath) + "&rev=" + encodeURIComponent(rev));
+          const j = await r.json();
+          c = (j && j.ok) ? (j.content || "") : null;
+        } catch (e) { c = null; }
+        contentCache[rev] = c;
+        return c;
+      }
+
+      async function renderSide(bodyEl, rev) {
+        bodyEl.innerHTML = "<div class='vcompare-empty'>불러오는 중…</div>";
+        const content = await fetchContent(rev);
+        if (content === null) {
+          bodyEl.innerHTML = "<div class='vcompare-empty'>이 버전을 불러올 수 없습니다.</div>";
+          return;
+        }
+        const kind = state.selectedKind;
+        if (kind === "markdown" || kind === "text") {
+          await renderMarkdownInto(bodyEl, content, kind, {});
+        } else {
+          bodyEl.innerHTML = "";
+          const pre = document.createElement("pre");
+          pre.className = "vcompare-raw";
+          pre.textContent = content;
+          bodyEl.appendChild(pre);
+        }
+      }
+
+      function buildOptions(selectEl, selectedValue) {
+        selectEl.innerHTML = "";
+        for (const e of entries) {
+          const opt = document.createElement("option");
+          opt.value = e.value;
+          opt.textContent = e.label;
+          if (e.value === selectedValue) opt.selected = true;
+          selectEl.appendChild(opt);
+        }
+      }
+
+      async function open() {
+        if (!state.selectedPath) return;
+        let data;
+        try {
+          const r = await fetch("/api/git/filelog?path=" + encodeURIComponent(state.selectedPath));
+          data = await r.json();
+        } catch (e) { showToast("git 이력을 불러오지 못했어요", { kind: "err", icon: "⚠️" }); return; }
+        if (!data || !data.available) { showToast("이 파일은 git 저장소에 없습니다", { kind: "err", icon: "⚠️" }); return; }
+        const commits = Array.isArray(data.commits) ? data.commits : [];
+        entries = [];
+        if (data.dirty) entries.push({ value: "WORKING", label: "● 현재 작업본 (저장된 디스크 내용)" });
+        commits.forEach(function (c, i) {
+          const tag = (i === 0 && !data.dirty) ? "  (최신)" : "";
+          entries.push({ value: c.hash, label: c.short + " · " + c.date + " · " + (c.subject || "") + tag });
+        });
+        if (!entries.length) { showToast("이 파일의 커밋 이력이 없습니다", { kind: "err", icon: "⚠️" }); return; }
+
+        // Defaults: right = newest, left = the one before it (before/after).
+        const rightVal = entries[0].value;
+        const leftVal = entries[1] ? entries[1].value : entries[0].value;
+        contentCache = {};
+        buildOptions(selLeft, leftVal);
+        buildOptions(selRight, rightVal);
+        titleEl.textContent = "버전 비교 — " + state.selectedPath.split("/").pop();
+        overlay.hidden = false;
+        document.body.classList.add("lightbox-open");
+        renderSide(leftBody, leftVal);
+        renderSide(rightBody, rightVal);
+      }
+
+      function close() {
+        overlay.hidden = true;
+        document.body.classList.remove("lightbox-open");
+      }
+
+      btn.addEventListener("click", open);
+      if (closeBtn) closeBtn.addEventListener("click", close);
+      if (selLeft) selLeft.addEventListener("change", function () { renderSide(leftBody, selLeft.value); });
+      if (selRight) selRight.addEventListener("change", function () { renderSide(rightBody, selRight.value); });
+      document.addEventListener("keydown", function (e) {
+        if (!overlay.hidden && e.key === "Escape") { e.preventDefault(); close(); }
+      });
+    })();
+
     // ── Multi-memo notebook in the right panel ───────────────────
     // A global notebook (not tied to the open file). Memos live in memory,
     // are mirrored to localStorage for instant load/offline, and sync to the
@@ -10726,6 +10941,116 @@ func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	root := s.gitRoot(r.Context(), abs)
 	s.writeJSON(w, http.StatusOK, map[string]any{"root": root, "isRepo": root != ""})
+}
+
+// isHexRev reports whether s looks like a git object id (short or full). We feed
+// only ids we ourselves produced via `git log`, but validate as defence in depth
+// before interpolating into a `git show <rev>:<path>` argument.
+func isHexRev(s string) bool {
+	if len(s) < 4 || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// handleGitFileLog lists the commit history for a single file (most recent
+// first), so the UI can offer per-version before/after comparison. Reports
+// availability=false when the file is not inside a git repository.
+func (s *webServer) handleGitFileLog(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	root := s.gitRoot(r.Context(), filepath.Dir(abs))
+	if root == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	rel = filepath.ToSlash(rel)
+	const sep = "\x1f"
+	format := "%H" + sep + "%h" + sep + "%ad" + sep + "%an" + sep + "%s"
+	out, lerr := gitOutput(r.Context(), root, "log", "--follow",
+		"--date=format:%Y-%m-%d %H:%M", "--format="+format, "--", rel)
+	commits := []map[string]any{}
+	if lerr == nil && out != "" {
+		for _, line := range strings.Split(out, "\n") {
+			parts := strings.SplitN(line, sep, 5)
+			if len(parts) < 5 {
+				continue
+			}
+			commits = append(commits, map[string]any{
+				"hash": parts[0], "short": parts[1],
+				"date": parts[2], "author": parts[3], "subject": parts[4],
+			})
+		}
+	}
+	status, _ := gitOutput(r.Context(), root, "status", "--porcelain", "--", rel)
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"available": true, "root": root, "relpath": rel,
+		"commits": commits, "dirty": strings.TrimSpace(status) != "",
+	})
+}
+
+// handleGitShow returns the contents of a file at a given revision. A blank or
+// "WORKING" rev returns the current on-disk copy.
+func (s *webServer) handleGitShow(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	rev := r.URL.Query().Get("rev")
+	if p == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "missing path"})
+		return
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "bad path"})
+		return
+	}
+	if rev == "" || rev == "WORKING" {
+		b, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": rerr.Error()})
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "content": string(b)})
+		return
+	}
+	if !isHexRev(rev) {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "bad rev"})
+		return
+	}
+	root := s.gitRoot(r.Context(), filepath.Dir(abs))
+	if root == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "not a repo"})
+		return
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "rel"})
+		return
+	}
+	rel = filepath.ToSlash(rel)
+	out, gerr := gitOutput(r.Context(), root, "show", rev+":"+rel)
+	if gerr != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": out})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "content": out})
 }
 
 // handleAidlc powers the "AI-DLC" sidebar mode. The mode is available only when
