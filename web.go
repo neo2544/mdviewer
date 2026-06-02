@@ -3235,26 +3235,20 @@ const webAppHTML = `<!doctype html>
       -webkit-backdrop-filter: blur(7px);
     }
     .memo-selection-bar[hidden] { display: none; }
-    /* Floating copy button shown when text is selected inside the lightbox
-       (⌥+Drag select). Positioned just below the selection in JS. */
-    .lb-copy-sel-btn {
+    /* Rubber-band box drawn while ⌥+dragging inside the lightbox. The text
+       fully enclosed by it is copied to the clipboard on release. */
+    .lb-select-box {
       position: fixed;
-      z-index: 2602;             /* above the lightbox (2000) and its toolbars */
-      transform: translate(-50%, 6px);
-      border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
-      background: color-mix(in oklab, var(--accent) 20%, var(--panel-2));
-      color: var(--text);
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 8px;
-      cursor: pointer;
-      white-space: nowrap;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.28);
-      backdrop-filter: blur(7px);
-      -webkit-backdrop-filter: blur(7px);
+      z-index: 2601;             /* above the lightbox (2000), below toolbars */
+      border: 1.5px solid var(--accent);
+      background: color-mix(in oklab, var(--accent) 16%, transparent);
+      border-radius: 2px;
+      pointer-events: none;
     }
-    .lb-copy-sel-btn:hover { background: color-mix(in oklab, var(--accent) 36%, var(--panel-2)); }
-    .lb-copy-sel-btn[hidden] { display: none; }
+    .lb-select-box[hidden] { display: none; }
+    /* ⌥ held over the lightbox stage → box-select cursor (not text I-beam). */
+    body.alt-select-mode .lightbox-stage,
+    body.alt-select-mode .lightbox-stage * { cursor: crosshair !important; }
     .memo-selection-btn {
       border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
       background: color-mix(in oklab, var(--accent) 14%, transparent);
@@ -3936,8 +3930,7 @@ const webAppHTML = `<!doctype html>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke / post-it to delete" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: select text · Double-click: reset · Esc: close</div>
-    <button type="button" class="lb-copy-sel-btn" id="lbCopySelBtn" hidden>📋 복사</button>
+    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: 영역 글자 복사 · Double-click: reset · Esc: close</div>
   </div>
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
@@ -9899,8 +9892,9 @@ const webAppHTML = `<!doctype html>
       setDrawControlsVisible(false);
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
-      const lbCopySel = document.getElementById("lbCopySelBtn");
-      if (lbCopySel) lbCopySel.hidden = true;
+      _lbBoxSel = null;
+      const lbSelBox = document.getElementById("lbSelectBox");
+      if (lbSelBox) lbSelBox.hidden = true;
       document.body.classList.remove("lightbox-open");
       // Reset the cached baseline so the NEXT opened diagram re-measures
       // from scratch (different content size).
@@ -9926,17 +9920,26 @@ const webAppHTML = `<!doctype html>
     // selectstart guard — without Alt held, the lightbox is pan-only; we
     // must beat the browser's default drag-to-select on SVG text so the
     // mouse drag pans the diagram instead of highlighting glyphs.
+    // Native text selection is disabled everywhere in the lightbox — ⌥+Drag
+    // does a box selection (copyable) instead, so we never want the browser's
+    // glyph highlighting to kick in here.
     lightboxEl.addEventListener("selectstart", (event) => {
-      if (event.altKey || state.altKey) return;
       if (event.target && event.target.closest && event.target.closest(".lightbox-toolbar")) return;
       event.preventDefault();
     });
 
     lightboxEl.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".lightbox-toolbar")) return;
-      // Alt/Option held → user wants to select text inside the diagram,
-      // not pan the lightbox. Let the browser handle the selection.
-      if (event.altKey || state.altKey) return;
+      // Alt/Option held → rubber-band box selection over the diagram. The
+      // text fully enclosed by the box is copied to the clipboard on release
+      // (replaces fiddly precise text selection).
+      if (event.altKey || state.altKey) {
+        if (event.button !== 0) return;
+        startLbBoxSelect(event);
+        event.preventDefault();
+        try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
+        return;
+      }
       if (_lbEraserMode && event.button === 0) {
         // Start an erase-drag session. Strokes touched here AND during
         // the subsequent pointermove are all bundled into one undo
@@ -10028,6 +10031,7 @@ const webAppHTML = `<!doctype html>
     });
 
     lightboxEl.addEventListener("pointermove", (event) => {
+      if (_lbBoxSel) { updateLbBoxSelect(event); event.preventDefault(); return; }
       if (_lbAnnoActive) { continueAnnotationStroke(event); return; }
       if (_lbEraseDrag) {
         // Walk every element under the pointer (elementsFromPoint, not
@@ -10087,6 +10091,7 @@ const webAppHTML = `<!doctype html>
     // refuse to emit a dblclick event after the second quick click.
     var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
+      if (_lbBoxSel) { endLbBoxSelect(event); event.preventDefault(); return; }
       if (_lbAnnoActive) { endAnnotationStroke(event); return; }
       if (_lbEraseDrag) {
         const erased = _lbEraseDrag.erased;
@@ -10233,56 +10238,90 @@ const webAppHTML = `<!doctype html>
       else if (!event.altKey && state.altKey) setMermaidAltSelect(false);
     }, { passive: true });
 
-    // ----- Lightbox: floating "복사" button for ⌥+Drag text selection -----
-    // The preview's memo-selection bar is scoped to previewBodyEl, so a
-    // selection inside the lightbox stage gets no copy affordance. Show a
-    // dedicated button positioned under the selection while the lightbox is open.
-    const lbCopySelBtn = document.getElementById("lbCopySelBtn");
-    function lightboxSelectionText() {
-      if (lightboxEl.hidden) return null;
-      const sel = window.getSelection && window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
-      const text = sel.toString().trim();
-      if (!text) return null;
-      const range = sel.getRangeAt(0);
-      const anc = range.commonAncestorContainer;
-      const node = anc.nodeType === 1 ? anc : anc.parentNode;
-      if (!node || !lightboxStageEl.contains(node)) return null;
-      return { text: text, range: range };
+    // ----- Lightbox: ⌥+Drag box selection → copy enclosed text -----
+    // Holding Alt/Option and dragging draws a rubber-band rectangle over the
+    // diagram. On release, every <text>/<foreignObject> whose box lies fully
+    // inside the rectangle is collected (grouped into lines) and copied to the
+    // clipboard. This replaces precise glyph selection, which is fiddly on SVG.
+    var _lbBoxSel = null;
+    function startLbBoxSelect(event) {
+      let box = document.getElementById("lbSelectBox");
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "lb-select-box";
+        box.id = "lbSelectBox";
+        document.body.appendChild(box);
+      }
+      _lbBoxSel = { sx: event.clientX, sy: event.clientY, el: box };
+      box.style.left = event.clientX + "px";
+      box.style.top = event.clientY + "px";
+      box.style.width = "0px";
+      box.style.height = "0px";
+      box.hidden = false;
     }
-    function hideLbCopySel() { if (lbCopySelBtn) lbCopySelBtn.hidden = true; }
-    function maybeShowLbCopySel() {
-      if (!lbCopySelBtn) return;
-      const s = lightboxSelectionText();
-      if (!s) { hideLbCopySel(); return; }
-      let rect;
-      try { rect = s.range.getBoundingClientRect(); } catch (e) { hideLbCopySel(); return; }
-      if (!rect || (!rect.width && !rect.height)) { hideLbCopySel(); return; }
-      lbCopySelBtn.style.left = (rect.left + rect.width / 2) + "px";
-      lbCopySelBtn.style.top = rect.bottom + "px";
-      lbCopySelBtn.hidden = false;
+    function updateLbBoxSelect(event) {
+      if (!_lbBoxSel) return;
+      const b = _lbBoxSel.el;
+      b.style.left = Math.min(_lbBoxSel.sx, event.clientX) + "px";
+      b.style.top = Math.min(_lbBoxSel.sy, event.clientY) + "px";
+      b.style.width = Math.abs(event.clientX - _lbBoxSel.sx) + "px";
+      b.style.height = Math.abs(event.clientY - _lbBoxSel.sy) + "px";
     }
-    if (lbCopySelBtn) {
-      document.addEventListener("mouseup", function () { setTimeout(maybeShowLbCopySel, 0); });
-      document.addEventListener("keyup", function (e) {
-        if (e.shiftKey || e.key === "Shift") setTimeout(maybeShowLbCopySel, 0);
-      });
-      // Clicking the button must not clear the selection before we read it.
-      lbCopySelBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      lbCopySelBtn.addEventListener("click", async function () {
-        const s = lightboxSelectionText();
-        if (!s) { hideLbCopySel(); return; }
-        const ok = await copyTextToClipboard(s.text);
-        showToast(ok ? "선택한 내용을 복사했어요" : "복사 실패",
-          ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
-        hideLbCopySel();
-        if (window.getSelection) window.getSelection().removeAllRanges();
-      });
-      // A mousedown elsewhere (starting a new drag / pan) dismisses it.
-      document.addEventListener("mousedown", function (e) {
-        if (!lbCopySelBtn.contains(e.target)) hideLbCopySel();
-      });
-      lightboxEl.addEventListener("wheel", hideLbCopySel, { passive: true });
+    async function endLbBoxSelect(event) {
+      const sel = _lbBoxSel;
+      _lbBoxSel = null;
+      if (!sel) return;
+      if (sel.el) sel.el.hidden = true;
+      try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+      const rect = {
+        left: Math.min(sel.sx, event.clientX),
+        top: Math.min(sel.sy, event.clientY),
+        right: Math.max(sel.sx, event.clientX),
+        bottom: Math.max(sel.sy, event.clientY),
+      };
+      // Ignore an accidental click / micro-drag.
+      if ((rect.right - rect.left) < 5 || (rect.bottom - rect.top) < 5) return;
+      const svg = lightboxStageEl.querySelector("svg");
+      if (!svg) return;
+      const text = extractMermaidTextInBox(svg, rect);
+      if (!text) { showToast("선택 영역에 글자가 없어요", { kind: "err", icon: "⚠️" }); return; }
+      const ok = await copyTextToClipboard(text);
+      showToast(ok ? "선택 영역의 글자를 복사했어요" : "복사 실패",
+        ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
+    }
+    // Collect text whose bounding box is fully contained in the screen-space
+    // rect, grouped into lines by y (same approach as extractMermaidText).
+    function extractMermaidTextInBox(svg, rect) {
+      const nodes = svg.querySelectorAll("text, foreignObject");
+      const items = [];
+      for (const node of nodes) {
+        if (node.tagName === "text" && node.closest("foreignObject")) continue;
+        let r;
+        try { r = node.getBoundingClientRect(); } catch (e) { continue; }
+        const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+        if (!text) continue;
+        if (r.left >= rect.left && r.right <= rect.right && r.top >= rect.top && r.bottom <= rect.bottom) {
+          items.push({ y: r.top, x: r.left, text });
+        }
+      }
+      if (!items.length) return "";
+      items.sort((a, b) => a.y - b.y || a.x - b.x);
+      const lines = [];
+      let current = [];
+      let lastY = -Infinity;
+      const lineTolerance = 6;
+      for (const it of items) {
+        if (Math.abs(it.y - lastY) > lineTolerance && current.length) {
+          lines.push(current);
+          current = [];
+        }
+        current.push(it);
+        lastY = it.y;
+      }
+      if (current.length) lines.push(current);
+      return lines
+        .map((line) => line.sort((a, b) => a.x - b.x).map((it) => it.text).join("  "))
+        .join("\n");
     }
 
     // ----- Copy diagram text to clipboard -----
