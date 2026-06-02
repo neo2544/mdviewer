@@ -3005,6 +3005,98 @@ const webAppHTML = `<!doctype html>
       text-align: center;
     }
     .memo-empty[hidden] { display: none; }
+    /* Trash: a collapsible recovery buffer at the bottom of the memo pane. */
+    .memo-trash {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed color-mix(in oklab, var(--line) 60%, transparent);
+    }
+    .memo-trash[hidden] { display: none; }
+    .memo-trash-head { display: flex; align-items: center; gap: 6px; }
+    .memo-trash-toggle {
+      flex: 1 1 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px;
+      border-radius: 6px;
+      text-align: left;
+    }
+    .memo-trash-toggle:hover { color: var(--text); }
+    .memo-trash-caret { display: inline-block; font-size: 10px; transition: transform 120ms ease; }
+    .memo-trash.open .memo-trash-caret { transform: rotate(90deg); }
+    .memo-trash-count {
+      font-variant-numeric: tabular-nums;
+      font-size: 10.5px;
+      color: var(--muted);
+      background: color-mix(in oklab, var(--line) 45%, transparent);
+      border-radius: 999px;
+      padding: 0 6px;
+      min-width: 16px;
+      text-align: center;
+    }
+    .memo-trash-empty-btn {
+      flex: 0 0 auto;
+      border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 7px;
+    }
+    .memo-trash-empty-btn:hover {
+      color: #e6604f;
+      border-color: color-mix(in oklab, #c0392b 50%, var(--line));
+      background: color-mix(in oklab, #c0392b 10%, transparent);
+    }
+    .memo-trash-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 30vh;
+      overflow-y: auto;
+    }
+    .memo-trash-list[hidden] { display: none; }
+    .memo-trash-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-radius: 8px;
+      border: 1px solid color-mix(in oklab, var(--line) 30%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 40%, transparent);
+    }
+    .memo-trash-item-main { flex: 1 1 auto; min-width: 0; }
+    .memo-trash-item-title {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .memo-trash-item-time { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .memo-trash-btn {
+      flex: 0 0 auto;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      padding: 2px 5px;
+      border-radius: 6px;
+      color: var(--muted);
+    }
+    .memo-trash-btn.restore:hover { color: var(--accent-2); background: color-mix(in oklab, var(--accent-2) 16%, transparent); }
+    .memo-trash-btn.purge:hover { color: #e6604f; background: color-mix(in oklab, #c0392b 14%, transparent); }
     .memo-title-input {
       width: 100%;
       border: 1px solid color-mix(in oklab, var(--line) 55%, transparent);
@@ -3717,6 +3809,17 @@ const webAppHTML = `<!doctype html>
             <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
             <a class="memo-backlink" id="memoBacklink" hidden></a>
             <div class="memo-sync-state" id="memoSyncState"></div>
+          </div>
+          <div class="memo-trash" id="memoTrash" hidden>
+            <div class="memo-trash-head">
+              <button type="button" class="memo-trash-toggle" id="memoTrashToggle" aria-expanded="false" title="삭제한 메모 (클릭하여 펼치기)">
+                <span class="memo-trash-caret" id="memoTrashCaret">&#x25B8;</span>
+                <span>&#x1F5D1; 휴지통</span>
+                <span class="memo-trash-count" id="memoTrashCount">0</span>
+              </button>
+              <button type="button" class="memo-trash-empty-btn" id="memoTrashEmptyBtn" title="휴지통 비우기 (영구 삭제)">비우기</button>
+            </div>
+            <div class="memo-trash-list" id="memoTrashList" hidden></div>
           </div>
         </div>
         </div>
@@ -7089,14 +7192,21 @@ const webAppHTML = `<!doctype html>
       const selectionMemoBtnEl = document.getElementById("memoSelectionMemoBtn");
       const selectionSearchBtnEl = document.getElementById("memoSelectionSearchBtn");
       const selectionCopyBtnEl = document.getElementById("memoSelectionCopyBtn");
+      const trashEl = document.getElementById("memoTrash");
+      const trashToggleEl = document.getElementById("memoTrashToggle");
+      const trashCountEl = document.getElementById("memoTrashCount");
+      const trashListEl = document.getElementById("memoTrashList");
+      const trashEmptyBtnEl = document.getElementById("memoTrashEmptyBtn");
       if (!listEl || !areaEl || !titleEl) return;
 
       const LS_KEY = "mdviewer.memos";
       const LS_LEGACY = "mdviewer.memo";
       const LS_SORT = "mdviewer.memoSort";
+      const LS_TRASH = "mdviewer.memoTrash";
       const m = {
         memos: [], activeId: null, dirty: new Set(), syncTimer: null,
         filter: "", sort: "updated",
+        trash: [], trashOpen: false,   // local-only recovery buffer (not synced)
         base: {},            // id -> updatedAt we last knew the server had (conflict baseline)
         conflicts: {},       // id -> { id, kind:"edit"|"deleted", mine, theirs }
         pulling: false, pushing: false, resolving: false,
@@ -7169,6 +7279,13 @@ const webAppHTML = `<!doctype html>
         try { const v = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); return Array.isArray(v) ? v : []; }
         catch (e) { return []; }
       }
+      function persistTrash() {
+        try { localStorage.setItem(LS_TRASH, JSON.stringify(m.trash)); } catch (e) {}
+      }
+      function loadTrash() {
+        try { const v = JSON.parse(localStorage.getItem(LS_TRASH) || "[]"); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+      }
       function setSyncState(s) { if (syncStateEl) syncStateEl.textContent = s || ""; }
 
       function renderList() {
@@ -7233,6 +7350,83 @@ const webAppHTML = `<!doctype html>
         if (emptyEl) emptyEl.hidden = has;
         if (editorEl) editorEl.hidden = !has;
         if (noMatchEl) noMatchEl.hidden = !(has && view.length === 0);
+        renderTrash();
+      }
+
+      // ── trash (local recovery buffer) ──
+      function renderTrash() {
+        if (!trashEl) return;
+        const n = m.trash.length;
+        const open = m.trashOpen && n > 0;
+        trashEl.hidden = (n === 0);
+        trashEl.classList.toggle("open", open);
+        if (trashCountEl) trashCountEl.textContent = String(n);
+        if (trashToggleEl) trashToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+        if (trashListEl) trashListEl.hidden = !open;
+        if (!trashListEl) return;
+        trashListEl.innerHTML = "";
+        if (!open) return;
+        for (const memo of m.trash) {
+          const item = document.createElement("div");
+          item.className = "memo-trash-item";
+          const main = document.createElement("div");
+          main.className = "memo-trash-item-main";
+          const title = document.createElement("div");
+          title.className = "memo-trash-item-title";
+          title.textContent = displayName(memo).text;
+          const time = document.createElement("div");
+          time.className = "memo-trash-item-time";
+          time.textContent = "삭제됨 · " + relTime(memo.deletedAt);
+          main.appendChild(title);
+          main.appendChild(time);
+          const restore = document.createElement("button");
+          restore.type = "button";
+          restore.className = "memo-trash-btn restore";
+          restore.title = "복원";
+          restore.textContent = "↩";
+          restore.addEventListener("click", function () { restoreMemo(memo.id); });
+          const purge = document.createElement("button");
+          purge.type = "button";
+          purge.className = "memo-trash-btn purge";
+          purge.title = "영구 삭제";
+          purge.textContent = "×";
+          purge.addEventListener("click", function () { purgeMemo(memo.id); });
+          item.appendChild(main);
+          item.appendChild(restore);
+          item.appendChild(purge);
+          trashListEl.appendChild(item);
+        }
+      }
+      function restoreMemo(id) {
+        const idx = m.trash.findIndex(function (x) { return x.id === id; });
+        if (idx === -1) return;
+        const memo = cloneMemo(m.trash[idx]); // cloneMemo drops the deletedAt marker
+        memo.updatedAt = nowISO();            // fresh stamp so it re-syncs to the server
+        m.trash.splice(idx, 1);
+        if (!getMemo(memo.id)) m.memos.unshift(memo);
+        m.dirty.add(memo.id);
+        delete m.base[memo.id];               // treat as new on the server
+        persistTrash();
+        persistLocal();
+        setActive(memo.id);                   // re-renders list + trash
+        scheduleSync();
+        showToast("메모를 복원했어요", { kind: "ok", icon: "↩" });
+      }
+      function purgeMemo(id) {
+        const memo = m.trash.find(function (x) { return x.id === id; });
+        if (!memo) return;
+        if (!window.confirm("이 메모를 영구 삭제할까요?")) return;
+        m.trash = m.trash.filter(function (x) { return x.id !== id; });
+        persistTrash();
+        renderTrash();
+      }
+      function emptyTrash() {
+        if (!m.trash.length) return;
+        if (!window.confirm("휴지통의 메모 " + m.trash.length + "개를 영구 삭제할까요?")) return;
+        m.trash = [];
+        persistTrash();
+        renderTrash();
+        showToast("휴지통을 비웠어요", { kind: "ok", icon: "🗑" });
       }
 
       function syncActiveEditor() {
@@ -7333,15 +7527,25 @@ const webAppHTML = `<!doctype html>
       }
 
       async function deleteMemo(id) {
-        if (!window.confirm("이 메모를 삭제할까요?")) return;
+        const memo = getMemo(id);
+        if (!memo) return;
+        // Move to the local trash instead of deleting outright — recoverable
+        // until the user empties the trash. No confirm: it is non-destructive.
+        const trashed = cloneMemo(memo);
+        trashed.deletedAt = nowISO();
+        m.trash.unshift(trashed);
         m.memos = m.memos.filter(function (x) { return x.id !== id; });
         m.dirty.delete(id);
         delete m.base[id];
         delete m.conflicts[id];
         if (m.activeId === id) m.activeId = m.memos[0] ? m.memos[0].id : null;
         persistLocal();
+        persistTrash();
         renderList();
         syncActiveEditor();
+        showToast("휴지통으로 이동했어요", { kind: "ok", icon: "🗑" });
+        // Remove from the server too, so other sessions also drop it. The trash
+        // is local-only; restoring re-pushes the memo as new.
         try {
           await fetch("/api/memos/delete", {
             method: "POST",
@@ -7812,6 +8016,9 @@ const webAppHTML = `<!doctype html>
       if (sortCreatedEl) sortCreatedEl.addEventListener("click", function () { applyMemoSort("created"); });
       if (sortTitleEl) sortTitleEl.addEventListener("click", function () { applyMemoSort("title"); });
 
+      if (trashToggleEl) trashToggleEl.addEventListener("click", function () { m.trashOpen = !m.trashOpen; renderTrash(); });
+      if (trashEmptyBtnEl) trashEmptyBtnEl.addEventListener("click", emptyTrash);
+
       if (copyBtnEl) {
         copyBtnEl.addEventListener("click", async function () {
           const memo = getMemo(m.activeId);
@@ -7859,6 +8066,7 @@ const webAppHTML = `<!doctype html>
       try { m.sort = localStorage.getItem(LS_SORT) || "updated"; } catch (e) {}
       if (m.sort !== "created" && m.sort !== "title") m.sort = "updated";
       m.memos = loadLocal();
+      m.trash = loadTrash();
       // One-time migration of the old single-memo scratchpad.
       if (!m.memos.length) {
         let legacy = "";
