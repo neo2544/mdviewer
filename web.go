@@ -1296,6 +1296,9 @@ const webAppHTML = `<!doctype html>
     .file-name {
       max-width: calc(100% - var(--file-meta-width));
     }
+    /* AI-DLC "folder/file" labels: muted path, bold filename. */
+    .file-name .fn-dir { color: var(--muted); font-weight: 400; }
+    .file-name .fn-base { color: var(--text); font-weight: 700; }
     .file-meta {
       display: grid;
       grid-template-columns: 7px auto;
@@ -1357,13 +1360,13 @@ const webAppHTML = `<!doctype html>
     }
     .section {
       border-top: 1px solid color-mix(in oklab, var(--line) 80%, transparent);
-      padding: 14px 12px 16px;
+      padding: 8px 12px 9px;
     }
     .section-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 10px;
+      margin-bottom: 6px;
       padding: 0 8px;
     }
     .section-title {
@@ -4666,6 +4669,17 @@ const webAppHTML = `<!doctype html>
       return escapeHTML(text).replace(pattern, '<span class="file-match">$1</span>');
     }
 
+    // For AI-DLC's "folder/file" labels: dim the folder path, bold the
+    // filename. Plain filenames (no slash) render unchanged.
+    function fileNameHTML(name, query) {
+      const idx = name.lastIndexOf("/");
+      if (idx < 0) return highlightName(name, query);
+      const dir = name.slice(0, idx + 1);
+      const base = name.slice(idx + 1);
+      return '<span class="fn-dir">' + highlightName(dir, query) + '</span>' +
+        '<span class="fn-base">' + highlightName(base, query) + '</span>';
+    }
+
     function shortenFavoritePath(path) {
       if (!path) return "";
       const parts = path.split("/").filter(Boolean);
@@ -5208,7 +5222,7 @@ const webAppHTML = `<!doctype html>
           button.dataset.flag = flag;
         }
         button.innerHTML = '<span class="file-name"></span><span class="file-meta"><span class="update-badge"></span><span class="file-size"></span></span>';
-        button.querySelector(".file-name").innerHTML = highlightName(entry.name, state.searchQuery.trim());
+        button.querySelector(".file-name").innerHTML = fileNameHTML(entry.name, state.searchQuery.trim());
         button.querySelector(".file-size").textContent = entry.is_dir ? "" : (function () {
           const t = entryModTimestamp(entry);
           return t ? relativeTime(t) : "";
