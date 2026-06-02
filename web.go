@@ -78,6 +78,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/list-recursive", s.handleListRecursive)
 	mux.HandleFunc("/api/git/remotes", s.handleGitRemotes)
 	mux.HandleFunc("/api/git/root", s.handleGitRoot)
+	mux.HandleFunc("/api/aidlc", s.handleAidlc)
 	mux.HandleFunc("/api/version", s.handleVersion)
 	mux.HandleFunc("/api/version/check", s.handleVersionCheck)
 	mux.HandleFunc("/api/update", s.handleUpdate)
@@ -1384,6 +1385,9 @@ const webAppHTML = `<!doctype html>
     }
     .section-toggle:hover .section-chevron { color: var(--accent); }
     .section-toggle .section-title { color: var(--accent); font-weight: 600; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+    .aidlc-count { color: var(--accent-2); font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in oklab, var(--accent-2) 14%, transparent); }
+    .aidlc-section .section-toggle .section-title { color: var(--accent-2); }
+    .aidlc-section .section-toggle:hover .section-chevron { color: var(--accent-2); }
     .section-chevron {
       display: inline-block;
       width: 12px;
@@ -3491,6 +3495,18 @@ const webAppHTML = `<!doctype html>
         </div>
         <div id="files"></div>
       </div>
+      <div class="section aidlc-section" data-section="aidlc" hidden>
+        <div class="section-head">
+          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
+            <span class="section-chevron">▾</span>
+            <span class="section-title">AI-DLC</span>
+          </button>
+          <div class="section-actions">
+            <span class="aidlc-count" id="aidlcCount"></span>
+          </div>
+        </div>
+        <div class="section-list" id="aidlcList"></div>
+      </div>
       <div class="section" data-section="recentFiles">
         <div class="section-head">
           <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
@@ -3909,6 +3925,9 @@ const webAppHTML = `<!doctype html>
       fbScope: (localStorage.getItem("mdviewer.fbScope") === "git") ? "git" : "folder",
       gitRepoRoot: null, // null = unknown, "" = not a repo, else repo root path
       gitRepoCwd: null,  // cwd the gitRepoRoot was resolved for
+      // AI-DLC mode: available only when the repo root holds an aidlc-docs folder.
+      aidlc: { available: false, root: "", dir: "", files: [] },
+      aidlcCwd: null,    // cwd the AI-DLC list was last resolved for
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
@@ -3923,6 +3942,7 @@ const webAppHTML = `<!doctype html>
       })(),
       searchInFileFocus: -1,  // index of the currently emphasized hit
       sectionCollapsed: {
+        aidlc:       localStorage.getItem("mdviewer.section.aidlc.collapsed") === "1",
         recentFiles: localStorage.getItem("mdviewer.section.recentFiles.collapsed") === "1",
         recentDirs:  localStorage.getItem("mdviewer.section.recentDirs.collapsed") === "1",
         favorites:   localStorage.getItem("mdviewer.section.favorites.collapsed") === "1",
@@ -3935,6 +3955,9 @@ const webAppHTML = `<!doctype html>
     const appShellEl = document.getElementById("appShell");
     const filesEl = document.getElementById("files");
     const favoritesEl = document.getElementById("favorites");
+    const aidlcSectionEl = document.querySelector('.section[data-section="aidlc"]');
+    const aidlcListEl = document.getElementById("aidlcList");
+    const aidlcCountEl = document.getElementById("aidlcCount");
     const recentFilesEl = document.getElementById("recentFiles");
     const recentDirsEl = document.getElementById("recentDirs");
     const searchInputEl = document.getElementById("searchInput");
@@ -4031,6 +4054,7 @@ const webAppHTML = `<!doctype html>
     }
 
     function applyAllSectionLayouts() {
+      applySectionLayout("aidlc");
       applySectionLayout("recentFiles");
       applySectionLayout("recentDirs");
       applySectionLayout("favorites");
@@ -4743,6 +4767,9 @@ const webAppHTML = `<!doctype html>
       state.cwd = data.cwd;
       refreshGitRemote();
       refreshGitScope();
+      // Refresh the AI-DLC list when the working dir actually changes (skip the
+      // 2.5s silent polls, which would otherwise hammer git on every tick).
+      if (state.cwd !== state.aidlcCwd) refreshAidlc();
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
@@ -5106,6 +5133,50 @@ const webAppHTML = `<!doctype html>
       }
     }
 
+    // AI-DLC mode: fetch the file list under <gitroot>/aidlc-docs (if present).
+    // The list is sorted by the server most-recently-modified first.
+    async function refreshAidlc() {
+      try {
+        const r = await fetch("/api/aidlc?dir=" + encodeURIComponent(state.cwd || ""));
+        if (!r.ok) { state.aidlc = { available: false, root: "", dir: "", files: [] }; renderAidlc(); return; }
+        const data = await r.json();
+        state.aidlc = {
+          available: !!(data && data.available),
+          root: (data && data.root) || "",
+          dir: (data && data.dir) || "",
+          files: (data && Array.isArray(data.files)) ? data.files : [],
+        };
+        state.aidlcCwd = state.cwd;
+      } catch (e) {
+        state.aidlc = { available: false, root: "", dir: "", files: [] };
+      }
+      renderAidlc();
+    }
+
+    function renderAidlc() {
+      if (!aidlcSectionEl) return;
+      if (!state.aidlc || !state.aidlc.available) {
+        aidlcSectionEl.hidden = true;
+        return;
+      }
+      aidlcSectionEl.hidden = false;
+      const files = state.aidlc.files || [];
+      if (aidlcCountEl) aidlcCountEl.textContent = files.length ? String(files.length) : "";
+      const items = files.map(function (f) {
+        return {
+          path: f.path,
+          name: f.name,
+          openedAt: f.mod_time ? new Date(f.mod_time).getTime() : 0,
+        };
+      });
+      renderRecentList(aidlcListEl, items, function (item) {
+        selectFile(item.path, { historyMode: "push" });
+      }, {
+        activeWhen: function (item) { return item.path === state.selectedPath; },
+        emptyText: "No AI-DLC docs",
+      });
+    }
+
     function toggleShowAll(buttonId, totalCount) {
       const btn = document.getElementById(buttonId);
       if (!btn) return;
@@ -5458,6 +5529,7 @@ const webAppHTML = `<!doctype html>
       clearFileFlag(path, data.mod_time);
       addRecentFile(path, data.name, data.kind, data.mod_time);
       renderFiles(state.entries);
+      renderAidlc();
       previewTitleEl.textContent = data.name;
       previewTitleEl.classList.add("copyable");
       previewTitleEl.title = "클릭하면 파일 이름 복사";
@@ -10312,6 +10384,83 @@ func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	root := s.gitRoot(r.Context(), abs)
 	s.writeJSON(w, http.StatusOK, map[string]any{"root": root, "isRepo": root != ""})
+}
+
+// handleAidlc powers the "AI-DLC" sidebar mode. The mode is available only when
+// the enclosing git repo root contains an aidlc-docs folder; when it does, this
+// lists every file beneath that folder, most-recently-modified first.
+func (s *webServer) handleAidlc(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.startDir
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	root := s.gitRoot(r.Context(), abs)
+	if root == "" {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	aidlcDir := filepath.Join(root, "aidlc-docs")
+	if info, serr := os.Stat(aidlcDir); serr != nil || !info.IsDir() {
+		s.writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+
+	const maxFiles = 5000
+	const maxDepth = 12
+	files := []webEntry{}
+	var walk func(d string, depth int)
+	walk = func(d string, depth int) {
+		if depth > maxDepth || len(files) >= maxFiles {
+			return
+		}
+		entries, rerr := os.ReadDir(d)
+		if rerr != nil {
+			return
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			full := filepath.Join(d, entry.Name())
+			if entry.IsDir() {
+				walk(full, depth+1)
+				continue
+			}
+			var size int64
+			var modTime string
+			if fi, ierr := entry.Info(); ierr == nil {
+				size = fi.Size()
+				modTime = fi.ModTime().Format(time.RFC3339)
+			}
+			files = append(files, webEntry{
+				Name:    entry.Name(),
+				Path:    full,
+				IsDir:   false,
+				Size:    size,
+				ModTime: modTime,
+			})
+			if len(files) >= maxFiles {
+				return
+			}
+		}
+	}
+	walk(aidlcDir, 0)
+	// Default ordering: most recently updated first. RFC3339 timestamps from the
+	// same machine share an offset, so a string compare orders them correctly.
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].ModTime > files[j].ModTime
+	})
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"available": true,
+		"root":      root,
+		"dir":       aidlcDir,
+		"files":     files,
+	})
 }
 
 // ── Self-update (mdviewer app) ──────────────────────────────────────────
