@@ -1387,25 +1387,54 @@ const webAppHTML = `<!doctype html>
     .section-toggle .section-title { color: var(--accent); font-weight: 600; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
     .aidlc-toggle {
       flex: 0 0 auto;
-      border: 1px solid color-mix(in oklab, var(--accent-2) 45%, var(--line));
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
       background: transparent;
-      color: var(--accent-2);
+      color: var(--muted);
       font-size: 10px;
       font-weight: 700;
       letter-spacing: .08em;
       text-transform: uppercase;
-      padding: 2px 9px;
+      padding: 3px 8px 3px 5px;
       border-radius: 999px;
       cursor: pointer;
       white-space: nowrap;
-      transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
     }
-    .aidlc-toggle:hover { background: color-mix(in oklab, var(--accent-2) 12%, transparent); }
+    /* Sliding switch: knob sits left + track grey when OFF, slides right + track
+       accent-2 when ON. Paired with the OFF/ON word for an unambiguous state. */
+    .aidlc-switch {
+      position: relative;
+      flex: 0 0 auto;
+      width: 22px;
+      height: 12px;
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--muted) 55%, transparent);
+      transition: background 140ms ease;
+    }
+    .aidlc-knob {
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+      transition: transform 140ms ease;
+    }
+    .aidlc-toggle-state { font-variant-numeric: tabular-nums; opacity: .85; }
+    .aidlc-toggle:hover { border-color: color-mix(in oklab, var(--accent-2) 40%, var(--line)); }
     .aidlc-toggle.active {
-      background: color-mix(in oklab, var(--accent-2) 18%, var(--panel-2));
-      border-color: color-mix(in oklab, var(--accent-2) 60%, var(--line));
       color: var(--accent-2);
+      border-color: color-mix(in oklab, var(--accent-2) 60%, var(--line));
+      background: color-mix(in oklab, var(--accent-2) 16%, var(--panel-2));
     }
+    .aidlc-toggle.active .aidlc-switch { background: var(--accent-2); }
+    .aidlc-toggle.active .aidlc-knob { transform: translateX(10px); }
+    .aidlc-toggle.active .aidlc-toggle-state { opacity: 1; }
     .section-chevron {
       display: inline-block;
       width: 12px;
@@ -3508,7 +3537,7 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="pane">
         <div class="file-header">
-          <button class="aidlc-toggle" id="aidlcToggle" type="button" aria-pressed="false" hidden title="AI-DLC 문서 전체를 최근 수정순으로 보기">AI-DLC</button>
+          <button class="aidlc-toggle" id="aidlcToggle" type="button" role="switch" aria-checked="false" hidden title="AI-DLC 문서 전체를 최근 수정순으로 보기"><span class="aidlc-switch"><span class="aidlc-knob"></span></span><span class="aidlc-toggle-text">AI-DLC</span><span class="aidlc-toggle-state">OFF</span></button>
           <button class="header-button active" id="sortName" data-direction="asc" type="button">Name</button>
           <button class="header-button size-col" id="sortMod" data-direction="asc" type="button">Updated</button>
         </div>
@@ -5200,9 +5229,10 @@ const webAppHTML = `<!doctype html>
       aidlcToggleEl.hidden = !avail;
       const on = avail && state.aidlcMode;
       aidlcToggleEl.classList.toggle("active", on);
-      aidlcToggleEl.setAttribute("aria-pressed", on ? "true" : "false");
+      aidlcToggleEl.setAttribute("aria-checked", on ? "true" : "false");
       const n = (state.aidlc && state.aidlc.files) ? state.aidlc.files.length : 0;
-      aidlcToggleEl.textContent = on ? ("AI-DLC " + n) : "AI-DLC";
+      const stateEl = aidlcToggleEl.querySelector(".aidlc-toggle-state");
+      if (stateEl) stateEl.textContent = on ? ("ON · " + n) : "OFF";
     }
 
     // renderFilePane draws the sidebar file list — the AI-DLC document list when
