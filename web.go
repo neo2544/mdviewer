@@ -1385,9 +1385,27 @@ const webAppHTML = `<!doctype html>
     }
     .section-toggle:hover .section-chevron { color: var(--accent); }
     .section-toggle .section-title { color: var(--accent); font-weight: 600; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
-    .aidlc-count { color: var(--accent-2); font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in oklab, var(--accent-2) 14%, transparent); }
-    .aidlc-section .section-toggle .section-title { color: var(--accent-2); }
-    .aidlc-section .section-toggle:hover .section-chevron { color: var(--accent-2); }
+    .aidlc-toggle {
+      flex: 0 0 auto;
+      border: 1px solid color-mix(in oklab, var(--accent-2) 45%, var(--line));
+      background: transparent;
+      color: var(--accent-2);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 2px 9px;
+      border-radius: 999px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    }
+    .aidlc-toggle:hover { background: color-mix(in oklab, var(--accent-2) 12%, transparent); }
+    .aidlc-toggle.active {
+      background: color-mix(in oklab, var(--accent-2) 18%, var(--panel-2));
+      border-color: color-mix(in oklab, var(--accent-2) 60%, var(--line));
+      color: var(--accent-2);
+    }
     .section-chevron {
       display: inline-block;
       width: 12px;
@@ -3490,22 +3508,11 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="pane">
         <div class="file-header">
+          <button class="aidlc-toggle" id="aidlcToggle" type="button" aria-pressed="false" hidden title="AI-DLC 문서 전체를 최근 수정순으로 보기">AI-DLC</button>
           <button class="header-button active" id="sortName" data-direction="asc" type="button">Name</button>
           <button class="header-button size-col" id="sortMod" data-direction="asc" type="button">Updated</button>
         </div>
         <div id="files"></div>
-      </div>
-      <div class="section aidlc-section" data-section="aidlc" hidden>
-        <div class="section-head">
-          <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
-            <span class="section-chevron">▾</span>
-            <span class="section-title">AI-DLC</span>
-          </button>
-          <div class="section-actions">
-            <span class="aidlc-count" id="aidlcCount"></span>
-          </div>
-        </div>
-        <div class="section-list" id="aidlcList"></div>
       </div>
       <div class="section" data-section="recentFiles">
         <div class="section-head">
@@ -3926,8 +3933,14 @@ const webAppHTML = `<!doctype html>
       gitRepoRoot: null, // null = unknown, "" = not a repo, else repo root path
       gitRepoCwd: null,  // cwd the gitRepoRoot was resolved for
       // AI-DLC mode: available only when the repo root holds an aidlc-docs folder.
+      // When ON, the file pane shows every aidlc-docs file (recursive), sorted
+      // most-recently-updated first. aidlcWanted is the user's persisted intent;
+      // aidlcMode is whether it's actually active (intent AND available).
       aidlc: { available: false, root: "", dir: "", files: [] },
       aidlcCwd: null,    // cwd the AI-DLC list was last resolved for
+      aidlcWanted: localStorage.getItem("mdviewer.aidlcMode") === "1",
+      aidlcMode: false,
+      aidlcPrevSort: null, // sort to restore when leaving AI-DLC mode
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
       sidebarCollapsed: localStorage.getItem("mdviewer.sidebarCollapsed") === "1",
@@ -3942,7 +3955,6 @@ const webAppHTML = `<!doctype html>
       })(),
       searchInFileFocus: -1,  // index of the currently emphasized hit
       sectionCollapsed: {
-        aidlc:       localStorage.getItem("mdviewer.section.aidlc.collapsed") === "1",
         recentFiles: localStorage.getItem("mdviewer.section.recentFiles.collapsed") === "1",
         recentDirs:  localStorage.getItem("mdviewer.section.recentDirs.collapsed") === "1",
         favorites:   localStorage.getItem("mdviewer.section.favorites.collapsed") === "1",
@@ -3955,9 +3967,7 @@ const webAppHTML = `<!doctype html>
     const appShellEl = document.getElementById("appShell");
     const filesEl = document.getElementById("files");
     const favoritesEl = document.getElementById("favorites");
-    const aidlcSectionEl = document.querySelector('.section[data-section="aidlc"]');
-    const aidlcListEl = document.getElementById("aidlcList");
-    const aidlcCountEl = document.getElementById("aidlcCount");
+    const aidlcToggleEl = document.getElementById("aidlcToggle");
     const recentFilesEl = document.getElementById("recentFiles");
     const recentDirsEl = document.getElementById("recentDirs");
     const searchInputEl = document.getElementById("searchInput");
@@ -4054,7 +4064,6 @@ const webAppHTML = `<!doctype html>
     }
 
     function applyAllSectionLayouts() {
-      applySectionLayout("aidlc");
       applySectionLayout("recentFiles");
       applySectionLayout("recentDirs");
       applySectionLayout("favorites");
@@ -4792,7 +4801,7 @@ const webAppHTML = `<!doctype html>
       }
       cwdEl.textContent = shortenDisplayPath(state.cwd);
       cwdEl.dataset.path = state.cwd;
-      renderFiles(data.entries);
+      renderFilePane();
       renderFavorites();
       updateToggleFavoriteLabel();
       // Record visited directory in MRU (skip silent background loads to
@@ -5138,7 +5147,7 @@ const webAppHTML = `<!doctype html>
     async function refreshAidlc() {
       try {
         const r = await fetch("/api/aidlc?dir=" + encodeURIComponent(state.cwd || ""));
-        if (!r.ok) { state.aidlc = { available: false, root: "", dir: "", files: [] }; renderAidlc(); return; }
+        if (!r.ok) throw 0;
         const data = await r.json();
         state.aidlc = {
           available: !!(data && data.available),
@@ -5150,31 +5159,60 @@ const webAppHTML = `<!doctype html>
       } catch (e) {
         state.aidlc = { available: false, root: "", dir: "", files: [] };
       }
-      renderAidlc();
+      applyAidlcMode();
+      updateAidlcToggle();
+      renderFilePane();
     }
 
-    function renderAidlc() {
-      if (!aidlcSectionEl) return;
-      if (!state.aidlc || !state.aidlc.available) {
-        aidlcSectionEl.hidden = true;
-        return;
+    // applyAidlcMode reconciles state.aidlcMode with the user's intent and the
+    // current availability. Entering AI-DLC mode switches the sort to
+    // updated-desc (newest first) and remembers the previous sort so it can be
+    // restored on exit. Returns true when the active mode actually changed.
+    function applyAidlcMode() {
+      const avail = !!(state.aidlc && state.aidlc.available);
+      const desired = avail && state.aidlcWanted;
+      if (desired === state.aidlcMode) return false;
+      if (desired) {
+        state.aidlcPrevSort = { key: state.sortKey, dir: state.sortDirection };
+        state.sortKey = "mod";
+        state.sortDirection = "desc";
+      } else if (state.aidlcPrevSort) {
+        state.sortKey = state.aidlcPrevSort.key;
+        state.sortDirection = state.aidlcPrevSort.dir;
+        state.aidlcPrevSort = null;
       }
-      aidlcSectionEl.hidden = false;
-      const files = state.aidlc.files || [];
-      if (aidlcCountEl) aidlcCountEl.textContent = files.length ? String(files.length) : "";
-      const items = files.map(function (f) {
-        return {
-          path: f.path,
-          name: f.name,
-          openedAt: f.mod_time ? new Date(f.mod_time).getTime() : 0,
-        };
-      });
-      renderRecentList(aidlcListEl, items, function (item) {
-        selectFile(item.path, { historyMode: "push" });
-      }, {
-        activeWhen: function (item) { return item.path === state.selectedPath; },
-        emptyText: "No AI-DLC docs",
-      });
+      state.aidlcMode = desired;
+      updateSortButtons();
+      return true;
+    }
+
+    function toggleAidlcMode() {
+      state.aidlcWanted = !state.aidlcWanted;
+      try { localStorage.setItem("mdviewer.aidlcMode", state.aidlcWanted ? "1" : "0"); } catch (e) {}
+      applyAidlcMode();
+      updateAidlcToggle();
+      renderFilePane();
+    }
+
+    function updateAidlcToggle() {
+      if (!aidlcToggleEl) return;
+      const avail = !!(state.aidlc && state.aidlc.available);
+      aidlcToggleEl.hidden = !avail;
+      const on = avail && state.aidlcMode;
+      aidlcToggleEl.classList.toggle("active", on);
+      aidlcToggleEl.setAttribute("aria-pressed", on ? "true" : "false");
+      const n = (state.aidlc && state.aidlc.files) ? state.aidlc.files.length : 0;
+      aidlcToggleEl.textContent = on ? ("AI-DLC " + n) : "AI-DLC";
+    }
+
+    // renderFilePane draws the sidebar file list — the AI-DLC document list when
+    // that mode is active, otherwise the current directory.
+    function renderFilePane() {
+      if (state.aidlcMode && state.aidlc && state.aidlc.available) {
+        renderFiles(state.aidlc.files || []);
+      } else {
+        renderFiles(state.entries);
+      }
     }
 
     function toggleShowAll(buttonId, totalCount) {
@@ -5507,7 +5545,7 @@ const webAppHTML = `<!doctype html>
       if (!state.cwd || !path.startsWith(state.cwd + "/")) {
         await loadDir(path.replace(/\/[^/]*$/, ""), { keepSelection: true });
       }
-      renderFiles(state.entries);
+      renderFilePane();
       let data;
       try {
         data = await fetchJSON("/api/file?path=" + encodeURIComponent(path));
@@ -5528,8 +5566,7 @@ const webAppHTML = `<!doctype html>
       }
       clearFileFlag(path, data.mod_time);
       addRecentFile(path, data.name, data.kind, data.mod_time);
-      renderFiles(state.entries);
-      renderAidlc();
+      renderFilePane();
       previewTitleEl.textContent = data.name;
       previewTitleEl.classList.add("copyable");
       previewTitleEl.title = "클릭하면 파일 이름 복사";
@@ -6371,7 +6408,7 @@ const webAppHTML = `<!doctype html>
       previewMetaEl.textContent = new Date(data.mod_time).toLocaleString() + " · " + humanSize(data.size);
       clearFileFlag(state.selectedPath, data.mod_time);
       await loadDir(state.cwd, { keepSelection: true, silent: true });
-      renderFiles(state.entries);
+      renderFilePane();
       updateEditorButtons();
       statusTextEl.textContent = "Saved " + data.name;
       if (state.editorMode === "preview") {
@@ -7815,8 +7852,11 @@ const webAppHTML = `<!doctype html>
     }
     searchInputEl.addEventListener("input", (event) => {
       state.searchQuery = event.target.value || "";
-      renderFiles(state.entries);
+      renderFilePane();
     });
+    if (aidlcToggleEl) {
+      aidlcToggleEl.addEventListener("click", toggleAidlcMode);
+    }
     sortNameEl.addEventListener("click", () => {
       if (state.sortKey === "name") {
         state.sortDirection = state.sortDirection === "asc" ? "desc" : "asc";
@@ -7825,7 +7865,7 @@ const webAppHTML = `<!doctype html>
         state.sortDirection = "asc";
       }
       updateSortButtons();
-      renderFiles(state.entries);
+      renderFilePane();
     });
     sortModEl.addEventListener("click", () => {
       if (state.sortKey === "mod") {
@@ -7835,7 +7875,7 @@ const webAppHTML = `<!doctype html>
         state.sortDirection = "desc";
       }
       updateSortButtons();
-      renderFiles(state.entries);
+      renderFilePane();
     });
 
     // ---------- Mermaid Playground modal ----------
