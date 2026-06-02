@@ -3734,6 +3734,7 @@ const webAppHTML = `<!doctype html>
   </div>
   <div class="memo-selection-bar" id="memoSelectionBar" hidden>
     <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모</button>
+    <button type="button" class="memo-selection-btn" id="memoSelectionSearchBtn">🔍 검색</button>
     <button type="button" class="memo-selection-btn" id="memoSelectionCopyBtn">📋 복사</button>
   </div>
   <div class="popup-modal" id="listPopup" hidden>
@@ -7086,6 +7087,7 @@ const webAppHTML = `<!doctype html>
       const backlinkEl = document.getElementById("memoBacklink");
       const selectionBarEl = document.getElementById("memoSelectionBar");
       const selectionMemoBtnEl = document.getElementById("memoSelectionMemoBtn");
+      const selectionSearchBtnEl = document.getElementById("memoSelectionSearchBtn");
       const selectionCopyBtnEl = document.getElementById("memoSelectionCopyBtn");
       if (!listEl || !areaEl || !titleEl) return;
 
@@ -7759,6 +7761,25 @@ const webAppHTML = `<!doctype html>
             const src = nearestHeadingForRange(s.range) || {};
             src.path = state.selectedPath || "";
             createMemoFromSelection(s.text, src);
+            // Surface the new memo: reveal the panel and switch to the Memo tab.
+            if (state.searchPanelCollapsed) { state.searchPanelCollapsed = false; applySearchPanelCollapsed(); }
+            setPanelTab("memo");
+            hideSelectionBtn();
+            if (window.getSelection) window.getSelection().removeAllRanges();
+          });
+        }
+        if (selectionSearchBtnEl) {
+          selectionSearchBtnEl.addEventListener("click", function () {
+            const s = currentPreviewSelection();
+            if (!s) { hideSelectionBtn(); return; }
+            const q = s.text.replace(/\s+/g, " ").trim();
+            // Reveal the panel, switch to Search, and run the query for the selection.
+            if (state.searchPanelCollapsed) { state.searchPanelCollapsed = false; applySearchPanelCollapsed(); }
+            setPanelTab("search");
+            if (searchPanelInputEl) searchPanelInputEl.value = q;
+            state.searchQueryRight = q;
+            runInFileSearch(q);
+            runFolderSearch(q);
             hideSelectionBtn();
             if (window.getSelection) window.getSelection().removeAllRanges();
           });
