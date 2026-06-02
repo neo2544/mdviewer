@@ -1385,6 +1385,10 @@ const webAppHTML = `<!doctype html>
     }
     .section-toggle:hover .section-chevron { color: var(--accent); }
     .section-toggle .section-title { color: var(--accent); font-weight: 600; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+    /* display:inline-flex below would otherwise defeat the [hidden] attribute
+       (author display wins over the UA [hidden]{display:none}), keeping the
+       switch visible even when no aidlc-docs folder exists. Restore hiding. */
+    .aidlc-toggle[hidden] { display: none; }
     .aidlc-toggle {
       flex: 0 0 auto;
       display: inline-flex;
