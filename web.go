@@ -2568,26 +2568,24 @@ const webAppHTML = `<!doctype html>
     .vcompare-body {
       flex: 1 1 auto;
       min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .vcompare-heads {
+      flex: 0 0 auto;
       display: grid;
       grid-template-columns: 1fr 1fr;
     }
-    .vcompare-pane {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      min-height: 0;
-      border-right: 1px solid var(--line);
-    }
-    .vcompare-pane:last-child { border-right: none; }
     .vcompare-pane-head {
-      flex: 0 0 auto;
       display: flex;
       align-items: center;
       gap: 8px;
+      min-width: 0;
       padding: 8px 12px;
       border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
       background: color-mix(in oklab, var(--panel-2) 50%, transparent);
     }
+    .vcompare-pane-head + .vcompare-pane-head { border-left: 1px solid var(--line); }
     .vcompare-pane-label { font-size: 11px; font-weight: 700; letter-spacing: .03em; flex: 0 0 auto; }
     .vcompare-pane-label.before { color: color-mix(in oklab, #e6604f 70%, var(--muted)); }
     .vcompare-pane-label.after { color: color-mix(in oklab, var(--accent-2) 80%, var(--muted)); }
@@ -2603,19 +2601,37 @@ const webAppHTML = `<!doctype html>
       outline: none;
     }
     .vcompare-select:focus { border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2)); }
-    .vcompare-pane-body {
+    /* Single synchronized scroll area: a 4-column grid (lnL · codeL · lnR · codeR).
+       Each diff row spans one grid row so the two sides always stay aligned. */
+    .vcompare-diff {
       flex: 1 1 auto;
       min-height: 0;
-      height: auto;
       overflow: auto;
+      display: grid;
+      grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+      align-content: start;
+      font: 12.5px/1.55 ui-monospace, SFMono-Regular, monospace;
+      tab-size: 4;
     }
-    .vcompare-pane-body pre.vcompare-raw {
-      margin: 0;
+    .vcd-ln {
+      padding: 0 8px;
+      text-align: right;
+      color: color-mix(in oklab, var(--muted) 80%, transparent);
+      user-select: none;
+      white-space: nowrap;
+      border-right: 1px solid color-mix(in oklab, var(--line) 40%, transparent);
+    }
+    .vcd-code {
+      padding: 0 10px;
       white-space: pre-wrap;
       word-break: break-word;
-      font: 12.5px/1.6 ui-monospace, SFMono-Regular, monospace;
+      overflow-wrap: anywhere;
     }
-    .vcompare-empty { color: var(--muted); font-size: 12px; padding: 12px; }
+    .vcd-ln.side-r { border-left: 1px solid var(--line); }
+    .vcd-del.side-l, .vcd-chg.side-l { background: color-mix(in oklab, #e0533f 16%, transparent); }
+    .vcd-add.side-r, .vcd-chg.side-r { background: color-mix(in oklab, #3fb950 18%, transparent); }
+    .vcd-empty { background: color-mix(in oklab, var(--muted) 7%, transparent); }
+    .vcompare-empty { color: var(--muted); font-size: 12px; padding: 12px; grid-column: 1 / -1; }
     /* .action sets display:inline-flex, which would defeat the [hidden] attr. */
     #versionButton[hidden] { display: none; }
 
@@ -3323,6 +3339,17 @@ const webAppHTML = `<!doctype html>
       pointer-events: none;
     }
     .lb-select-box[hidden] { display: none; }
+    /* Selection-style highlight flashed over text that was just copied. */
+    .lb-copy-hl {
+      position: fixed;
+      z-index: 2601;
+      pointer-events: none;
+      background: color-mix(in oklab, var(--accent) 42%, transparent);
+      border-radius: 2px;
+      opacity: 1;
+      transition: opacity 480ms ease;
+    }
+    .lb-copy-hl.fade { opacity: 0; }
     /* ⌥ held over the lightbox stage → box-select cursor (not text I-beam). */
     body.alt-select-mode .lightbox-stage,
     body.alt-select-mode .lightbox-stage * { cursor: crosshair !important; }
@@ -3992,20 +4019,17 @@ const webAppHTML = `<!doctype html>
       <button type="button" class="action icon-only vcompare-close" id="vcompareClose" title="닫기 (Esc)" aria-label="Close">✕</button>
     </div>
     <div class="vcompare-body">
-      <div class="vcompare-pane">
+      <div class="vcompare-heads">
         <div class="vcompare-pane-head">
           <span class="vcompare-pane-label before">◀ 이전 (Before)</span>
           <select class="vcompare-select" id="vcompareSelLeft" aria-label="비교할 이전 버전"></select>
         </div>
-        <div class="vcompare-pane-body preview-body" id="vcompareLeft"></div>
-      </div>
-      <div class="vcompare-pane">
         <div class="vcompare-pane-head">
           <span class="vcompare-pane-label after">이후 (After) ▶</span>
           <select class="vcompare-select" id="vcompareSelRight" aria-label="비교할 이후 버전"></select>
         </div>
-        <div class="vcompare-pane-body preview-body" id="vcompareRight"></div>
       </div>
+      <div class="vcompare-diff" id="vcompareDiff"></div>
     </div>
   </div>
   <div class="lightbox" id="lightbox" hidden>
@@ -5382,11 +5406,21 @@ const webAppHTML = `<!doctype html>
         const r = await fetch("/api/aidlc?dir=" + encodeURIComponent(state.cwd || ""));
         if (!r.ok) throw 0;
         const data = await r.json();
+        const aidlcDir = (data && data.dir) || "";
+        const aidlcFiles = (data && Array.isArray(data.files)) ? data.files : [];
+        // The flat list spans many subfolders, so label each file by its path
+        // relative to aidlc-docs (e.g. "design/components.md") instead of the
+        // bare filename — otherwise files sharing a name are indistinguishable.
+        for (const f of aidlcFiles) {
+          if (aidlcDir && f && f.path && f.path.indexOf(aidlcDir + "/") === 0) {
+            f.name = f.path.slice(aidlcDir.length + 1);
+          }
+        }
         state.aidlc = {
           available: !!(data && data.available),
           root: (data && data.root) || "",
-          dir: (data && data.dir) || "",
-          files: (data && Array.isArray(data.files)) ? data.files : [],
+          dir: aidlcDir,
+          files: aidlcFiles,
         };
         state.aidlcCwd = state.cwd;
       } catch (e) {
@@ -7271,9 +7305,10 @@ const webAppHTML = `<!doctype html>
       btn.hidden = !(state.gitRepoRoot && state.selectedPath);
     }
 
-    // ── Git version compare (before/after split) ──
+    // ── Git version compare (before/after split diff) ──
     // Pick any two revisions of the open file (working copy + each commit) and
-    // view them side by side. Backed by /api/git/filelog and /api/git/show.
+    // view them as a synchronized side-by-side line diff with colored
+    // backgrounds. Backed by /api/git/filelog and /api/git/show.
     (function setupVersionCompare() {
       const overlay = document.getElementById("vcompare");
       const btn = document.getElementById("versionButton");
@@ -7281,12 +7316,12 @@ const webAppHTML = `<!doctype html>
       const titleEl = document.getElementById("vcompareTitle");
       const selLeft = document.getElementById("vcompareSelLeft");
       const selRight = document.getElementById("vcompareSelRight");
-      const leftBody = document.getElementById("vcompareLeft");
-      const rightBody = document.getElementById("vcompareRight");
+      const diffEl = document.getElementById("vcompareDiff");
       if (!overlay || !btn) return;
 
       let entries = [];          // [{value, label}] incl. an optional WORKING row
       let contentCache = {};     // rev -> content string (or null on failure)
+      let renderToken = 0;       // guards against overlapping async renders
 
       async function fetchContent(rev) {
         if (rev in contentCache) return contentCache[rev];
@@ -7300,23 +7335,94 @@ const webAppHTML = `<!doctype html>
         return c;
       }
 
-      async function renderSide(bodyEl, rev) {
-        bodyEl.innerHTML = "<div class='vcompare-empty'>불러오는 중…</div>";
-        const content = await fetchContent(rev);
-        if (content === null) {
-          bodyEl.innerHTML = "<div class='vcompare-empty'>이 버전을 불러올 수 없습니다.</div>";
+      // Myers-style LCS line diff on the changed middle (after trimming the
+      // common prefix/suffix), capped so huge unrelated revisions stay fast.
+      function diffMiddle(a, b) {
+        if (!a.length) return b.map((x) => ({ t: "add", b: x }));
+        if (!b.length) return a.map((x) => ({ t: "del", a: x }));
+        if (a.length * b.length > 4000000) {
+          return a.map((x) => ({ t: "del", a: x })).concat(b.map((x) => ({ t: "add", b: x })));
+        }
+        const n = a.length, m = b.length;
+        const dp = [];
+        for (let i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+        for (let i = n - 1; i >= 0; i--) {
+          for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+          }
+        }
+        const ops = [];
+        let i = 0, j = 0;
+        while (i < n && j < m) {
+          if (a[i] === b[j]) { ops.push({ t: "same", a: a[i], b: b[j] }); i++; j++; }
+          else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: "del", a: a[i] }); i++; }
+          else { ops.push({ t: "add", b: b[j] }); j++; }
+        }
+        while (i < n) ops.push({ t: "del", a: a[i++] });
+        while (j < m) ops.push({ t: "add", b: b[j++] });
+        return ops;
+      }
+
+      function buildDiffRows(lc, rc) {
+        const a = lc.split("\n"), b = rc.split("\n");
+        let p = 0;
+        while (p < a.length && p < b.length && a[p] === b[p]) p++;
+        let sa = a.length, sb = b.length;
+        while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
+        const rows = [];
+        let ln = 0, rn = 0;
+        for (let i = 0; i < p; i++) rows.push({ lt: "same", l: a[i], ln: ++ln, rt: "same", r: b[i], rn: ++rn });
+        const ops = diffMiddle(a.slice(p, sa), b.slice(p, sb));
+        let k = 0;
+        while (k < ops.length) {
+          if (ops[k].t === "same") { rows.push({ lt: "same", l: ops[k].a, ln: ++ln, rt: "same", r: ops[k].b, rn: ++rn }); k++; continue; }
+          const dels = [], adds = [];
+          while (k < ops.length && ops[k].t !== "same") {
+            if (ops[k].t === "del") dels.push(ops[k].a); else adds.push(ops[k].b);
+            k++;
+          }
+          const mx = Math.max(dels.length, adds.length);
+          for (let x = 0; x < mx; x++) {
+            const hasD = x < dels.length, hasA = x < adds.length;
+            if (hasD && hasA) rows.push({ lt: "chg", l: dels[x], ln: ++ln, rt: "chg", r: adds[x], rn: ++rn });
+            else if (hasD) rows.push({ lt: "del", l: dels[x], ln: ++ln, rt: "empty", r: null, rn: null });
+            else rows.push({ lt: "empty", l: null, ln: null, rt: "add", r: adds[x], rn: ++rn });
+          }
+        }
+        for (let i = sa; i < a.length; i++) rows.push({ lt: "same", l: a[i], ln: ++ln, rt: "same", r: b[sb + (i - sa)], rn: ++rn });
+        return rows;
+      }
+
+      function cell(cls, text) {
+        const d = document.createElement("div");
+        d.className = cls;
+        if (text !== null && text !== undefined && text !== "") d.textContent = text;
+        return d;
+      }
+      function renderDiffRows(rows) {
+        diffEl.innerHTML = "";
+        if (!rows.length) { diffEl.innerHTML = "<div class='vcompare-empty'>내용이 없습니다.</div>"; return; }
+        const frag = document.createDocumentFragment();
+        for (const row of rows) {
+          frag.appendChild(cell("vcd-ln side-l vcd-" + row.lt, row.ln === null ? "" : String(row.ln)));
+          frag.appendChild(cell("vcd-code side-l vcd-" + row.lt, row.l === null ? "" : row.l));
+          frag.appendChild(cell("vcd-ln side-r vcd-" + row.rt, row.rn === null ? "" : String(row.rn)));
+          frag.appendChild(cell("vcd-code side-r vcd-" + row.rt, row.r === null ? "" : row.r));
+        }
+        diffEl.appendChild(frag);
+        diffEl.scrollTop = 0;
+      }
+
+      async function render() {
+        const token = ++renderToken;
+        diffEl.innerHTML = "<div class='vcompare-empty'>불러오는 중…</div>";
+        const [lc, rc] = await Promise.all([fetchContent(selLeft.value), fetchContent(selRight.value)]);
+        if (token !== renderToken) return; // a newer render superseded this one
+        if (lc === null || rc === null) {
+          diffEl.innerHTML = "<div class='vcompare-empty'>이 버전을 불러올 수 없습니다.</div>";
           return;
         }
-        const kind = state.selectedKind;
-        if (kind === "markdown" || kind === "text") {
-          await renderMarkdownInto(bodyEl, content, kind, {});
-        } else {
-          bodyEl.innerHTML = "";
-          const pre = document.createElement("pre");
-          pre.className = "vcompare-raw";
-          pre.textContent = content;
-          bodyEl.appendChild(pre);
-        }
+        renderDiffRows(buildDiffRows(lc, rc));
       }
 
       function buildOptions(selectEl, selectedValue) {
@@ -7356,8 +7462,7 @@ const webAppHTML = `<!doctype html>
         titleEl.textContent = "버전 비교 — " + state.selectedPath.split("/").pop();
         overlay.hidden = false;
         document.body.classList.add("lightbox-open");
-        renderSide(leftBody, leftVal);
-        renderSide(rightBody, rightVal);
+        render();
       }
 
       function close() {
@@ -7367,8 +7472,8 @@ const webAppHTML = `<!doctype html>
 
       btn.addEventListener("click", open);
       if (closeBtn) closeBtn.addEventListener("click", close);
-      if (selLeft) selLeft.addEventListener("change", function () { renderSide(leftBody, selLeft.value); });
-      if (selRight) selRight.addEventListener("change", function () { renderSide(rightBody, selRight.value); });
+      if (selLeft) selLeft.addEventListener("change", render);
+      if (selRight) selRight.addEventListener("change", render);
       document.addEventListener("keydown", function (e) {
         if (!overlay.hidden && e.key === "Escape") { e.preventDefault(); close(); }
       });
@@ -10108,6 +10213,7 @@ const webAppHTML = `<!doctype html>
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
       _lbBoxSel = null;
+      clearCopiedHighlights();
       const lbSelBox = document.getElementById("lbSelectBox");
       if (lbSelBox) lbSelBox.hidden = true;
       document.body.classList.remove("lightbox-open");
@@ -10460,6 +10566,7 @@ const webAppHTML = `<!doctype html>
     // clipboard. This replaces precise glyph selection, which is fiddly on SVG.
     var _lbBoxSel = null;
     function startLbBoxSelect(event) {
+      clearCopiedHighlights();
       let box = document.getElementById("lbSelectBox");
       if (!box) {
         box = document.createElement("div");
@@ -10498,9 +10605,11 @@ const webAppHTML = `<!doctype html>
       if ((rect.right - rect.left) < 5 || (rect.bottom - rect.top) < 5) return;
       const svg = lightboxStageEl.querySelector("svg");
       if (!svg) return;
-      const text = extractMermaidTextInBox(svg, rect);
-      if (!text) { showToast("선택 영역에 글자가 없어요", { kind: "err", icon: "⚠️" }); return; }
-      const ok = await copyTextToClipboard(text);
+      const res = extractMermaidTextInBox(svg, rect);
+      if (!res.text) { showToast("선택 영역에 글자가 없어요", { kind: "err", icon: "⚠️" }); return; }
+      // Show what was captured (selection-style highlight) before copying.
+      showCopiedHighlights(res.rects);
+      const ok = await copyTextToClipboard(res.text);
       showToast(ok ? "선택 영역의 글자를 복사했어요" : "복사 실패",
         ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
     }
@@ -10516,10 +10625,11 @@ const webAppHTML = `<!doctype html>
         const text = (node.textContent || "").replace(/\s+/g, " ").trim();
         if (!text) continue;
         if (r.left >= rect.left && r.right <= rect.right && r.top >= rect.top && r.bottom <= rect.bottom) {
-          items.push({ y: r.top, x: r.left, text });
+          items.push({ y: r.top, x: r.left, text, rect: { left: r.left, top: r.top, width: r.width, height: r.height } });
         }
       }
-      if (!items.length) return "";
+      if (!items.length) return { text: "", rects: [] };
+      const rects = items.map((it) => it.rect);
       items.sort((a, b) => a.y - b.y || a.x - b.x);
       const lines = [];
       let current = [];
@@ -10534,9 +10644,37 @@ const webAppHTML = `<!doctype html>
         lastY = it.y;
       }
       if (current.length) lines.push(current);
-      return lines
+      const text = lines
         .map((line) => line.sort((a, b) => a.x - b.x).map((it) => it.text).join("  "))
         .join("\n");
+      return { text: text, rects: rects };
+    }
+
+    // Briefly paint a selection-style highlight over the text that was just
+    // copied, so the user can see exactly what landed on the clipboard.
+    var _lbCopyHls = [];
+    function clearCopiedHighlights() {
+      for (const el of _lbCopyHls) { try { el.remove(); } catch (e) {} }
+      _lbCopyHls = [];
+    }
+    function showCopiedHighlights(rects) {
+      clearCopiedHighlights();
+      for (const r of rects) {
+        const hl = document.createElement("div");
+        hl.className = "lb-copy-hl";
+        hl.style.left = r.left + "px";
+        hl.style.top = r.top + "px";
+        hl.style.width = r.width + "px";
+        hl.style.height = r.height + "px";
+        document.body.appendChild(hl);
+        _lbCopyHls.push(hl);
+      }
+      const mine = _lbCopyHls.slice();
+      setTimeout(function () { for (const el of mine) el.classList.add("fade"); }, 900);
+      setTimeout(function () {
+        for (const el of mine) { try { el.remove(); } catch (e) {} }
+        _lbCopyHls = _lbCopyHls.filter((el) => mine.indexOf(el) === -1);
+      }, 1400);
     }
 
     // ----- Copy diagram text to clipboard -----
