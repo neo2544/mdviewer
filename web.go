@@ -2568,15 +2568,19 @@ const webAppHTML = `<!doctype html>
     .vcompare-body {
       flex: 1 1 auto;
       min-height: 0;
-      display: flex;
-      flex-direction: column;
-    }
-    .vcompare-heads {
-      flex: 0 0 auto;
       display: grid;
       grid-template-columns: 1fr 1fr;
     }
+    .vcompare-pane {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--line);
+    }
+    .vcompare-pane:last-child { border-right: none; }
     .vcompare-pane-head {
+      flex: 0 0 auto;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -2585,7 +2589,6 @@ const webAppHTML = `<!doctype html>
       border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
       background: color-mix(in oklab, var(--panel-2) 50%, transparent);
     }
-    .vcompare-pane-head + .vcompare-pane-head { border-left: 1px solid var(--line); }
     .vcompare-pane-label { font-size: 11px; font-weight: 700; letter-spacing: .03em; flex: 0 0 auto; }
     .vcompare-pane-label.before { color: color-mix(in oklab, #e6604f 70%, var(--muted)); }
     .vcompare-pane-label.after { color: color-mix(in oklab, var(--accent-2) 80%, var(--muted)); }
@@ -2601,37 +2604,29 @@ const webAppHTML = `<!doctype html>
       outline: none;
     }
     .vcompare-select:focus { border-color: color-mix(in oklab, var(--accent) 50%, var(--accent-2)); }
-    /* Single synchronized scroll area: a 4-column grid (lnL · codeL · lnR · codeR).
-       Each diff row spans one grid row so the two sides always stay aligned. */
-    .vcompare-diff {
+    /* Each side renders markdown normally and scrolls; the two panes are kept
+       in proportional scroll sync via JS. Lines that differ between the two
+       revisions get a colored-background block highlight. */
+    .vcompare-pane-body {
       flex: 1 1 auto;
       min-height: 0;
       overflow: auto;
-      display: grid;
-      grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
-      align-content: start;
-      font: 12.5px/1.55 ui-monospace, SFMono-Regular, monospace;
-      tab-size: 4;
     }
-    .vcd-ln {
-      padding: 0 8px;
-      text-align: right;
-      color: color-mix(in oklab, var(--muted) 80%, transparent);
-      user-select: none;
-      white-space: nowrap;
-      border-right: 1px solid color-mix(in oklab, var(--line) 40%, transparent);
+    .vcompare-pane-body .vcd-chg-block {
+      border-radius: 4px;
+      scroll-margin: 8px;
     }
-    .vcd-code {
-      padding: 0 10px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+    .vcompare-pane-body.side-l .vcd-chg-block {
+      background: color-mix(in oklab, #e0533f 13%, transparent);
+      box-shadow: inset 3px 0 0 color-mix(in oklab, #e0533f 60%, transparent);
     }
-    .vcd-ln.side-r { border-left: 1px solid var(--line); }
-    .vcd-del.side-l, .vcd-chg.side-l { background: color-mix(in oklab, #e0533f 16%, transparent); }
-    .vcd-add.side-r, .vcd-chg.side-r { background: color-mix(in oklab, #3fb950 18%, transparent); }
-    .vcd-empty { background: color-mix(in oklab, var(--muted) 7%, transparent); }
-    .vcompare-empty { color: var(--muted); font-size: 12px; padding: 12px; grid-column: 1 / -1; }
+    .vcompare-pane-body.side-r .vcd-chg-block {
+      background: color-mix(in oklab, #3fb950 15%, transparent);
+      box-shadow: inset 3px 0 0 color-mix(in oklab, #3fb950 60%, transparent);
+    }
+    .vcd-rawwrap { font: 12.5px/1.55 ui-monospace, SFMono-Regular, monospace; tab-size: 4; }
+    .vcd-rawline { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; padding: 0 6px; }
+    .vcompare-empty { color: var(--muted); font-size: 12px; padding: 12px; }
     /* .action sets display:inline-flex, which would defeat the [hidden] attr. */
     #versionButton[hidden] { display: none; }
 
@@ -4019,17 +4014,20 @@ const webAppHTML = `<!doctype html>
       <button type="button" class="action icon-only vcompare-close" id="vcompareClose" title="닫기 (Esc)" aria-label="Close">✕</button>
     </div>
     <div class="vcompare-body">
-      <div class="vcompare-heads">
+      <div class="vcompare-pane">
         <div class="vcompare-pane-head">
           <span class="vcompare-pane-label before">◀ 이전 (Before)</span>
           <select class="vcompare-select" id="vcompareSelLeft" aria-label="비교할 이전 버전"></select>
         </div>
+        <div class="vcompare-pane-body preview-body side-l" id="vcompareLeft"></div>
+      </div>
+      <div class="vcompare-pane">
         <div class="vcompare-pane-head">
           <span class="vcompare-pane-label after">이후 (After) ▶</span>
           <select class="vcompare-select" id="vcompareSelRight" aria-label="비교할 이후 버전"></select>
         </div>
+        <div class="vcompare-pane-body preview-body side-r" id="vcompareRight"></div>
       </div>
-      <div class="vcompare-diff" id="vcompareDiff"></div>
     </div>
   </div>
   <div class="lightbox" id="lightbox" hidden>
@@ -7305,10 +7303,10 @@ const webAppHTML = `<!doctype html>
       btn.hidden = !(state.gitRepoRoot && state.selectedPath);
     }
 
-    // ── Git version compare (before/after split diff) ──
+    // ── Git version compare (before/after) ──
     // Pick any two revisions of the open file (working copy + each commit) and
-    // view them as a synchronized side-by-side line diff with colored
-    // backgrounds. Backed by /api/git/filelog and /api/git/show.
+    // view them rendered side by side, kept in proportional scroll sync, with
+    // changed blocks highlighted. Backed by /api/git/filelog and /api/git/show.
     (function setupVersionCompare() {
       const overlay = document.getElementById("vcompare");
       const btn = document.getElementById("versionButton");
@@ -7316,7 +7314,8 @@ const webAppHTML = `<!doctype html>
       const titleEl = document.getElementById("vcompareTitle");
       const selLeft = document.getElementById("vcompareSelLeft");
       const selRight = document.getElementById("vcompareSelRight");
-      const diffEl = document.getElementById("vcompareDiff");
+      const leftBody = document.getElementById("vcompareLeft");
+      const rightBody = document.getElementById("vcompareRight");
       if (!overlay || !btn) return;
 
       let entries = [];          // [{value, label}] incl. an optional WORKING row
@@ -7363,67 +7362,95 @@ const webAppHTML = `<!doctype html>
         return ops;
       }
 
-      function buildDiffRows(lc, rc) {
+      // Diff the two revisions and return the set of changed line numbers
+      // (0-based, in each version's own numbering — matching the data-source-line
+      // attribute that annotateSourceLines stamps on rendered blocks).
+      function computeChanged(lc, rc) {
         const a = lc.split("\n"), b = rc.split("\n");
         let p = 0;
         while (p < a.length && p < b.length && a[p] === b[p]) p++;
         let sa = a.length, sb = b.length;
         while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
-        const rows = [];
-        let ln = 0, rn = 0;
-        for (let i = 0; i < p; i++) rows.push({ lt: "same", l: a[i], ln: ++ln, rt: "same", r: b[i], rn: ++rn });
+        const left = new Set(), right = new Set();
         const ops = diffMiddle(a.slice(p, sa), b.slice(p, sb));
-        let k = 0;
-        while (k < ops.length) {
-          if (ops[k].t === "same") { rows.push({ lt: "same", l: ops[k].a, ln: ++ln, rt: "same", r: ops[k].b, rn: ++rn }); k++; continue; }
-          const dels = [], adds = [];
-          while (k < ops.length && ops[k].t !== "same") {
-            if (ops[k].t === "del") dels.push(ops[k].a); else adds.push(ops[k].b);
-            k++;
-          }
-          const mx = Math.max(dels.length, adds.length);
-          for (let x = 0; x < mx; x++) {
-            const hasD = x < dels.length, hasA = x < adds.length;
-            if (hasD && hasA) rows.push({ lt: "chg", l: dels[x], ln: ++ln, rt: "chg", r: adds[x], rn: ++rn });
-            else if (hasD) rows.push({ lt: "del", l: dels[x], ln: ++ln, rt: "empty", r: null, rn: null });
-            else rows.push({ lt: "empty", l: null, ln: null, rt: "add", r: adds[x], rn: ++rn });
-          }
+        let lLine = p, rLine = p;
+        for (const op of ops) {
+          if (op.t === "same") { lLine++; rLine++; }
+          else if (op.t === "del") { left.add(lLine); lLine++; }
+          else { right.add(rLine); rLine++; }
         }
-        for (let i = sa; i < a.length; i++) rows.push({ lt: "same", l: a[i], ln: ++ln, rt: "same", r: b[sb + (i - sa)], rn: ++rn });
-        return rows;
+        return { left: left, right: right };
       }
 
-      function cell(cls, text) {
-        const d = document.createElement("div");
-        d.className = cls;
-        if (text !== null && text !== undefined && text !== "") d.textContent = text;
-        return d;
-      }
-      function renderDiffRows(rows) {
-        diffEl.innerHTML = "";
-        if (!rows.length) { diffEl.innerHTML = "<div class='vcompare-empty'>내용이 없습니다.</div>"; return; }
-        const frag = document.createDocumentFragment();
-        for (const row of rows) {
-          frag.appendChild(cell("vcd-ln side-l vcd-" + row.lt, row.ln === null ? "" : String(row.ln)));
-          frag.appendChild(cell("vcd-code side-l vcd-" + row.lt, row.l === null ? "" : row.l));
-          frag.appendChild(cell("vcd-ln side-r vcd-" + row.rt, row.rn === null ? "" : String(row.rn)));
-          frag.appendChild(cell("vcd-code side-r vcd-" + row.rt, row.r === null ? "" : row.r));
+      // Tint each top-level rendered block whose source-line range overlaps a
+      // changed line. Block range = [its start, next block's start).
+      function applyBlockHighlight(bodyEl, changedSet) {
+        if (!changedSet || !changedSet.size) return;
+        const blocks = Array.from(bodyEl.querySelectorAll(":scope > [data-source-line]"))
+          .map((el) => ({ el: el, line: parseInt(el.getAttribute("data-source-line"), 10) }))
+          .filter((b) => !isNaN(b.line))
+          .sort((a, b) => a.line - b.line);
+        if (!blocks.length) return;
+        const starts = blocks.map((b) => b.line);
+        for (const ln of changedSet) {
+          let lo = 0, hi = starts.length - 1, idx = -1;
+          while (lo <= hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= ln) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+          if (idx >= 0) blocks[idx].el.classList.add("vcd-chg-block");
         }
-        diffEl.appendChild(frag);
-        diffEl.scrollTop = 0;
+      }
+
+      async function renderSide(bodyEl, content, changedSet) {
+        const kind = state.selectedKind;
+        if (kind === "markdown" || kind === "text") {
+          await renderMarkdownInto(bodyEl, content, kind, { trackSourceLines: true });
+          applyBlockHighlight(bodyEl, changedSet);
+        } else {
+          // Code / other: render as plain lines, tinting the changed ones.
+          bodyEl.innerHTML = "";
+          const wrap = document.createElement("div");
+          wrap.className = "vcd-rawwrap";
+          const lines = content.split("\n");
+          for (let i = 0; i < lines.length; i++) {
+            const d = document.createElement("div");
+            d.className = "vcd-rawline" + (changedSet.has(i) ? " vcd-chg-block" : "");
+            d.textContent = lines[i] === "" ? " " : lines[i];
+            wrap.appendChild(d);
+          }
+          bodyEl.appendChild(wrap);
+        }
       }
 
       async function render() {
         const token = ++renderToken;
-        diffEl.innerHTML = "<div class='vcompare-empty'>불러오는 중…</div>";
+        leftBody.innerHTML = "<div class='vcompare-empty'>불러오는 중…</div>";
+        rightBody.innerHTML = "";
         const [lc, rc] = await Promise.all([fetchContent(selLeft.value), fetchContent(selRight.value)]);
         if (token !== renderToken) return; // a newer render superseded this one
         if (lc === null || rc === null) {
-          diffEl.innerHTML = "<div class='vcompare-empty'>이 버전을 불러올 수 없습니다.</div>";
+          leftBody.innerHTML = "<div class='vcompare-empty'>이 버전을 불러올 수 없습니다.</div>";
+          rightBody.innerHTML = "";
           return;
         }
-        renderDiffRows(buildDiffRows(lc, rc));
+        const changed = computeChanged(lc, rc);
+        await renderSide(leftBody, lc, changed.left);
+        if (token !== renderToken) return;
+        await renderSide(rightBody, rc, changed.right);
+        leftBody.scrollTop = 0;
+        rightBody.scrollTop = 0;
       }
+
+      // Proportional bidirectional scroll sync (reentrancy-guarded).
+      let vcSyncSrc = null;
+      function vcSync(src, dst) {
+        if (vcSyncSrc && vcSyncSrc !== src) return;
+        vcSyncSrc = src;
+        const range = src.scrollHeight - src.clientHeight;
+        const ratio = range > 0 ? src.scrollTop / range : 0;
+        dst.scrollTop = ratio * (dst.scrollHeight - dst.clientHeight);
+        requestAnimationFrame(() => { vcSyncSrc = null; });
+      }
+      leftBody.addEventListener("scroll", () => vcSync(leftBody, rightBody));
+      rightBody.addEventListener("scroll", () => vcSync(rightBody, leftBody));
 
       function buildOptions(selectEl, selectedValue) {
         selectEl.innerHTML = "";
