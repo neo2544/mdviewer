@@ -2630,6 +2630,50 @@ const webAppHTML = `<!doctype html>
     /* .action sets display:inline-flex, which would defeat the [hidden] attr. */
     #versionButton[hidden] { display: none; }
 
+    /* Accent-color picker popover (anchored under the 🎨 toolbar button). */
+    .accent-popover {
+      position: fixed;
+      z-index: 2700;
+      width: 230px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: color-mix(in oklab, var(--panel) 96%, transparent);
+      box-shadow: 0 12px 34px rgba(0,0,0,0.3);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .accent-popover[hidden] { display: none; }
+    .accent-pop-title { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .accent-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 10px; }
+    .accent-swatch {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      padding: 0;
+      box-shadow: inset 0 0 0 1px color-mix(in oklab, black 16%, transparent);
+    }
+    .accent-swatch:hover { transform: scale(1.08); }
+    .accent-swatch.active { border-color: var(--text); box-shadow: 0 0 0 2px color-mix(in oklab, var(--text) 35%, transparent); }
+    .accent-custom-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text); margin-bottom: 10px; }
+    .accent-custom-row input[type="color"] {
+      width: 38px; height: 26px; padding: 0;
+      border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer;
+    }
+    .accent-reset {
+      width: 100%;
+      border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+      background: color-mix(in oklab, var(--panel-2) 70%, transparent);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .accent-reset:hover { border-color: var(--accent); color: var(--accent); }
+
     body.lightbox-open { overflow: hidden; }
     .lightbox {
       position: fixed;
@@ -3672,13 +3716,17 @@ const webAppHTML = `<!doctype html>
     }
   </style>
   <script>
-    // Apply theme BEFORE first paint to avoid a flash of the wrong colors.
+    // Apply theme + accent BEFORE first paint to avoid a flash of wrong colors.
     (function() {
       try {
         var t = localStorage.getItem("mdviewer.theme") || "auto";
         if (t === "light" || t === "dark") {
           document.documentElement.setAttribute("data-theme", t);
         }
+      } catch (e) {}
+      try {
+        var a = localStorage.getItem("mdviewer.accent") || "";
+        if (a) document.documentElement.style.setProperty("--accent", a);
       } catch (e) {}
     })();
   </script>
@@ -3816,6 +3864,9 @@ const webAppHTML = `<!doctype html>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          </button>
+          <button class="action icon-only" id="accentBtn" type="button" title="강조 색상 선택" aria-label="Accent color">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2C6.5 2 2 6 2 11c0 4 3 7 7 7 1 0 1.5-.7 1.5-1.5 0-.4-.2-.7-.4-1-.3-.3-.5-.7-.5-1 0-.8.7-1.5 1.5-1.5H13c3.3 0 6-2.5 6-6 0-3.6-3.1-5-7-5Z"/></svg>
           </button>
           <span class="chip" id="kindChip" data-kind="idle" aria-live="polite">Idle</span>
         </div>
@@ -4007,6 +4058,15 @@ const webAppHTML = `<!doctype html>
       <div class="palette-hint">↑↓ navigate · Enter open · Esc close</div>
       <div id="paletteResults" class="palette-results"></div>
     </div>
+  </div>
+  <div class="accent-popover" id="accentPopover" hidden role="dialog" aria-label="강조 색상 선택">
+    <div class="accent-pop-title">강조 색상</div>
+    <div class="accent-swatches" id="accentSwatches"></div>
+    <label class="accent-custom-row">
+      <span>직접 선택</span>
+      <input type="color" id="accentCustom" value="#e25aa6" />
+    </label>
+    <button type="button" class="accent-reset" id="accentReset">기본값(핑크)으로</button>
   </div>
   <div class="vcompare" id="vcompare" hidden>
     <div class="vcompare-head">
@@ -7174,8 +7234,8 @@ const webAppHTML = `<!doctype html>
           }
           if (v.current) {
             const date = fmtDate(v.current.date);
-            // "버전 main bc463f2 · 2026-05-31" (🏷 emoji is the separate repo link)
-            el.dataset.base = "버전 " + (v.branch ? (v.branch + " ") : "") +
+            // "MD Viewer Version : main bc463f2 · 2026-05-31" (🏷 = repo link)
+            el.dataset.base = "MD Viewer Version : " + (v.branch ? (v.branch + " ") : "") +
               v.current.hash + (date ? (" · " + date) : "");
             el.textContent = el.dataset.base;
             let tip = "현재 버전: " + (v.branch ? (v.branch + " ") : "") + v.current.hash +
@@ -7189,7 +7249,7 @@ const webAppHTML = `<!doctype html>
             el.title = tip;
             wrap.hidden = false;
           } else {
-            el.dataset.base = v.devMode ? "버전 dev" : "";
+            el.dataset.base = v.devMode ? "MD Viewer Version : dev" : "";
             el.textContent = el.dataset.base;
             el.title = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
             wrap.hidden = !v.devMode;
@@ -8651,6 +8711,78 @@ const webAppHTML = `<!doctype html>
         applyTheme(next);
       };
     }
+
+    // ---------- Accent color picker ----------
+    // Override --accent (used everywhere via var()/color-mix) with a user choice,
+    // persisted in localStorage. Empty value = revert to the built-in pink,
+    // which stays adaptive to light/dark.
+    (function setupAccent() {
+      const btn = document.getElementById("accentBtn");
+      const pop = document.getElementById("accentPopover");
+      const swatchWrap = document.getElementById("accentSwatches");
+      const custom = document.getElementById("accentCustom");
+      const reset = document.getElementById("accentReset");
+      if (!btn || !pop) return;
+      const LS = "mdviewer.accent";
+      const PRESETS = [
+        "#e25aa6", "#7c5cff", "#3b82f6", "#06b6d4",
+        "#10b981", "#f59e0b", "#ef4444", "#64748b",
+      ];
+
+      function current() { try { return localStorage.getItem(LS) || ""; } catch (e) { return ""; } }
+      function apply(color, persist) {
+        if (color) document.documentElement.style.setProperty("--accent", color);
+        else document.documentElement.style.removeProperty("--accent");
+        if (persist) { try { color ? localStorage.setItem(LS, color) : localStorage.removeItem(LS); } catch (e) {} }
+        markActive(color);
+      }
+      function markActive(color) {
+        const lc = (color || "").toLowerCase();
+        for (const s of swatchWrap.querySelectorAll(".accent-swatch")) {
+          s.classList.toggle("active", s.dataset.color.toLowerCase() === lc);
+        }
+        if (custom && color) custom.value = color;
+      }
+      // Build preset swatches.
+      for (const c of PRESETS) {
+        const s = document.createElement("button");
+        s.type = "button";
+        s.className = "accent-swatch";
+        s.dataset.color = c;
+        s.style.background = c;
+        s.title = c;
+        s.addEventListener("click", function () { apply(c, true); });
+        swatchWrap.appendChild(s);
+      }
+      if (custom) custom.addEventListener("input", function () { apply(custom.value, true); });
+      if (reset) reset.addEventListener("click", function () { apply("", true); });
+
+      function openPop() {
+        markActive(current());
+        pop.hidden = false;
+        const r = btn.getBoundingClientRect();
+        const w = pop.offsetWidth || 230;
+        let left = r.right - w;
+        if (left < 8) left = 8;
+        pop.style.top = (r.bottom + 8) + "px";
+        pop.style.left = left + "px";
+      }
+      function closePop() { pop.hidden = true; }
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (pop.hidden) openPop(); else closePop();
+      });
+      document.addEventListener("mousedown", function (e) {
+        if (!pop.hidden && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (!pop.hidden && e.key === "Escape") { e.preventDefault(); closePop(); }
+      });
+
+      // Apply any saved choice on load (the pre-paint script already set the
+      // CSS var; this keeps the swatch UI in sync).
+      apply(current(), false);
+    })();
 
     document.getElementById("refreshButton").onclick = () => {
       // selectFile's dirty guard exempts same-path navigations, so a
