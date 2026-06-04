@@ -4300,7 +4300,7 @@ const webAppHTML = `<!doctype html>
       // Finder-style hidden-file toggle. Persisted; flipped by Cmd/Ctrl+Shift+.
       showHidden: localStorage.getItem("mdviewer.showHidden") === "1",
       searchQueryRight: "",   // distinct from the left-sidebar file-name search
-      searchInFileHits: [],   // array of <mark> elements in preview order
+      searchInFileHits: [],   // array of hit objects {marks,line,score,before,after,text}
       searchSortMode: (function () {
         try { return localStorage.getItem("mdviewer.searchSortMode") || "line"; }
         catch (e) { return "line"; }
@@ -5633,7 +5633,8 @@ const webAppHTML = `<!doctype html>
       function walk(node) {
         for (const child of node.childNodes) {
           if (child.nodeType === 1) {
-            if (!SKIP[child.tagName]) walk(child);
+            // Skip the code line-number gutter — it's not searchable content.
+            if (!SKIP[child.tagName] && !(child.classList && child.classList.contains("hljs-ln-numbers"))) walk(child);
           } else if (child.nodeType === 3) {
             if (child.nodeValue && child.nodeValue.length) visit(child);
           }
@@ -5642,42 +5643,67 @@ const webAppHTML = `<!doctype html>
       walk(root);
     }
 
-    // highlightInFile wraps each occurrence of needle in previewBodyEl with
-    // <mark class="search-mark">. Case-insensitive. Returns the array of
-    // mark elements in document order.
+    // highlightInFile finds each occurrence of needle in the RENDERED text of
+    // previewBodyEl and wraps it in <mark class="search-mark">. It searches the
+    // concatenated text of all nodes, so a match that spans inline elements
+    // (e.g. **bold**(rest) → <strong>bold</strong>(rest)) is found and may be
+    // wrapped across several nodes. Returns hit objects (one per match):
+    //   { marks:[el…], line, score, before, after, text }
     function highlightInFile(needle) {
       clearInFileHighlights();
       if (!needle) return [];
-      const lower = needle.toLowerCase();
+      // 1. Concatenate every text node, keeping an offset → node map.
+      const map = [];
+      let full = "";
+      walkTextNodes(previewBodyEl, function (n) {
+        const v = n.nodeValue || "";
+        map.push({ node: n, start: full.length, end: full.length + v.length });
+        full += v;
+      });
+      // 2. Find all matches in the lowercased concatenation.
+      const lowerFull = full.toLowerCase();
+      const lowerNeedle = needle.toLowerCase();
       const len = needle.length;
-      const hits = [];
-      const targets = [];
-      walkTextNodes(previewBodyEl, function (t) { targets.push(t); });
-      for (const node of targets) {
-        const text = node.nodeValue || "";
-        const lo = text.toLowerCase();
-        let idx = lo.indexOf(lower);
-        if (idx < 0) continue;
+      const matches = [];
+      let idx = lowerFull.indexOf(lowerNeedle);
+      while (idx >= 0) { matches.push([idx, idx + len]); idx = lowerFull.indexOf(lowerNeedle, idx + len); }
+      if (!matches.length) { state.searchInFileHits = []; state.searchInFileFocus = -1; return []; }
+      const hits = matches.map(function (m) {
+        return { marks: [], line: null, score: 0, text: full.slice(m[0], m[1]),
+                 before: full.slice(Math.max(0, m[0] - 40), m[0]), after: full.slice(m[1], m[1] + 40) };
+      });
+      // 3. Wrap each match's spanning segments per original node. We collected
+      //    the map before mutating, and replace each node independently, so the
+      //    offsets stay valid throughout.
+      for (const entry of map) {
+        const node = entry.node, text = node.nodeValue || "";
+        const segs = [];
+        for (let mi = 0; mi < matches.length; mi++) {
+          const a = Math.max(matches[mi][0], entry.start), b = Math.min(matches[mi][1], entry.end);
+          if (a < b) segs.push([a - entry.start, b - entry.start, mi]);
+        }
+        if (!segs.length) continue;
         const parent = node.parentNode;
         if (!parent) continue;
-        let cursor = 0;
         const frag = document.createDocumentFragment();
-        while (idx >= 0) {
-          if (idx > cursor) {
-            frag.appendChild(document.createTextNode(text.substring(cursor, idx)));
-          }
+        let cur = 0;
+        for (const seg of segs) {
+          if (seg[0] > cur) frag.appendChild(document.createTextNode(text.slice(cur, seg[0])));
           const mark = document.createElement("mark");
           mark.className = "search-mark";
-          mark.textContent = text.substring(idx, idx + len);
+          mark.textContent = text.slice(seg[0], seg[1]);
           frag.appendChild(mark);
-          hits.push(mark);
-          cursor = idx + len;
-          idx = lo.indexOf(lower, cursor);
+          hits[seg[2]].marks.push(mark);
+          cur = seg[1];
         }
-        if (cursor < text.length) {
-          frag.appendChild(document.createTextNode(text.substring(cursor)));
-        }
+        if (cur < text.length) frag.appendChild(document.createTextNode(text.slice(cur)));
         parent.replaceChild(frag, node);
+      }
+      // 4. Resolve line + priority per hit (from its first mark).
+      for (const h of hits) {
+        const m0 = h.marks[0];
+        h.line = m0 ? lineNumberForHit(m0) : null;
+        h.score = m0 ? priorityForHit(h) : 0;
       }
       state.searchInFileHits = hits;
       state.searchInFileFocus = -1;
@@ -5688,14 +5714,15 @@ const webAppHTML = `<!doctype html>
     function focusHit(i) {
       const hits = state.searchInFileHits;
       if (!hits.length) return;
-      if (state.searchInFileFocus >= 0 && hits[state.searchInFileFocus]) {
-        hits[state.searchInFileFocus].classList.remove("current");
+      const prev = hits[state.searchInFileFocus];
+      if (state.searchInFileFocus >= 0 && prev) {
+        for (const m of prev.marks) m.classList.remove("current");
       }
       const clamped = Math.max(0, Math.min(i, hits.length - 1));
       state.searchInFileFocus = clamped;
-      const mark = hits[clamped];
-      mark.classList.add("current");
-      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+      const hit = hits[clamped];
+      for (const m of hit.marks) m.classList.add("current");
+      if (hit.marks[0]) hit.marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
     // Resolve a 1-indexed line number for a hit. Code files: walk up to
@@ -5736,19 +5763,20 @@ const webAppHTML = `<!doctype html>
       // (spaces, punctuation, end-of-text) is a boundary.
       return !c || !/[A-Za-z0-9_À-ɏ가-힯぀-ヿ一-鿿]/.test(c);
     }
-    function priorityForHit(mark) {
+    function priorityForHit(hit) {
       let score = 0;
-      let el = mark.parentElement;
-      while (el && el !== previewBodyEl) {
-        const tag = el.tagName;
-        if (tag && _HIT_SCORE_BY_TAG[tag] && score < _HIT_SCORE_BY_TAG[tag]) {
-          score = _HIT_SCORE_BY_TAG[tag];
+      for (const mark of hit.marks) {
+        let el = mark.parentElement;
+        while (el && el !== previewBodyEl) {
+          const tag = el.tagName;
+          if (tag && _HIT_SCORE_BY_TAG[tag] && score < _HIT_SCORE_BY_TAG[tag]) {
+            score = _HIT_SCORE_BY_TAG[tag];
+          }
+          el = el.parentElement;
         }
-        el = el.parentElement;
       }
-      const before = (mark.previousSibling && mark.previousSibling.nodeValue) || "";
-      const after  = (mark.nextSibling && mark.nextSibling.nodeValue) || "";
-      if (_isWordBoundary(before.slice(-1)) && _isWordBoundary(after.slice(0, 1))) {
+      // Whole-word boundary bonus, using the concatenated context around the hit.
+      if (_isWordBoundary(hit.before.slice(-1)) && _isWordBoundary(hit.after.slice(0, 1))) {
         score += 20;
       }
       return score;
@@ -5771,8 +5799,8 @@ const webAppHTML = `<!doctype html>
       searchInFileSummaryEl.textContent = hits.length + " match" + (hits.length === 1 ? "" : "es");
       // Build ranked index list, preserving the original hits[] order
       // for focusHit (since it scrolls by index in document order).
-      const ranked = hits.map(function (m, i) {
-        return { mark: m, idx: i, score: priorityForHit(m), line: lineNumberForHit(m) };
+      const ranked = hits.map(function (h, i) {
+        return { hit: h, idx: i, score: h.score, line: h.line };
       });
       if (state.searchSortMode === "priority") {
         ranked.sort(function (a, b) {
@@ -5793,9 +5821,9 @@ const webAppHTML = `<!doctype html>
       const maxList = 50;
       const shown = ranked.slice(0, maxList);
       for (const item of shown) {
-        const mark = item.mark;
-        const ctxBefore = (mark.previousSibling && mark.previousSibling.nodeValue) || "";
-        const ctxAfter  = (mark.nextSibling && mark.nextSibling.nodeValue) || "";
+        const h = item.hit;
+        const ctxBefore = h.before || "";
+        const ctxAfter  = h.after || "";
         const row = document.createElement("div");
         row.className = "search-hit";
         if (item.line != null) {
@@ -5810,7 +5838,7 @@ const webAppHTML = `<!doctype html>
         pre.textContent = (ctxBefore.length > 30 ? "…" : "") + ctxBefore.slice(-30);
         const hit = document.createElement("span");
         hit.className = "search-hit-needle";
-        hit.textContent = mark.textContent;
+        hit.textContent = h.text;
         const post = document.createElement("span");
         post.textContent = ctxAfter.slice(0, 30) + (ctxAfter.length > 30 ? "…" : "");
         ctx.appendChild(pre);
