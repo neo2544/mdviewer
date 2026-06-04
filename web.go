@@ -3829,7 +3829,7 @@ const webAppHTML = `<!doctype html>
               <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
             </svg>
             <input class="search-input" id="searchInput" type="search" data-i18n-ph="phSearchFiles" placeholder="Search files" spellcheck="false" />
-            <button class="searchbox-browse-btn" id="browseSubfoldersBtn" title="하위 폴더 포함 탐색" type="button" aria-label="하위 폴더 탐색">
+            <button class="searchbox-browse-btn" id="browseSubfoldersBtn" data-i18n-title="browseBtnTitle" title="하위 폴더 포함 탐색" type="button" data-i18n-aria="fbTitle" aria-label="하위 폴더 탐색">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M1.5 3.5 C1.5 2.7 2.2 2 3 2 H5.5 L6.5 3 H13 c.8 0 1.5.7 1.5 1.5 V12.5 c0 .8-.7 1.5-1.5 1.5 H3 c-.8 0-1.5-.7-1.5-1.5 Z" />
                 <line x1="5" y1="7" x2="11" y2="7" />
@@ -3848,7 +3848,7 @@ const webAppHTML = `<!doctype html>
       </div>
       <div class="pane">
         <div class="file-header">
-          <button class="aidlc-toggle" id="aidlcToggle" type="button" role="switch" aria-checked="false" hidden title="AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)"><span class="aidlc-switch"><span class="aidlc-knob"></span></span><span class="aidlc-toggle-text">AI-DLC</span><span class="aidlc-toggle-state">OFF</span></button>
+          <button class="aidlc-toggle" id="aidlcToggle" type="button" role="switch" aria-checked="false" hidden data-i18n-title="aidlcToggleTitle" title="AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)"><span class="aidlc-switch"><span class="aidlc-knob"></span></span><span class="aidlc-toggle-text">AI-DLC</span><span class="aidlc-toggle-state">OFF</span></button>
           <button class="header-button active" id="sortName" data-direction="asc" type="button">Name</button>
           <button class="header-button size-col" id="sortMod" data-direction="asc" type="button">Updated</button>
         </div>
@@ -3892,7 +3892,7 @@ const webAppHTML = `<!doctype html>
         <div class="section-list" id="favorites"></div>
       </div>
       <div class="sidebar-version" id="sidebarVersionWrap" hidden>
-        <button type="button" class="version-repo-link" id="versionRepoLink" title="저장소 페이지 열기">🏷</button>
+        <button type="button" class="version-repo-link" id="versionRepoLink" data-i18n-title="versionRepoLinkTitle" title="저장소 페이지 열기">🏷</button>
         <button type="button" class="version-text" id="sidebarVersion" title=""></button>
       </div>
     </aside>
@@ -3938,14 +3938,14 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="refreshButton" type="button" title="Refresh — reload current file from disk (prompts if unsaved changes)" aria-label="Refresh">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
           </button>
-          <button class="action icon-only" id="mermaidLabBtn" type="button" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
+          <button class="action icon-only" id="mermaidLabBtn" type="button" data-i18n-title="mlBtnTitle" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
           </button>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
           </button>
-          <button class="action icon-only" id="accentBtn" type="button" title="강조 색상 선택" aria-label="Accent color">
+          <button class="action icon-only" id="accentBtn" type="button" data-i18n-title="accentBtnTitle" title="강조 색상 선택" data-i18n-aria="accentTitle" aria-label="Accent color">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2C6.5 2 2 6 2 11c0 4 3 7 7 7 1 0 1.5-.7 1.5-1.5 0-.4-.2-.7-.4-1-.3-.3-.5-.7-.5-1 0-.8.7-1.5 1.5-1.5H13c3.3 0 6-2.5 6-6 0-3.6-3.1-5-7-5Z"/></svg>
           </button>
           <button class="action lang-toggle" id="langToggle" type="button" aria-label="Language">EN</button>
@@ -4119,18 +4119,18 @@ const webAppHTML = `<!doctype html>
       <div class="mermaid-lab-head">
         <div class="mermaid-lab-title">&#x1F9EA; Mermaid Playground</div>
         <div class="mermaid-lab-head-actions">
-          <button type="button" class="action" id="mermaidLabClearBtn" title="Clear the editor">Clear</button>
-          <button type="button" class="action" id="mermaidLabCopyBtn" title="Copy text">Copy</button>
-          <button type="button" class="popup-close" id="mermaidLabCloseBtn" title="Close (Esc)">&#x2715;</button>
+          <button type="button" class="action" id="mermaidLabClearBtn" data-i18n-title="mlClearTitle" title="Clear the editor" data-i18n="mlClear">Clear</button>
+          <button type="button" class="action" id="mermaidLabCopyBtn" data-i18n-title="mlCopyTitle" title="Copy text" data-i18n="mlCopy">Copy</button>
+          <button type="button" class="popup-close" id="mermaidLabCloseBtn" data-i18n-title="mlCloseTitle" title="Close (Esc)">&#x2715;</button>
         </div>
       </div>
       <div class="mermaid-lab-body">
         <div class="mermaid-lab-pane mermaid-lab-editor-pane">
-          <textarea class="mermaid-lab-editor" id="mermaidLabEditor" spellcheck="false" placeholder="Paste or type mermaid source here&#10;e.g.&#10;&#10;flowchart LR&#10;  A --&gt; B"></textarea>
+          <textarea class="mermaid-lab-editor" id="mermaidLabEditor" spellcheck="false" data-i18n-ph="mlPlaceholder" placeholder="Paste or type mermaid source here&#10;e.g.&#10;&#10;flowchart LR&#10;  A --&gt; B"></textarea>
         </div>
         <div class="mermaid-lab-pane mermaid-lab-preview-pane" id="mermaidLabPreview"></div>
       </div>
-      <div class="mermaid-lab-foot subtle">Live render &#x2014; Esc to close &#xB7; Click backdrop to dismiss</div>
+      <div class="mermaid-lab-foot subtle" data-i18n="mlFoot">Live render &#x2014; Esc to close &#xB7; Click backdrop to dismiss</div>
     </div>
   </div>
   <div class="palette" id="palette" hidden>
@@ -4140,37 +4140,37 @@ const webAppHTML = `<!doctype html>
       <div id="paletteResults" class="palette-results"></div>
     </div>
   </div>
-  <div class="accent-popover" id="accentPopover" hidden role="dialog" aria-label="강조 색상 선택">
-    <div class="accent-pop-title">강조 색상</div>
+  <div class="accent-popover" id="accentPopover" hidden role="dialog" data-i18n-aria="accentBtnTitle" aria-label="강조 색상 선택">
+    <div class="accent-pop-title" data-i18n="accentTitle">강조 색상</div>
     <div class="accent-swatches" id="accentSwatches"></div>
     <label class="accent-custom-row">
-      <span>직접 선택</span>
+      <span data-i18n="accentCustom">직접 선택</span>
       <input type="color" id="accentCustom" value="#e25aa6" />
     </label>
-    <button type="button" class="accent-reset" id="accentReset">기본값(핑크)으로</button>
+    <button type="button" class="accent-reset" id="accentReset" data-i18n="accentReset">기본값(핑크)으로</button>
   </div>
   <div class="vcompare" id="vcompare" hidden>
     <div class="vcompare-head">
-      <div class="vcompare-title" id="vcompareTitle">버전 비교</div>
+      <div class="vcompare-title" id="vcompareTitle" data-i18n="vcompareTitle">버전 비교</div>
       <div class="vcompare-nav">
-        <button type="button" class="action icon-only" id="vcomparePrev" title="이전 변경점 (↑)" aria-label="이전 변경점">▲</button>
-        <span class="vcompare-nav-count" id="vcompareNavCount">변경 없음</span>
-        <button type="button" class="action icon-only" id="vcompareNext" title="다음 변경점 (↓)" aria-label="다음 변경점">▼</button>
+        <button type="button" class="action icon-only" id="vcomparePrev" data-i18n-title="updPrevTitle" title="이전 변경점 (↑)" data-i18n-aria="updPrevTitle" aria-label="이전 변경점">▲</button>
+        <span class="vcompare-nav-count" id="vcompareNavCount" data-i18n="vcNoChanges">변경 없음</span>
+        <button type="button" class="action icon-only" id="vcompareNext" data-i18n-title="updNextTitle" title="다음 변경점 (↓)" data-i18n-aria="updNextTitle" aria-label="다음 변경점">▼</button>
       </div>
-      <button type="button" class="action icon-only vcompare-close" id="vcompareClose" title="닫기 (Esc)" aria-label="Close">✕</button>
+      <button type="button" class="action icon-only vcompare-close" id="vcompareClose" data-i18n-title="closeEscTitle" title="닫기 (Esc)" aria-label="Close">✕</button>
     </div>
     <div class="vcompare-body">
       <div class="vcompare-pane">
         <div class="vcompare-pane-head">
-          <span class="vcompare-pane-label before">◀ 이전 (Before)</span>
-          <select class="vcompare-select" id="vcompareSelLeft" aria-label="비교할 이전 버전"></select>
+          <span class="vcompare-pane-label before" data-i18n="vcBefore">◀ 이전 (Before)</span>
+          <select class="vcompare-select" id="vcompareSelLeft" data-i18n-aria="vcSelLeftAria" aria-label="비교할 이전 버전"></select>
         </div>
         <div class="vcompare-pane-body preview-body side-l" id="vcompareLeft"></div>
       </div>
       <div class="vcompare-pane">
         <div class="vcompare-pane-head">
-          <span class="vcompare-pane-label after">이후 (After) ▶</span>
-          <select class="vcompare-select" id="vcompareSelRight" aria-label="비교할 이후 버전"></select>
+          <span class="vcompare-pane-label after" data-i18n="vcAfter">이후 (After) ▶</span>
+          <select class="vcompare-select" id="vcompareSelRight" data-i18n-aria="vcSelRightAria" aria-label="비교할 이후 버전"></select>
         </div>
         <div class="vcompare-pane-body preview-body side-r" id="vcompareRight"></div>
       </div>
@@ -4201,7 +4201,7 @@ const webAppHTML = `<!doctype html>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke / post-it to delete" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
-    <div class="lightbox-hint">Wheel: zoom · Drag: pan · ⌥+Drag: 영역 글자 복사 · Double-click: reset · Esc: close</div>
+    <div class="lightbox-hint" data-i18n="lbHint">Wheel: zoom · Drag: pan · ⌥+Drag: 영역 글자 복사 · Double-click: reset · Esc: close</div>
   </div>
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
@@ -5334,7 +5334,7 @@ const webAppHTML = `<!doctype html>
       grip = document.createElement("span");
       grip.className = "fav-grip";
       grip.textContent = "⠿";
-      grip.title = "드래그하여 순서 변경";
+      grip.title = t("favDragReorder");
       row.insertBefore(grip, row.firstChild);
       return grip;
     }
@@ -5408,10 +5408,10 @@ const webAppHTML = `<!doctype html>
       const wrap = document.createElement("div");
       wrap.className = "fav-move";
       const up = document.createElement("button");
-      up.type = "button"; up.className = "fav-move-btn"; up.textContent = "▲"; up.title = "위로 이동";
+      up.type = "button"; up.className = "fav-move-btn"; up.textContent = "▲"; up.title = t("favMoveUp");
       up.addEventListener("click", function (e) { e.stopPropagation(); moveFavorite(path, -1); });
       const down = document.createElement("button");
-      down.type = "button"; down.className = "fav-move-btn"; down.textContent = "▼"; down.title = "아래로 이동";
+      down.type = "button"; down.className = "fav-move-btn"; down.textContent = "▼"; down.title = t("favMoveDown");
       down.addEventListener("click", function (e) { e.stopPropagation(); moveFavorite(path, +1); });
       wrap.appendChild(up); wrap.appendChild(down);
       return wrap;
@@ -5933,7 +5933,7 @@ const webAppHTML = `<!doctype html>
       const loadingEl = document.createElement("div");
       loadingEl.className = "search-empty";
       loadingEl.textContent = state.folderSearchScope === "git"
-        ? "Git 저장소 전체 검색 중… ⏳" : "검색 중…";
+        ? t("searchLoadingGit") : t("searchLoading");
       searchFolderHitsEl.appendChild(loadingEl);
       let results = [];
       try {
@@ -5987,9 +5987,7 @@ const webAppHTML = `<!doctype html>
     // (no dirty draft, or the user confirmed losing changes).
     function confirmDiscardDirty() {
       if (!state.editDirty) return true;
-      return window.confirm(
-        "저장되지 않은 변경 사항이 있습니다.\n\n계속 진행하면 변경 내용이 사라집니다. 정말 이동하시겠어요?"
-      );
+      return window.confirm(t("confirmDiscard"));
     }
 
     async function selectFile(path, options = {}) {
@@ -6029,7 +6027,7 @@ const webAppHTML = `<!doctype html>
       renderFilePane();
       previewTitleEl.textContent = data.name;
       previewTitleEl.classList.add("copyable");
-      previewTitleEl.title = "클릭하면 파일 이름 복사";
+      previewTitleEl.title = t("previewClickCopyName");
       previewMetaEl.textContent = new Date(data.mod_time).toLocaleString() + " · " + humanSize(data.size);
       kindChipEl.textContent = data.kind;
       kindChipEl.setAttribute("data-kind", data.kind || "idle");
@@ -6118,6 +6116,75 @@ const webAppHTML = `<!doctype html>
         toastSelCopied: "Copied the selection", toastBoxCopied: "Copied the text in the selected region", toastBoxEmpty: "No text in the selected region",
         toastMemoCopiedTitle: "Copied the memo with a title link", toastMemoCopiedFile: "Copied the memo with the filename",
         toastNoText: "No text to copy", toastMermaidCopied: "Copied the mermaid text to the clipboard",
+        // batch 4 — diagram/export, version footer, conflicts, mermaid lab, etc.
+        toastClipFail: "Copy to clipboard failed",
+        toastOtherSession: "{0} change(s) from another session applied",
+        toastNoSaveContent: "Nothing to save",
+        toastImgSaved: "Saved the image",
+        toastNoSaveImg: "Couldn't create an image to save",
+        toastPngSaved: "Saved as PNG",
+        toastNoImgClip: "This browser doesn't support copying images to the clipboard",
+        toastNoCopyContent: "Nothing to copy",
+        toastImgClipCopied: "Copied the image to the clipboard",
+        toastNoDiagram: "No diagram to copy",
+        toastDiagramClipCopied: "Copied the diagram image to the clipboard",
+        errSvgEncode: "SVG encoding failed", errCanvasDraw: "Canvas draw failed",
+        errPngEncode: "PNG encoding failed (canvas.toBlob null)", errSvgImgLoad: "SVG image load failed",
+        errPngConvert: "PNG conversion failed", errImgLoad: "Image load failed", errRender: "Render failed",
+        confDeletedNote: "This memo was deleted in another session while you were editing it.",
+        confEditNote: "This memo was also edited differently in another session while you were editing it.",
+        confMine: "My version", confServer: "Server version",
+        confRecreate: "Recreate", confAcceptDelete: "Accept deletion",
+        confKeepMine: "Keep mine", confTakeServer: "Use server version", confKeepBoth: "Keep both",
+        confRemaining: "({0} left)", confMineTag: "(mine)", confEmpty: "(none)", confEmptyMemo: "(empty memo)",
+        relJustNow: "just now", relMinAgo: "{0}m ago", relHourAgo: "{0}h ago", relDayAgo: "{0}d ago",
+        trashDeleted: "Deleted", trashRestore: "Restore", trashPurge: "Delete permanently",
+        confirmPurgeOne: "Permanently delete this memo?",
+        confirmPurgeAll: "Permanently delete {0} memo(s) in the trash?",
+        backlinkSource: "Source: ", backlinkTitle: "Go to where this memo was created: ",
+        syncEditing: "Editing…", syncSaved: "Saved", syncPending: "Waiting to save…",
+        favDragReorder: "Drag to reorder", favMoveUp: "Move up", favMoveDown: "Move down",
+        searchLoadingGit: "Searching the whole Git repo… ⏳", searchLoading: "Searching…",
+        confirmDiscard: "You have unsaved changes.\n\nIf you continue, your changes will be lost. Leave anyway?",
+        beforeUnload: "You have unsaved changes.",
+        previewClickCopyName: "Click to copy the file name",
+        verRepoOpen: "Open repository: ", verNoRepoURL: "No repository URL",
+        verCurrent: "Current version: ", verUpdateDate: "Updated: ", verClickCheck: "Click: check for updates",
+        verRecentChanges: "Recent changes:", verDevMode: "Dev mode — self-update unavailable",
+        verUpdateBadge: "⬆ Update {0} · ", verUpdateAvail: "{0} new version(s) available",
+        verLatest: "Latest: ", verClickPull: "Click to pull · build · restart.",
+        verRestartCheckFail: "Couldn't confirm the restart. Please refresh manually.",
+        verConfirmUpdate: "Update to the latest version and restart the app?\n(git pull · go build · auto-restart)",
+        verUpdating: "Updating… (pull · build)\nPlease wait a moment.",
+        verUpdateFail: "Update failed\n\n", verUnknownErr: "Unknown error",
+        verUpdateDoneRestart: "Update complete — restarting…\nThe page will refresh automatically.",
+        verRestarting: "Restarting…\nThe page will refresh automatically.",
+        scopeNotRepo: "The current folder isn't a Git repository",
+        vcdChanged: "Changed", vcdShowSource: "</> Source", vcdShowDiagram: "🖼 Diagram",
+        vcLoading: "Loading…", vcLoadFail: "Couldn't load this version.",
+        vcChangeWord: "changes", vcNoChanges: "No changes",
+        vcWorkingCopy: "● Current working copy (saved disk content)", vcLatestTag: "  (latest)",
+        vcompareTitle: "Version compare", vcTitlePrefix: "Version compare — ",
+        vcBefore: "◀ Before", vcAfter: "After ▶",
+        vcSelLeftAria: "Earlier version to compare", vcSelRightAria: "Later version to compare",
+        fbLoading: "Loading…", fbLoadFail: "Failed to load",
+        fbTitleWith: "{0} subfolders", fbNoMatch: "No matches", fbNoFiles: "No files",
+        katexLoading: "(KaTeX loading… type again in a moment to render)",
+        mlClearTitle: "Clear the editor", mlClear: "Clear", mlCopyTitle: "Copy text", mlCopy: "Copy",
+        mlCloseTitle: "Close (Esc)", mlFoot: "Live render — Esc to close · Click backdrop to dismiss",
+        mlPlaceholder: "Paste or type mermaid source here\ne.g.\n\nflowchart LR\n  A --> B",
+        mlHint: "Paste mermaid source — or TeX math like $E=mc^2$ — on the left to see it rendered here.",
+        mlCopied: "Copied!", mlFailed: "Failed", mlRenderFail: "Render failed:",
+        mlBtnTitle: "Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)",
+        accentTitle: "Accent color", accentCustom: "Custom", accentReset: "Default (pink)", accentBtnTitle: "Choose accent color",
+        browseBtnTitle: "Browse including subfolders",
+        aidlcToggleTitle: "View all AI-DLC-generated documents by most-recently-modified (turns on the aidlc-docs folder, sorted by time)",
+        versionRepoLinkTitle: "Open repository page",
+        closeEscTitle: "Close (Esc)",
+        lbHint: "Wheel: zoom · Drag: pan · ⌥+Drag: copy region text · Double-click: reset · Esc: close",
+        themeAuto: "Auto", themeLight: "Light", themeDark: "Dark",
+        themeTitle: "Theme: {0} (click to cycle)", themeAria: "Theme: {0}",
+        lbCloseConfirm: "You have annotations. Closing will discard unsaved drawings.\nSave as PNG (💾) before closing?\n\n[OK] Save now → close\n[Cancel] Close without saving",
       },
       ko: {
         guideBanner: "내장 사용 가이드",
@@ -6163,6 +6230,75 @@ const webAppHTML = `<!doctype html>
         toastSelCopied: "선택한 내용을 복사했어요", toastBoxCopied: "선택 영역의 글자를 복사했어요", toastBoxEmpty: "선택 영역에 글자가 없어요",
         toastMemoCopiedTitle: "메모를 제목 링크와 함께 복사했어요", toastMemoCopiedFile: "메모를 파일명과 함께 복사했어요",
         toastNoText: "복사할 텍스트가 없어요", toastMermaidCopied: "머메이드 텍스트를 클립보드에 복사했어요",
+        // batch 4
+        toastClipFail: "클립보드 복사 실패",
+        toastOtherSession: "다른 세션 변경 {0}건 반영됨",
+        toastNoSaveContent: "저장할 콘텐츠가 없어요",
+        toastImgSaved: "이미지를 저장했어요",
+        toastNoSaveImg: "저장할 이미지를 만들 수 없어요",
+        toastPngSaved: "PNG로 저장했어요",
+        toastNoImgClip: "이 브라우저는 이미지 클립보드 복사를 지원하지 않아요",
+        toastNoCopyContent: "복사할 콘텐츠가 없어요",
+        toastImgClipCopied: "이미지를 클립보드에 복사했어요",
+        toastNoDiagram: "복사할 다이어그램이 없어요",
+        toastDiagramClipCopied: "다이어그램 이미지를 클립보드에 복사했어요",
+        errSvgEncode: "SVG 인코딩 실패", errCanvasDraw: "Canvas 그리기 실패",
+        errPngEncode: "PNG 인코딩 실패 (canvas.toBlob null)", errSvgImgLoad: "SVG 이미지 로딩 실패",
+        errPngConvert: "PNG 변환 실패", errImgLoad: "이미지 로딩 실패", errRender: "렌더 실패",
+        confDeletedNote: "이 메모를 편집하는 동안 다른 세션에서 삭제되었습니다.",
+        confEditNote: "이 메모를 편집하는 동안 다른 세션에서도 다르게 수정되었습니다.",
+        confMine: "내 버전", confServer: "서버 버전",
+        confRecreate: "다시 생성", confAcceptDelete: "삭제 수용",
+        confKeepMine: "내 버전 유지", confTakeServer: "서버 버전 적용", confKeepBoth: "둘 다 보관",
+        confRemaining: "({0}건 남음)", confMineTag: "(내 버전)", confEmpty: "(없음)", confEmptyMemo: "(빈 메모)",
+        relJustNow: "방금", relMinAgo: "{0}분 전", relHourAgo: "{0}시간 전", relDayAgo: "{0}일 전",
+        trashDeleted: "삭제됨", trashRestore: "복원", trashPurge: "영구 삭제",
+        confirmPurgeOne: "이 메모를 영구 삭제할까요?",
+        confirmPurgeAll: "휴지통의 메모 {0}개를 영구 삭제할까요?",
+        backlinkSource: "출처: ", backlinkTitle: "이 메모를 만든 위치로 이동: ",
+        syncEditing: "편집 중…", syncSaved: "저장됨", syncPending: "저장 대기 중…",
+        favDragReorder: "드래그하여 순서 변경", favMoveUp: "위로 이동", favMoveDown: "아래로 이동",
+        searchLoadingGit: "Git 저장소 전체 검색 중… ⏳", searchLoading: "검색 중…",
+        confirmDiscard: "저장되지 않은 변경 사항이 있습니다.\n\n계속 진행하면 변경 내용이 사라집니다. 정말 이동하시겠어요?",
+        beforeUnload: "저장되지 않은 변경 사항이 있습니다.",
+        previewClickCopyName: "클릭하면 파일 이름 복사",
+        verRepoOpen: "저장소 열기: ", verNoRepoURL: "저장소 주소 없음",
+        verCurrent: "현재 버전: ", verUpdateDate: "업데이트 날짜: ", verClickCheck: "클릭: 업데이트 확인",
+        verRecentChanges: "최근 변경:", verDevMode: "개발 모드 — 자가 업데이트 불가",
+        verUpdateBadge: "⬆ 업데이트 {0}개 · ", verUpdateAvail: "새 버전 {0}개 사용 가능",
+        verLatest: "최신: ", verClickPull: "클릭하면 pull · 빌드 · 재시작합니다.",
+        verRestartCheckFail: "재시작 확인에 실패했어요. 수동으로 새로고침 해주세요.",
+        verConfirmUpdate: "최신 버전으로 업데이트하고 앱을 재시작할까요?\n(git pull · go build · 자동 재시작)",
+        verUpdating: "업데이트 중… (pull · 빌드)\n잠시만 기다려 주세요.",
+        verUpdateFail: "업데이트 실패\n\n", verUnknownErr: "알 수 없는 오류",
+        verUpdateDoneRestart: "업데이트 완료 — 재시작 중…\n자동으로 새로고침됩니다.",
+        verRestarting: "재시작 중…\n자동으로 새로고침됩니다.",
+        scopeNotRepo: "현재 폴더가 Git 저장소가 아닙니다",
+        vcdChanged: "변경됨", vcdShowSource: "</> 소스", vcdShowDiagram: "🖼 다이어그램",
+        vcLoading: "불러오는 중…", vcLoadFail: "이 버전을 불러올 수 없습니다.",
+        vcChangeWord: "변경", vcNoChanges: "변경 없음",
+        vcWorkingCopy: "● 현재 작업본 (저장된 디스크 내용)", vcLatestTag: "  (최신)",
+        vcompareTitle: "버전 비교", vcTitlePrefix: "버전 비교 — ",
+        vcBefore: "◀ 이전 (Before)", vcAfter: "이후 (After) ▶",
+        vcSelLeftAria: "비교할 이전 버전", vcSelRightAria: "비교할 이후 버전",
+        fbLoading: "불러오는 중…", fbLoadFail: "불러오기 실패",
+        fbTitleWith: "{0} 하위 폴더 탐색", fbNoMatch: "검색 결과 없음", fbNoFiles: "파일 없음",
+        katexLoading: "(KaTeX 로딩 중… 잠시 후 입력하면 렌더됩니다)",
+        mlClearTitle: "에디터 비우기", mlClear: "지우기", mlCopyTitle: "텍스트 복사", mlCopy: "복사",
+        mlCloseTitle: "닫기 (Esc)", mlFoot: "실시간 렌더 — Esc로 닫기 · 배경 클릭 시 닫기",
+        mlPlaceholder: "여기에 머메이드 소스를 붙여넣거나 입력하세요\n예:\n\nflowchart LR\n  A --> B",
+        mlHint: "왼쪽에 머메이드 소스 — 또는 $E=mc^2$ 같은 TeX 수식 — 을 붙여넣으면 여기에 렌더됩니다.",
+        mlCopied: "복사됨!", mlFailed: "실패", mlRenderFail: "렌더 실패:",
+        mlBtnTitle: "Mermaid Playground — 머메이드 소스를 붙여넣으면 실시간 렌더 (다이어그램 클릭 시 확대)",
+        accentTitle: "강조 색상", accentCustom: "직접 선택", accentReset: "기본값(핑크)으로", accentBtnTitle: "강조 색상 선택",
+        browseBtnTitle: "하위 폴더 포함 탐색",
+        aidlcToggleTitle: "AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)",
+        versionRepoLinkTitle: "저장소 페이지 열기",
+        closeEscTitle: "닫기 (Esc)",
+        lbHint: "휠: 확대 · 드래그: 이동 · ⌥+드래그: 영역 글자 복사 · 더블클릭: 초기화 · Esc: 닫기",
+        themeAuto: "자동", themeLight: "밝게", themeDark: "어둡게",
+        themeTitle: "테마: {0} (클릭하여 전환)", themeAria: "테마: {0}",
+        lbCloseConfirm: "주석이 있어요. 닫으면 저장하지 않은 그림은 사라집니다.\n💾로 PNG 저장 후 닫으시겠어요?\n\n[확인] 지금 저장 → 닫기\n[취소] 그냥 닫기",
       },
       };
       return _I18N;
@@ -6178,6 +6314,7 @@ const webAppHTML = `<!doctype html>
       document.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.getAttribute("data-i18n")); });
       document.querySelectorAll("[data-i18n-title]").forEach(function (el) { el.title = t(el.getAttribute("data-i18n-title")); });
       document.querySelectorAll("[data-i18n-ph]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-i18n-ph"))); });
+      document.querySelectorAll("[data-i18n-aria]").forEach(function (el) { el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria"))); });
     }
     function updateLangToggle() {
       const b = document.getElementById("langToggle");
@@ -6197,6 +6334,10 @@ const webAppHTML = `<!doctype html>
       try { if (typeof renderFavorites === "function") renderFavorites(); } catch (e) {}
       try { if (typeof applyFolderScope === "function") applyFolderScope(state.folderSearchScope); } catch (e) {}
       try { if (typeof renderInFileResults === "function") renderInFileResults(state.searchQueryRight || "", state.searchInFileHits || []); } catch (e) {}
+      try { if (typeof updateGitScopeUI === "function") updateGitScopeUI(); } catch (e) {}
+      try { if (typeof applyTheme === "function") applyTheme(currentTheme()); } catch (e) {}
+      try { if (window.__refreshVersionFooter) window.__refreshVersionFooter(); } catch (e) {}
+      try { if (window.__refreshMemoPanel) window.__refreshMemoPanel(); } catch (e) {}
     }
 
     let usageGuideCache = {}; // keyed by language
@@ -7641,7 +7782,7 @@ const webAppHTML = `<!doctype html>
     window.addEventListener("beforeunload", (event) => {
       if (!state.editDirty) return;
       event.preventDefault();
-      event.returnValue = "저장되지 않은 변경 사항이 있습니다.";
+      event.returnValue = t("beforeUnload");
       return event.returnValue;
     });
 
@@ -7775,7 +7916,7 @@ const webAppHTML = `<!doctype html>
           canUpdate = !!v.canUpdate;
           repoURL = v.repoURL || "";
           if (repoLink) {
-            repoLink.title = repoURL ? ("저장소 열기: " + repoURL) : "저장소 주소 없음";
+            repoLink.title = repoURL ? (t("verRepoOpen") + repoURL) : t("verNoRepoURL");
             repoLink.style.cursor = repoURL ? "pointer" : "default";
           }
           if (v.current) {
@@ -7784,12 +7925,12 @@ const webAppHTML = `<!doctype html>
             el.dataset.base = "MD Viewer Version : " + (v.branch ? (v.branch + " ") : "") +
               v.current.hash + (date ? (" · " + date) : "");
             el.textContent = el.dataset.base;
-            let tip = "현재 버전: " + (v.branch ? (v.branch + " ") : "") + v.current.hash +
+            let tip = t("verCurrent") + (v.branch ? (v.branch + " ") : "") + v.current.hash +
               (v.current.subject ? ("\n" + v.current.subject) : "") +
-              (date ? ("\n업데이트 날짜: " + date) : "") +
-              "\n클릭: 업데이트 확인";
+              (date ? ("\n" + t("verUpdateDate") + date) : "") +
+              "\n" + t("verClickCheck");
             if (Array.isArray(v.log) && v.log.length) {
-              tip += "\n\n최근 변경:";
+              tip += "\n\n" + t("verRecentChanges");
               for (const c of v.log) tip += "\n" + (c.date || "") + "  " + (c.hash || "") + "  " + (c.subject || "");
             }
             el.title = tip;
@@ -7797,7 +7938,7 @@ const webAppHTML = `<!doctype html>
           } else {
             el.dataset.base = v.devMode ? "MD Viewer Version : dev" : "";
             el.textContent = el.dataset.base;
-            el.title = v.devMode ? "개발 모드 — 자가 업데이트 불가" : "";
+            el.title = v.devMode ? t("verDevMode") : "";
             wrap.hidden = !v.devMode;
           }
         } catch (e) {}
@@ -7811,10 +7952,10 @@ const webAppHTML = `<!doctype html>
           updateBehind = (d && d.behind) ? d.behind : 0;
           if (updateBehind > 0) {
             el.classList.add("update-available");
-            el.textContent = "⬆ 업데이트 " + updateBehind + "개 · " + (el.dataset.base || "");
-            el.title = "새 버전 " + updateBehind + "개 사용 가능" +
-              (d.latest && d.latest.subject ? ("\n최신: " + d.latest.subject) : "") +
-              "\n클릭하면 pull · 빌드 · 재시작합니다.";
+            el.textContent = t("verUpdateBadge").replace("{0}", updateBehind) + (el.dataset.base || "");
+            el.title = t("verUpdateAvail").replace("{0}", updateBehind) +
+              (d.latest && d.latest.subject ? ("\n" + t("verLatest") + d.latest.subject) : "") +
+              "\n" + t("verClickPull");
           } else {
             el.classList.remove("update-available");
             if (el.dataset.base) el.textContent = el.dataset.base;
@@ -7830,24 +7971,24 @@ const webAppHTML = `<!doctype html>
             if (r.ok) { location.reload(); return; }
           } catch (e) { /* still restarting */ }
         }
-        showOverlay("재시작 확인에 실패했어요. 수동으로 새로고침 해주세요.", false);
+        showOverlay(t("verRestartCheckFail"), false);
       }
 
       async function runUpdate() {
-        if (!window.confirm("최신 버전으로 업데이트하고 앱을 재시작할까요?\n(git pull · go build · 자동 재시작)")) return;
-        showOverlay("업데이트 중… (pull · 빌드)\n잠시만 기다려 주세요.", true);
+        if (!window.confirm(t("verConfirmUpdate"))) return;
+        showOverlay(t("verUpdating"), true);
         try {
           const r = await fetch("/api/update", { method: "POST" });
           const d = await r.json();
           if (!d.ok) {
-            showOverlay("업데이트 실패\n\n" + (d.message || "알 수 없는 오류"), false);
+            showOverlay(t("verUpdateFail") + (d.message || t("verUnknownErr")), false);
             setTimeout(hideOverlay, 6000);
             return;
           }
-          showOverlay("업데이트 완료 — 재시작 중…\n자동으로 새로고침됩니다.", true);
+          showOverlay(t("verUpdateDoneRestart"), true);
           pollUntilBack();
         } catch (e) {
-          showOverlay("재시작 중…\n자동으로 새로고침됩니다.", true);
+          showOverlay(t("verRestarting"), true);
           pollUntilBack();
         }
       }
@@ -7866,6 +8007,8 @@ const webAppHTML = `<!doctype html>
       }
 
       loadVersion().then(checkForUpdate);
+      // Re-render the footer text/tooltip in the new language on toggle.
+      window.__refreshVersionFooter = function () { loadVersion().then(checkForUpdate); };
     })();
 
     // Resolve whether the current folder is inside a git repo, then enable or
@@ -7889,7 +8032,7 @@ const webAppHTML = `<!doctype html>
       if (gitBtn) {
         gitBtn.disabled = !isRepo;
         gitBtn.classList.toggle("disabled", !isRepo);
-        gitBtn.title = isRepo ? "상위 Git 저장소 전체 검색" : "현재 폴더가 Git 저장소가 아닙니다";
+        gitBtn.title = isRepo ? t("scopeGitTitle") : t("scopeNotRepo");
       }
       if (!isRepo && state.folderSearchScope === "git") applyFolderScope("folder");
       // File-name browser "Git repo" toggle (only present while the modal exists).
@@ -7897,7 +8040,7 @@ const webAppHTML = `<!doctype html>
       if (fbGitBtn) {
         fbGitBtn.disabled = !isRepo;
         fbGitBtn.classList.toggle("disabled", !isRepo);
-        fbGitBtn.title = isRepo ? "Git 저장소 전체 탐색" : "현재 폴더가 Git 저장소가 아닙니다";
+        fbGitBtn.title = isRepo ? t("fbScopeGitTitle") : t("scopeNotRepo");
       }
       if (!isRepo && state.fbScope === "git") { state.fbScope = "folder"; }
       updateVersionButton();
@@ -8109,11 +8252,11 @@ const webAppHTML = `<!doctype html>
           bar.className = "vcd-mermaid-bar";
           const badge = document.createElement("span");
           badge.className = "vcd-mermaid-badge";
-          badge.textContent = "변경됨";
+          badge.textContent = t("vcdChanged");
           const toggle = document.createElement("button");
           toggle.type = "button";
           toggle.className = "vcd-mermaid-toggle";
-          toggle.textContent = "</> 소스";
+          toggle.textContent = t("vcdShowSource");
           bar.appendChild(badge);
           bar.appendChild(toggle);
 
@@ -8135,7 +8278,7 @@ const webAppHTML = `<!doctype html>
             const showSrc = wrap.hidden !== true ? true : false;
             wrap.hidden = showSrc;
             src.hidden = !showSrc;
-            toggle.textContent = showSrc ? "🖼 다이어그램" : "</> 소스";
+            toggle.textContent = showSrc ? t("vcdShowDiagram") : t("vcdShowSource");
           });
         }
       }
@@ -8167,12 +8310,12 @@ const webAppHTML = `<!doctype html>
 
       async function render() {
         const token = ++renderToken;
-        leftBody.innerHTML = "<div class='vcompare-empty'>불러오는 중…</div>";
+        leftBody.innerHTML = "<div class='vcompare-empty'>" + t("vcLoading") + "</div>";
         rightBody.innerHTML = "";
         const [lc, rc] = await Promise.all([fetchContent(selLeft.value), fetchContent(selRight.value)]);
         if (token !== renderToken) return; // a newer render superseded this one
         if (lc === null || rc === null) {
-          leftBody.innerHTML = "<div class='vcompare-empty'>이 버전을 불러올 수 없습니다.</div>";
+          leftBody.innerHTML = "<div class='vcompare-empty'>" + t("vcLoadFail") + "</div>";
           rightBody.innerHTML = "";
           return;
         }
@@ -8331,7 +8474,7 @@ const webAppHTML = `<!doctype html>
       }
       function updateNavUI() {
         const n = groups.length;
-        if (countEl) countEl.textContent = n ? ((navIdx >= 0 ? (navIdx + 1) : "–") + " / " + n + " 변경") : "변경 없음";
+        if (countEl) countEl.textContent = n ? ((navIdx >= 0 ? (navIdx + 1) : "–") + " / " + n + " " + t("vcChangeWord")) : t("vcNoChanges");
         if (prevBtn) prevBtn.disabled = !n;
         if (nextBtn) nextBtn.disabled = !n;
       }
@@ -8372,9 +8515,9 @@ const webAppHTML = `<!doctype html>
         if (!data || !data.available) { showToast(t("toastNotInGit"), { kind: "err", icon: "⚠️" }); return; }
         const commits = Array.isArray(data.commits) ? data.commits : [];
         entries = [];
-        if (data.dirty) entries.push({ value: "WORKING", label: "● 현재 작업본 (저장된 디스크 내용)" });
+        if (data.dirty) entries.push({ value: "WORKING", label: t("vcWorkingCopy") });
         commits.forEach(function (c, i) {
-          const tag = (i === 0 && !data.dirty) ? "  (최신)" : "";
+          const tag = (i === 0 && !data.dirty) ? t("vcLatestTag") : "";
           entries.push({ value: c.hash, label: c.short + " · " + c.date + " · " + (c.subject || "") + tag });
         });
         if (!entries.length) { showToast(t("toastNoCommits"), { kind: "err", icon: "⚠️" }); return; }
@@ -8385,7 +8528,7 @@ const webAppHTML = `<!doctype html>
         contentCache = {};
         buildOptions(selLeft, leftVal);
         buildOptions(selRight, rightVal);
-        titleEl.textContent = "버전 비교 — " + state.selectedPath.split("/").pop();
+        titleEl.textContent = t("vcTitlePrefix") + state.selectedPath.split("/").pop();
         overlay.hidden = false;
         document.body.classList.add("lightbox-open");
         render();
@@ -8480,14 +8623,14 @@ const webAppHTML = `<!doctype html>
         return { text: "Untitled", untitled: true };
       }
       function relTime(iso) {
-        const t = Date.parse(iso);
-        if (isNaN(t)) return "";
-        const s = Math.floor((Date.now() - t) / 1000);
-        if (s < 60) return "방금";
-        const mins = Math.floor(s / 60); if (mins < 60) return mins + "분 전";
-        const h = Math.floor(mins / 60); if (h < 24) return h + "시간 전";
-        const d = Math.floor(h / 24); if (d < 7) return d + "일 전";
-        const dt = new Date(t); return (dt.getMonth() + 1) + "/" + dt.getDate();
+        const ts = Date.parse(iso);
+        if (isNaN(ts)) return "";
+        const s = Math.floor((Date.now() - ts) / 1000);
+        if (s < 60) return t("relJustNow");
+        const mins = Math.floor(s / 60); if (mins < 60) return t("relMinAgo").replace("{0}", mins);
+        const h = Math.floor(mins / 60); if (h < 24) return t("relHourAgo").replace("{0}", h);
+        const d = Math.floor(h / 24); if (d < 7) return t("relDayAgo").replace("{0}", d);
+        const dt = new Date(ts); return (dt.getMonth() + 1) + "/" + dt.getDate();
       }
       function sortMemos() {
         m.memos.sort(function (a, b) { return (b.updatedAt || "").localeCompare(a.updatedAt || ""); });
@@ -8623,19 +8766,19 @@ const webAppHTML = `<!doctype html>
           title.textContent = displayName(memo).text;
           const time = document.createElement("div");
           time.className = "memo-trash-item-time";
-          time.textContent = "삭제됨 · " + relTime(memo.deletedAt);
+          time.textContent = t("trashDeleted") + " · " + relTime(memo.deletedAt);
           main.appendChild(title);
           main.appendChild(time);
           const restore = document.createElement("button");
           restore.type = "button";
           restore.className = "memo-trash-btn restore";
-          restore.title = "복원";
+          restore.title = t("trashRestore");
           restore.textContent = "↩";
           restore.addEventListener("click", function () { restoreMemo(memo.id); });
           const purge = document.createElement("button");
           purge.type = "button";
           purge.className = "memo-trash-btn purge";
-          purge.title = "영구 삭제";
+          purge.title = t("trashPurge");
           purge.textContent = "×";
           purge.addEventListener("click", function () { purgeMemo(memo.id); });
           item.appendChild(main);
@@ -8662,14 +8805,14 @@ const webAppHTML = `<!doctype html>
       function purgeMemo(id) {
         const memo = m.trash.find(function (x) { return x.id === id; });
         if (!memo) return;
-        if (!window.confirm("이 메모를 영구 삭제할까요?")) return;
+        if (!window.confirm(t("confirmPurgeOne"))) return;
         m.trash = m.trash.filter(function (x) { return x.id !== id; });
         persistTrash();
         renderTrash();
       }
       function emptyTrash() {
         if (!m.trash.length) return;
-        if (!window.confirm("휴지통의 메모 " + m.trash.length + "개를 영구 삭제할까요?")) return;
+        if (!window.confirm(t("confirmPurgeAll").replace("{0}", m.trash.length))) return;
         m.trash = [];
         persistTrash();
         renderTrash();
@@ -8688,8 +8831,8 @@ const webAppHTML = `<!doctype html>
         if (!memo || !memo.sourcePath) { backlinkEl.hidden = true; return; }
         const fileName = memo.sourcePath.split("/").pop();
         const where = memo.sourceHeading ? (fileName + " › " + memo.sourceHeading) : fileName;
-        backlinkEl.textContent = "↩ 출처: " + where;
-        backlinkEl.title = "이 메모를 만든 위치로 이동: " + memo.sourcePath + (memo.sourceHash ? ("#" + memo.sourceHash) : "");
+        backlinkEl.textContent = "↩ " + t("backlinkSource") + where;
+        backlinkEl.title = t("backlinkTitle") + memo.sourcePath + (memo.sourceHash ? ("#" + memo.sourceHash) : "");
         backlinkEl.hidden = false;
       }
 
@@ -8707,7 +8850,7 @@ const webAppHTML = `<!doctype html>
         m.dirty.add(memo.id);
         persistLocal();
         renderList(); // refresh display name + relative time live
-        setSyncState("편집 중…");
+        setSyncState(t("syncEditing"));
         scheduleSync();
       }
 
@@ -8837,9 +8980,9 @@ const webAppHTML = `<!doctype html>
               if (sentAt[id]) m.base[id] = sentAt[id];
             }
           }
-          setSyncState("저장됨 · " + relTime(nowISO()));
+          setSyncState(t("syncSaved") + " · " + relTime(nowISO()));
         } catch (e) {
-          setSyncState("저장 대기 중…"); // periodic flush retries
+          setSyncState(t("syncPending")); // periodic flush retries
         } finally {
           m.pushing = false;
         }
@@ -8971,7 +9114,7 @@ const webAppHTML = `<!doctype html>
         if (toPush.some(function (id) { return !m.conflicts[id]; })) flushDirty();
 
         if (!isInitial && autoChanges > 0) {
-          showToast("다른 세션 변경 " + autoChanges + "건 반영됨", { kind: "ok", icon: "🔄" });
+          showToast(t("toastOtherSession").replace("{0}", autoChanges), { kind: "ok", icon: "🔄" });
         }
         if (Object.keys(m.conflicts).length) openConflictPopup();
       }
@@ -9018,14 +9161,14 @@ const webAppHTML = `<!doctype html>
         const c = m.conflicts[id];
         if (!c || c.kind !== "edit") return;
         // Fork my version into a new memo; original takes the server version.
-        const t = nowISO();
+        const ts = nowISO();
         const mineTitle = (c.mine.title || "").trim();
         const fork = {
           id: genId(),
-          title: mineTitle ? (mineTitle + " (내 버전)") : "(내 버전)",
+          title: mineTitle ? (mineTitle + " " + t("confMineTag")) : t("confMineTag"),
           body: c.mine.body || "",
           pinned: false,
-          createdAt: t, updatedAt: t,
+          createdAt: ts, updatedAt: ts,
         };
         m.memos.unshift(fork);
         m.dirty.add(fork.id);
@@ -9040,10 +9183,10 @@ const webAppHTML = `<!doctype html>
       }
 
       function conflictPreview(memo) {
-        if (!memo) return "(없음)";
-        const t = (memo.title || "").trim();
-        const full = (t ? t + "\n" : "") + (memo.body || "");
-        return full.length > 800 ? full.slice(0, 800) + "…" : (full || "(빈 메모)");
+        if (!memo) return t("confEmpty");
+        const ttl = (memo.title || "").trim();
+        const full = (ttl ? ttl + "\n" : "") + (memo.body || "");
+        return full.length > 800 ? full.slice(0, 800) + "…" : (full || t("confEmptyMemo"));
       }
       function makeConflictBtn(label, primary, onClick) {
         const b = document.createElement("button");
@@ -9069,7 +9212,7 @@ const webAppHTML = `<!doctype html>
         m.resolving = true;
         modal.hidden = false;
         const remaining = Object.keys(m.conflicts).length;
-        if (countEl) countEl.textContent = remaining > 1 ? "(" + remaining + "건 남음)" : "";
+        if (countEl) countEl.textContent = remaining > 1 ? t("confRemaining").replace("{0}", remaining) : "";
 
         bodyEl.innerHTML = "";
         const name = document.createElement("div");
@@ -9083,22 +9226,22 @@ const webAppHTML = `<!doctype html>
         actions.className = "memo-conflict-actions";
 
         if (c.kind === "deleted") {
-          note.textContent = "이 메모를 편집하는 동안 다른 세션에서 삭제되었습니다.";
+          note.textContent = t("confDeletedNote");
           bodyEl.appendChild(note);
           const col = document.createElement("div");
           col.className = "memo-conflict-col";
           const lbl = document.createElement("div");
           lbl.className = "memo-conflict-col-label";
-          lbl.textContent = "내 버전";
+          lbl.textContent = t("confMine");
           const pre = document.createElement("div");
           pre.className = "memo-conflict-preview";
           pre.textContent = conflictPreview(c.mine);
           col.appendChild(lbl); col.appendChild(pre);
           bodyEl.appendChild(col);
-          actions.appendChild(makeConflictBtn("다시 생성", true, function () { resolveKeepMine(c.id); }));
-          actions.appendChild(makeConflictBtn("삭제 수용", false, function () { resolveTakeServer(c.id); }));
+          actions.appendChild(makeConflictBtn(t("confRecreate"), true, function () { resolveKeepMine(c.id); }));
+          actions.appendChild(makeConflictBtn(t("confAcceptDelete"), false, function () { resolveTakeServer(c.id); }));
         } else {
-          note.textContent = "이 메모를 편집하는 동안 다른 세션에서도 다르게 수정되었습니다.";
+          note.textContent = t("confEditNote");
           bodyEl.appendChild(note);
           const cols = document.createElement("div");
           cols.className = "memo-conflict-cols";
@@ -9114,12 +9257,12 @@ const webAppHTML = `<!doctype html>
             col.appendChild(lbl); col.appendChild(pre);
             return col;
           };
-          cols.appendChild(mk("내 버전", c.mine));
-          cols.appendChild(mk("서버 버전", c.theirs));
+          cols.appendChild(mk(t("confMine"), c.mine));
+          cols.appendChild(mk(t("confServer"), c.theirs));
           bodyEl.appendChild(cols);
-          actions.appendChild(makeConflictBtn("내 버전 유지", true, function () { resolveKeepMine(c.id); }));
-          actions.appendChild(makeConflictBtn("서버 버전 적용", false, function () { resolveTakeServer(c.id); }));
-          actions.appendChild(makeConflictBtn("둘 다 보관", false, function () { resolveKeepBoth(c.id); }));
+          actions.appendChild(makeConflictBtn(t("confKeepMine"), true, function () { resolveKeepMine(c.id); }));
+          actions.appendChild(makeConflictBtn(t("confTakeServer"), false, function () { resolveTakeServer(c.id); }));
+          actions.appendChild(makeConflictBtn(t("confKeepBoth"), false, function () { resolveKeepBoth(c.id); }));
         }
         bodyEl.appendChild(actions);
       }
@@ -9304,7 +9447,7 @@ const webAppHTML = `<!doctype html>
             }
             showToast(title ? t("toastMemoCopiedTitle") : t("toastMemoCopiedFile"), { kind: "ok", icon: "📋" });
           } catch (e) {
-            showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+            showToast(t("toastClipFail") + ": " + (e && e.message || e), { kind: "err", icon: "⚠️" });
           }
         });
       }
@@ -9337,6 +9480,12 @@ const webAppHTML = `<!doctype html>
         if (document.visibilityState === "visible") pullAndReconcile(false);
       });
       window.addEventListener("beforeunload", flushBeacon);
+      // Re-render memo list/editor labels (relative time, trash, backlink) on language toggle.
+      window.__refreshMemoPanel = function () {
+        try { renderList(); } catch (e) {}
+        try { syncActiveEditor(); } catch (e) {}
+        try { if (m.resolving) renderConflictPopup(); } catch (e) {}
+      };
     })();
 
     // Sort-mode toggle for the in-file search list.
@@ -9432,7 +9581,7 @@ const webAppHTML = `<!doctype html>
       if (!text) {
         const hint = document.createElement("div");
         hint.className = "subtle";
-        hint.textContent = "Paste mermaid source — or TeX math like $E=mc^2$ — on the left to see it rendered here.";
+        hint.textContent = t("mlHint");
         mermaidLabPreviewEl.appendChild(hint);
         return;
       }
@@ -9447,7 +9596,7 @@ const webAppHTML = `<!doctype html>
         } else {
           const note = document.createElement("div");
           note.className = "subtle";
-          note.textContent = "(KaTeX 로딩 중… 잠시 후 입력하면 렌더됩니다)";
+          note.textContent = t("katexLoading");
           mermaidLabPreviewEl.appendChild(note);
         }
         return;
@@ -9474,7 +9623,7 @@ const webAppHTML = `<!doctype html>
       } catch (err) {
         const errBox = document.createElement("div");
         errBox.className = "mermaid-error";
-        errBox.textContent = "Render failed:\n" + (err && err.message ? err.message : String(err));
+        errBox.textContent = t("mlRenderFail") + "\n" + (err && err.message ? err.message : String(err));
         mermaidLabPreviewEl.appendChild(errBox);
       }
     }
@@ -9489,11 +9638,11 @@ const webAppHTML = `<!doctype html>
     mermaidLabCopyBtnEl.onclick = async function() {
       try {
         await navigator.clipboard.writeText(mermaidLabEditorEl.value || "");
-        mermaidLabCopyBtnEl.textContent = "Copied!";
-        setTimeout(function() { mermaidLabCopyBtnEl.textContent = "Copy"; }, 1000);
+        mermaidLabCopyBtnEl.textContent = t("mlCopied");
+        setTimeout(function() { mermaidLabCopyBtnEl.textContent = t("mlCopy"); }, 1000);
       } catch (e) {
-        mermaidLabCopyBtnEl.textContent = "Failed";
-        setTimeout(function() { mermaidLabCopyBtnEl.textContent = "Copy"; }, 1000);
+        mermaidLabCopyBtnEl.textContent = t("mlFailed");
+        setTimeout(function() { mermaidLabCopyBtnEl.textContent = t("mlCopy"); }, 1000);
       }
     };
     mermaidLabEditorEl.addEventListener("input", function(event) {
@@ -9508,7 +9657,11 @@ const webAppHTML = `<!doctype html>
     // ---------- Theme toggle (Auto → Light → Dark) ----------
     const themeToggleEl = document.getElementById("themeToggle");
     const THEME_ORDER = ["auto", "light", "dark"];
-    const THEME_LABEL = { auto: "Auto", light: "Light", dark: "Dark" };
+    function themeLabel(theme) {
+      if (theme === "light") return t("themeLight");
+      if (theme === "dark") return t("themeDark");
+      return t("themeAuto");
+    }
     const THEME_ICON = {
       auto:  '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>',
       light: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
@@ -9535,9 +9688,9 @@ const webAppHTML = `<!doctype html>
       }
       if (themeToggleEl) {
         themeToggleEl.innerHTML = THEME_ICON[theme] || THEME_ICON.auto;
-        const label = THEME_LABEL[theme] || "Auto";
-        themeToggleEl.title = "Theme: " + label + " (click to cycle)";
-        themeToggleEl.setAttribute("aria-label", "Theme: " + label);
+        const label = themeLabel(theme);
+        themeToggleEl.title = t("themeTitle").replace("{0}", label);
+        themeToggleEl.setAttribute("aria-label", t("themeAria").replace("{0}", label));
       }
       syncHljsTheme(theme);
     }
@@ -9865,7 +10018,7 @@ const webAppHTML = `<!doctype html>
     }
 
     function loadFolderBrowse() {
-      fbResultsEl.innerHTML = '<div class="fb-loading">불러오는 중…</div>';
+      fbResultsEl.innerHTML = '<div class="fb-loading">' + t("fbLoading") + '</div>';
       fbAllGroups = [];
       const cwd = state.cwd || "";
       const url = "/api/list-recursive?dir=" + encodeURIComponent(cwd) +
@@ -9877,7 +10030,7 @@ const webAppHTML = `<!doctype html>
           renderFolderBrowse(fbSearchEl.value);
         })
         .catch(function() {
-          fbResultsEl.innerHTML = '<div class="fb-empty">불러오기 실패</div>';
+          fbResultsEl.innerHTML = '<div class="fb-empty">' + t("fbLoadFail") + '</div>';
         });
     }
 
@@ -9887,10 +10040,10 @@ const webAppHTML = `<!doctype html>
       // so the recursive browser opens pre-filtered to the same query.
       const seed = (searchInputEl && searchInputEl.value) ? searchInputEl.value.trim() : "";
       fbSearchEl.value = seed;
-      fbResultsEl.innerHTML = '<div class="fb-loading">불러오는 중…</div>';
+      fbResultsEl.innerHTML = '<div class="fb-loading">' + t("fbLoading") + '</div>';
       const cwd = state.cwd || "";
       const shortCwd = cwd ? cwd.replace(/.*\//, "") || cwd : "";
-      folderBrowseTitleEl.textContent = shortCwd ? shortCwd + " 하위 폴더 탐색" : "하위 폴더 탐색";
+      folderBrowseTitleEl.textContent = shortCwd ? t("fbTitleWith").replace("{0}", shortCwd) : t("fbTitle");
       fbAllGroups = [];
       // Focus and select the seeded text so the user can refine or replace it.
       setTimeout(() => { try { fbSearchEl.focus(); fbSearchEl.select(); } catch (e) {} }, 50);
@@ -9981,7 +10134,7 @@ const webAppHTML = `<!doctype html>
       if (!hasAny) {
         const empty = document.createElement("div");
         empty.className = "fb-empty";
-        empty.textContent = lq ? "검색 결과 없음" : "파일 없음";
+        empty.textContent = lq ? t("fbNoMatch") : t("fbNoFiles");
         fbResultsEl.appendChild(empty);
       }
     }
@@ -11038,7 +11191,7 @@ const webAppHTML = `<!doctype html>
       try {
         dataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
       } catch (e) {
-        showToast("SVG 인코딩 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+        showToast(t("errSvgEncode") + ": " + (e && e.message || e), { kind: "err", icon: "⚠️" });
         onBlob(null);
         return;
       }
@@ -11063,19 +11216,19 @@ const webAppHTML = `<!doctype html>
         try {
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         } catch (e) {
-          showToast("Canvas 그리기 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+          showToast(t("errCanvasDraw") + ": " + (e && e.message || e), { kind: "err", icon: "⚠️" });
           onBlob(null);
           return;
         }
         canvas.toBlob((b) => {
           if (!b) {
-            showToast("PNG 인코딩 실패 (canvas.toBlob null)", { kind: "err", icon: "⚠️" });
+            showToast(t("errPngEncode"), { kind: "err", icon: "⚠️" });
           }
           onBlob(b, "image/png");
         }, "image/png");
       };
       img.onerror = (e) => {
-        showToast("SVG 이미지 로딩 실패 (data URL " + Math.round(dataUrl.length / 1024) + "KB)", { kind: "err", icon: "⚠️" });
+        showToast(t("errSvgImgLoad") + " (data URL " + Math.round(dataUrl.length / 1024) + "KB)", { kind: "err", icon: "⚠️" });
         onBlob(null);
       };
       img.src = dataUrl;
@@ -11084,7 +11237,7 @@ const webAppHTML = `<!doctype html>
     function saveLightboxImage() {
       const child = lightboxStageEl.firstElementChild;
       if (!child) {
-        showToast("저장할 콘텐츠가 없어요", { kind: "err", icon: "⚠️" });
+        showToast(t("toastNoSaveContent"), { kind: "err", icon: "⚠️" });
         return;
       }
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -11098,11 +11251,11 @@ const webAppHTML = `<!doctype html>
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        showToast("이미지를 저장했어요", { kind: "ok", icon: "💾" });
+        showToast(t("toastImgSaved"), { kind: "ok", icon: "💾" });
         return;
       }
       renderLightboxToBlob((blob) => {
-        if (!blob) { showToast("저장할 이미지를 만들 수 없어요", { kind: "err", icon: "⚠️" }); return; }
+        if (!blob) { showToast(t("toastNoSaveImg"), { kind: "err", icon: "⚠️" }); return; }
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = "diagram-" + stamp + ".png";
@@ -11110,18 +11263,18 @@ const webAppHTML = `<!doctype html>
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-        showToast("PNG로 저장했어요 (" + a.download + ")", { kind: "ok", icon: "💾" });
+        showToast(t("toastPngSaved") + " (" + a.download + ")", { kind: "ok", icon: "💾" });
       });
     }
 
     async function copyLightboxImage() {
       if (!navigator.clipboard || typeof window.ClipboardItem !== "function") {
-        showToast("이 브라우저는 이미지 클립보드 복사를 지원하지 않아요", { kind: "err", icon: "⚠️" });
+        showToast(t("toastNoImgClip"), { kind: "err", icon: "⚠️" });
         return;
       }
       const child = lightboxStageEl.firstElementChild;
       if (!child) {
-        showToast("복사할 콘텐츠가 없어요", { kind: "err", icon: "⚠️" });
+        showToast(t("toastNoCopyContent"), { kind: "err", icon: "⚠️" });
         return;
       }
       // Build the blob lazily inside a Promise. ClipboardItem accepts
@@ -11142,20 +11295,20 @@ const webAppHTML = `<!doctype html>
             canvas.height = tmp.naturalHeight || tmp.height || 600;
             const ctx = canvas.getContext("2d");
             ctx.drawImage(tmp, 0, 0);
-            canvas.toBlob((b) => b ? resolve(b) : reject(new Error("PNG 변환 실패")), "image/png");
+            canvas.toBlob((b) => b ? resolve(b) : reject(new Error(t("errPngConvert"))), "image/png");
           };
-          tmp.onerror = () => reject(new Error("이미지 로딩 실패"));
+          tmp.onerror = () => reject(new Error(t("errImgLoad")));
           tmp.src = child.src;
         } else {
-          renderLightboxToBlob((b) => b ? resolve(b) : reject(new Error("렌더 실패")));
+          renderLightboxToBlob((b) => b ? resolve(b) : reject(new Error(t("errRender"))));
         }
       });
       try {
         const item = new ClipboardItem({ "image/png": blobPromise });
         await navigator.clipboard.write([item]);
-        showToast("이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+        showToast(t("toastImgClipCopied"), { kind: "ok", icon: "📋" });
       } catch (e) {
-        showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+        showToast(t("toastClipFail") + ": " + (e && e.message || e), { kind: "err", icon: "⚠️" });
       }
     }
 
@@ -11200,7 +11353,7 @@ const webAppHTML = `<!doctype html>
       // already trying to close.
       _lbAnnoActive = null;
       if (hasAnnotations()) {
-        const ok = window.confirm("주석이 있어요. 닫으면 저장하지 않은 그림은 사라집니다.\n💾로 PNG 저장 후 닫으시겠어요?\n\n[확인] 지금 저장 → 닫기\n[취소] 그냥 닫기");
+        const ok = window.confirm(t("lbCloseConfirm"));
         if (ok) {
           // Bake to PNG, then close once the download is triggered.
           saveLightboxImage();
@@ -11752,15 +11905,15 @@ const webAppHTML = `<!doctype html>
       } catch (err) {
         console.error("copy failed:", err);
         if (btn) flashButton(btn, "Copy failed", false);
-        showToast("클립보드 복사 실패: " + (err && err.message || err), { kind: "err", icon: "⚠️" });
+        showToast(t("toastClipFail") + ": " + (err && err.message || err), { kind: "err", icon: "⚠️" });
       }
     }
 
     async function copyMermaidImage(el) {
       const svg = el.querySelector("svg");
-      if (!svg) { showToast("복사할 다이어그램이 없어요", { kind: "err", icon: "⚠️" }); return; }
+      if (!svg) { showToast(t("toastNoDiagram"), { kind: "err", icon: "⚠️" }); return; }
       if (!navigator.clipboard || typeof window.ClipboardItem !== "function") {
-        showToast("이 브라우저는 이미지 클립보드 복사를 지원하지 않아요", { kind: "err", icon: "⚠️" });
+        showToast(t("toastNoImgClip"), { kind: "err", icon: "⚠️" });
         return;
       }
       // Same lazy-Promise pattern as copyLightboxImage so the
@@ -11782,7 +11935,7 @@ const webAppHTML = `<!doctype html>
         try {
           dataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
         } catch (e) {
-          reject(new Error("SVG 인코딩 실패")); return;
+          reject(new Error(t("errSvgEncode"))); return;
         }
         const img = new Image();
         img.onload = () => {
@@ -11802,20 +11955,20 @@ const webAppHTML = `<!doctype html>
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           try { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); }
-          catch (e) { reject(new Error("Canvas 그리기 실패: " + (e && e.message || e))); return; }
+          catch (e) { reject(new Error(t("errCanvasDraw") + ": " + (e && e.message || e))); return; }
           canvas.toBlob((b) => {
-            b ? resolve(b) : reject(new Error("PNG 인코딩 실패 (canvas.toBlob null)"));
+            b ? resolve(b) : reject(new Error(t("errPngEncode")));
           }, "image/png");
         };
-        img.onerror = () => { reject(new Error("SVG 이미지 로딩 실패 (" + Math.round(dataUrl.length / 1024) + "KB)")); };
+        img.onerror = () => { reject(new Error(t("errSvgImgLoad") + " (" + Math.round(dataUrl.length / 1024) + "KB)")); };
         img.src = dataUrl;
       });
       try {
         const item = new ClipboardItem({ "image/png": blobPromise });
         await navigator.clipboard.write([item]);
-        showToast("다이어그램 이미지를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+        showToast(t("toastDiagramClipCopied"), { kind: "ok", icon: "📋" });
       } catch (e) {
-        showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
+        showToast(t("toastClipFail") + ": " + (e && e.message || e), { kind: "err", icon: "⚠️" });
       }
     }
 
