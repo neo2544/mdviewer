@@ -1464,6 +1464,15 @@ const webAppHTML = `<!doctype html>
     .upd-toggle.active { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 60%, var(--line)); background: color-mix(in oklab, var(--accent) 14%, var(--panel-2)); }
     .upd-toggle.active .upd-switch { background: var(--accent); }
     .upd-toggle.active .upd-knob { transform: translateX(10px); }
+    .upd-nav { display: inline-flex; align-items: center; gap: 4px; }
+    .upd-nav[hidden] { display: none; }
+    .upd-nav .action { padding: 5px 7px; }
+    .upd-nav-count { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 30px; text-align: center; white-space: nowrap; }
+    .preview-body .upd-flash { animation: updFlash 0.95s ease; border-radius: 4px; }
+    @keyframes updFlash {
+      0% { outline: 2px solid color-mix(in oklab, var(--accent) 75%, transparent); outline-offset: 2px; }
+      100% { outline: 2px solid transparent; outline-offset: 2px; }
+    }
 
     /* Inline update-diff annotations on the rendered preview. */
     .upd-note { margin: 0 0 12px; padding: 6px 10px; border-radius: 8px; font-size: 12px;
@@ -3902,6 +3911,11 @@ const webAppHTML = `<!doctype html>
             <span>Version</span>
           </button>
           <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden title="Show what changed since the last version, inline (additions green, deletions red strikethrough)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text">Changes</span></button>
+          <span class="upd-nav" id="updNav" hidden>
+            <button class="action icon-only" id="updPrev" type="button" title="Previous change (↑)" aria-label="Previous change">▲</button>
+            <span class="upd-nav-count" id="updNavCount"></span>
+            <button class="action icon-only" id="updNext" type="button" title="Next change (↓)" aria-label="Next change">▼</button>
+          </span>
           <div class="seg" role="tablist" aria-label="View mode">
             <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -6058,12 +6072,16 @@ const webAppHTML = `<!doctype html>
         guideSubtitle: "Select a file from the left to open your content.",
         guideMeta: "Usage guide",
         langTitle: "Language: English — click for 한국어",
+        updNoChange: "No changes since the last version.",
+        updNoneShown: "no changes",
       },
       ko: {
         guideBanner: "내장 사용 가이드",
         guideSubtitle: "왼쪽에서 파일을 선택해 내용을 열어보세요.",
         guideMeta: "사용 가이드",
         langTitle: "언어: 한국어 — 클릭 시 English",
+        updNoChange: "마지막 버전과 동일 — 변경 없음.",
+        updNoneShown: "변경 없음",
       },
     };
     function t(key) {
@@ -6932,6 +6950,7 @@ const webAppHTML = `<!doctype html>
       const oldLines = oldContent.split("\n"), newLines = newContent.split("\n");
       const blank = function (s) { return !s || !s.trim(); };
       const seen = new Set();
+      const anchors = []; // change locations, for ▲/▼ navigation
       for (const pr of diff.pairs) {
         if (blank(oldLines[pr.o]) && blank(newLines[pr.n])) continue;
         const ne = updAnchorForLine(newContainer, pr.n), oe = updAnchorForLine(oldContainer, pr.o);
@@ -6939,11 +6958,12 @@ const webAppHTML = `<!doctype html>
         if ((ne.closest && ne.closest(".mermaid-wrap")) || (ne.classList && ne.classList.contains("mermaid-wrap"))) continue;
         seen.add(ne);
         try { updInlineChange(ne, oe.textContent || "", ne.textContent || ""); } catch (e) {}
+        anchors.push(ne);
       }
       for (const ln of diff.addedNew) {
         if (blank(newLines[ln])) continue;          // blank lines have no rendered block
         const ne = updAnchorForLine(newContainer, ln);
-        if (ne && !seen.has(ne)) ne.classList.add("upd-add-block");
+        if (ne && !seen.has(ne)) { ne.classList.add("upd-add-block"); seen.add(ne); anchors.push(ne); }
       }
       const insertedRemoved = new Set();
       for (const rm of diff.removedOld) {
@@ -6959,7 +6979,43 @@ const webAppHTML = `<!doctype html>
         const anchor = rm.afterNew >= 0 ? updAnchorForLine(newContainer, rm.afterNew) : null;
         if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(block, anchor.nextSibling);
         else newContainer.insertBefore(block, newContainer.firstChild);
+        anchors.push(block);
       }
+      // Order anchors by document position so ▲/▼ navigation walks top→bottom.
+      anchors.sort(function (a, b) {
+        const p = a.compareDocumentPosition(b);
+        if (p & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (p & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return 0;
+      });
+      return anchors;
+    }
+    // ▲/▼ navigation across the change locations in the Changes overlay.
+    let updChanges = [], updNavIdx = -1;
+    function buildUpdNav(anchors) {
+      updChanges = anchors || [];
+      updNavIdx = -1;
+      const nav = document.getElementById("updNav");
+      const count = document.getElementById("updNavCount");
+      const has = state.updMode && updChanges.length > 0;
+      if (nav) nav.hidden = !has;
+      if (count) count.textContent = updChanges.length ? ("– / " + updChanges.length) : t("updNoneShown");
+    }
+    function updFlash(el) {
+      if (!el) return;
+      el.classList.remove("upd-flash"); void el.offsetWidth; el.classList.add("upd-flash");
+      setTimeout(function () { try { el.classList.remove("upd-flash"); } catch (e) {} }, 950);
+    }
+    function updGoToChange(i) {
+      if (!updChanges.length) return;
+      updNavIdx = (i % updChanges.length + updChanges.length) % updChanges.length;
+      const el = updChanges[updNavIdx];
+      if (!el) return;
+      const br = previewBodyEl.getBoundingClientRect(), er = el.getBoundingClientRect();
+      previewBodyEl.scrollTop += (er.top - br.top) - 60;
+      updFlash(el);
+      const count = document.getElementById("updNavCount");
+      if (count) count.textContent = (updNavIdx + 1) + " / " + updChanges.length;
     }
     async function renderUpdateDiff(container, data) {
       const path = state.selectedPath;
@@ -6970,21 +7026,25 @@ const webAppHTML = `<!doctype html>
       try {
         const r = await fetch("/api/git/filelog?path=" + encodeURIComponent(path));
         const log = await r.json();
+        const norm = function (s) { return (s || "").replace(/\r/g, "").replace(/\s+$/, ""); };
         if (log && log.available && Array.isArray(log.commits) && log.commits.length) {
           const headC = await updGitShow(path, log.commits[0].hash);
-          if (headC != null && headC.replace(/\r/g, "") !== newContent.replace(/\r/g, "")) {
+          if (headC != null && norm(headC) !== norm(newContent)) {
             oldContent = headC;                                   // dirty: HEAD → working
           } else if (log.commits[1]) {
             oldContent = await updGitShow(path, log.commits[1].hash); // clean: prev → HEAD(=working)
           }
         }
       } catch (e) { /* fall through */ }
-      if (oldContent == null) { updNote(container, "마지막 커밋과 동일 — 변경 없음"); return; }
+      buildUpdNav([]); // reset nav until we have anchors
+      if (oldContent == null) { updNote(container, t("updNoChange")); return; }
       // Old version: parse + source-line stamp only (no mermaid/hljs needed — we
       // just read rendered text per line).
       const oldBox = document.createElement("div");
       try { oldBox.innerHTML = marked.parse(oldContent); annotateSourceLines(oldBox, oldContent); } catch (e) { return; }
-      try { annotateUpdateDiff(container, oldBox, oldContent, newContent); } catch (e) {}
+      let anchors = [];
+      try { anchors = annotateUpdateDiff(container, oldBox, oldContent, newContent) || []; } catch (e) {}
+      buildUpdNav(anchors);
     }
 
     async function renderPreview(data) {
@@ -7508,6 +7568,10 @@ const webAppHTML = `<!doctype html>
           requestAnimationFrame(() => { previewBodyEl.scrollTop = top; });
         }
       };
+      const updPrevB = document.getElementById("updPrev");
+      const updNextB = document.getElementById("updNext");
+      if (updPrevB) updPrevB.onclick = () => updGoToChange(updNavIdx - 1);
+      if (updNextB) updNextB.onclick = () => updGoToChange(updNavIdx + 1);
     }
     editModeButtonEl.onclick = () => {
       if (!canEditKind(state.selectedKind)) return;
@@ -7753,6 +7817,9 @@ const webAppHTML = `<!doctype html>
       t.hidden = !eligible;
       t.classList.toggle("active", eligible && state.updMode);
       t.setAttribute("aria-checked", (eligible && state.updMode) ? "true" : "false");
+      // The change-nav only makes sense while the overlay is on; buildUpdNav
+      // re-shows it after a diff renders.
+      if (!(eligible && state.updMode)) { const nav = document.getElementById("updNav"); if (nav) nav.hidden = true; }
     }
 
     // ── Git version compare (before/after) ──
@@ -12036,12 +12103,19 @@ func (s *webServer) handleGitShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel = filepath.ToSlash(rel)
-	out, gerr := gitOutput(r.Context(), root, "show", rev+":"+rel)
+	// Raw stdout — do NOT trim. Trimming would drop the committed file's
+	// trailing newline, which makes a clean working copy look "changed"
+	// against HEAD and breaks the diff (only an empty trailing line differs).
+	raw, gerr := exec.CommandContext(r.Context(), "git", "-C", root, "show", rev+":"+rel).Output()
 	if gerr != nil {
-		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": out})
+		msg := gerr.Error()
+		if ee, ok := gerr.(*exec.ExitError); ok {
+			msg = strings.TrimSpace(string(ee.Stderr))
+		}
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": msg})
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "content": out})
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "content": string(raw)})
 }
 
 // handleAidlc powers the "AI-DLC" sidebar mode. The mode is available only when
