@@ -1444,6 +1444,34 @@ const webAppHTML = `<!doctype html>
     .aidlc-toggle.active .aidlc-switch { background: var(--accent-2); }
     .aidlc-toggle.active .aidlc-knob { transform: translateX(10px); }
     .aidlc-toggle.active .aidlc-toggle-state { opacity: 1; }
+
+    /* "업데이트 내역" toggle — same sliding-switch idiom as the AI-DLC toggle. */
+    .upd-toggle[hidden] { display: none; }
+    .upd-toggle {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--line); background: transparent; color: var(--muted);
+      font-size: 10px; font-weight: 700; letter-spacing: .04em;
+      padding: 4px 9px 4px 6px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+      transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+    }
+    .upd-switch { position: relative; flex: 0 0 auto; width: 22px; height: 12px; border-radius: 999px; background: color-mix(in oklab, var(--muted) 55%, transparent); transition: background 140ms ease; }
+    .upd-knob { position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform 140ms ease; }
+    .upd-toggle:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); }
+    .upd-toggle.active { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 60%, var(--line)); background: color-mix(in oklab, var(--accent) 14%, var(--panel-2)); }
+    .upd-toggle.active .upd-switch { background: var(--accent); }
+    .upd-toggle.active .upd-knob { transform: translateX(10px); }
+
+    /* Inline update-diff annotations on the rendered preview. */
+    .upd-note { margin: 0 0 12px; padding: 6px 10px; border-radius: 8px; font-size: 12px;
+      color: var(--muted); background: color-mix(in oklab, var(--accent) 10%, transparent);
+      border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--line)); }
+    .upd-add { background: color-mix(in oklab, #3fb950 30%, transparent); border-radius: 2px; }
+    .upd-del { background: color-mix(in oklab, #e0533f 26%, transparent); color: inherit; text-decoration: line-through; border-radius: 2px; }
+    mark.upd-add, mark.upd-del { color: inherit; padding: 0 1px; }
+    /* Whole added block / line. */
+    .preview-body .upd-add-block { background: color-mix(in oklab, #3fb950 14%, transparent); box-shadow: inset 3px 0 0 color-mix(in oklab, #3fb950 60%, transparent); border-radius: 4px; }
+    /* Inserted "removed" block (entire deleted line/paragraph). */
+    .upd-removed-block { background: color-mix(in oklab, #e0533f 12%, transparent); box-shadow: inset 3px 0 0 color-mix(in oklab, #e0533f 60%, transparent); border-radius: 4px; text-decoration: line-through; color: color-mix(in oklab, var(--text) 60%, var(--muted)); opacity: .85; margin: 4px 0; padding: 2px 6px; }
     .section-chevron {
       display: inline-block;
       width: 12px;
@@ -3868,6 +3896,7 @@ const webAppHTML = `<!doctype html>
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a3 3 0 0 1-3 3H9"/><circle cx="18" cy="6" r="3"/></svg>
             <span>Version</span>
           </button>
+          <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden title="마지막 버전에서 무엇이 바뀌었는지 미리보기에 인라인 표시 (추가=녹색, 삭제=빨강 취소선)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text">업데이트 내역</span></button>
           <div class="seg" role="tablist" aria-label="View mode">
             <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -4292,6 +4321,8 @@ const webAppHTML = `<!doctype html>
       aidlcCwd: null,    // cwd the AI-DLC list was last resolved for
       aidlcWanted: localStorage.getItem("mdviewer.aidlcMode") === "1",
       aidlcMode: false,
+      updMode: localStorage.getItem("mdviewer.updMode") === "1", // show inline changes vs last version
+      gitFileHasHistory: false,                                  // current file is tracked w/ commits
       aidlcPrevSort: null, // sort to restore when leaving AI-DLC mode
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
       searchPanelWidth: Number(localStorage.getItem("mdviewer.searchPanelWidth") || 240),
@@ -4769,6 +4800,7 @@ const webAppHTML = `<!doctype html>
       const canSave = editable && state.selectedPath && state.editDirty;
       saveButtonEl.disabled = !canSave;
       saveButtonEl.classList.toggle("is-primary", !!canSave);
+      if (typeof updateUpdToggle === "function") updateUpdToggle();
     }
 
     function setEditorMode(mode) {
@@ -6711,8 +6743,201 @@ const webAppHTML = `<!doctype html>
       try { attachZoomToPreview(); } catch (e) {}
     }
 
+    // ── "업데이트 내역": inline diff of the working copy vs the last version ──
+    // Renders the working markdown, then overlays change marks: added text/blocks
+    // in green, removed text inserted in place with a red strikethrough. Compare
+    // target is automatic — uncommitted changes (HEAD→working) when the file is
+    // dirty, otherwise the most recent commit (prev→HEAD).
+    async function updGitShow(path, rev) {
+      try {
+        const r = await fetch("/api/git/show?path=" + encodeURIComponent(path) + "&rev=" + encodeURIComponent(rev));
+        const j = await r.json();
+        return (j && j.ok) ? (j.content || "") : null;
+      } catch (e) { return null; }
+    }
+    function updLcs(a, b) {
+      if (!a.length) return b.map(function () { return { t: "add" }; });
+      if (!b.length) return a.map(function () { return { t: "del" }; });
+      if (a.length * b.length > 4000000) return a.map(function () { return { t: "del" }; }).concat(b.map(function () { return { t: "add" }; }));
+      const n = a.length, m = b.length, dp = [];
+      for (let i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      const ops = []; let i = 0, j = 0;
+      while (i < n && j < m) { if (a[i] === b[j]) { ops.push({ t: "same" }); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: "del" }); i++; } else { ops.push({ t: "add" }); j++; } }
+      while (i < n) { ops.push({ t: "del" }); i++; } while (j < m) { ops.push({ t: "add" }); j++; }
+      return ops;
+    }
+    function updLineDiff(oldText, newText) {
+      const a = oldText.split("\n"), b = newText.split("\n");
+      let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+      let sa = a.length, sb = b.length; while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
+      const ops = updLcs(a.slice(p, sa), b.slice(p, sb));
+      const addedNew = new Set(), pairs = [], removedOld = [];
+      let oLine = p, nLine = p, dels = [], adds = [], lastNew = p - 1;
+      function flush() {
+        const k = Math.min(dels.length, adds.length);
+        for (let i = 0; i < k; i++) pairs.push({ o: dels[i], n: adds[i] });
+        for (let i = k; i < dels.length; i++) removedOld.push({ o: dels[i], afterNew: lastNew });
+        for (let i = k; i < adds.length; i++) addedNew.add(adds[i]);
+        dels = []; adds = [];
+      }
+      for (const op of ops) {
+        if (op.t === "same") { flush(); oLine++; nLine++; lastNew = nLine - 1; }
+        else if (op.t === "del") { dels.push(oLine); oLine++; }
+        else { adds.push(nLine); nLine++; lastNew = nLine - 1; }
+      }
+      flush();
+      return { addedNew: addedNew, pairs: pairs, removedOld: removedOld };
+    }
+    function updCharOps(a, b) {
+      const n = a.length, m = b.length;
+      if (n * m > 200000) return null;
+      if (!n && !m) return [];
+      const dp = []; for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      const ops = []; let i = 0, j = 0;
+      function push(t, ch) { const last = ops[ops.length - 1]; if (last && last.t === t) last.text += ch; else ops.push({ t: t, text: ch }); }
+      while (i < n && j < m) { if (a[i] === b[j]) { push("same", a[i]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", a[i]); i++; } else { push("add", b[j]); j++; } }
+      while (i < n) { push("del", a[i]); i++; } while (j < m) { push("add", b[j]); j++; }
+      return ops;
+    }
+    function updAnchorForLine(body, line) {
+      if (line == null) return null;
+      function depthOf(el) { let d = 0; while (el && el !== body) { el = el.parentElement; d++; } return d; }
+      const blocks = Array.from(body.querySelectorAll("[data-source-line]"))
+        .map(function (el) { return { el: el, line: parseInt(el.getAttribute("data-source-line"), 10), depth: depthOf(el) }; })
+        .filter(function (b) { return !isNaN(b.line); })
+        .sort(function (a, b) { return (a.line - b.line) || (a.depth - b.depth); });
+      if (!blocks.length) return null;
+      let lo = 0, hi = blocks.length - 1, idx = 0;
+      while (lo <= hi) { const mid = (lo + hi) >> 1; if (blocks[mid].line <= line) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+      return blocks[idx].el;
+    }
+    function updWrapRanges(container, ranges, cls) {
+      if (!ranges || !ranges.length) return;
+      const nodes = []; const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let nd; while ((nd = tw.nextNode())) nodes.push(nd);
+      let pos = 0;
+      for (const node of nodes) {
+        const text = node.nodeValue; const start = pos, end = pos + text.length; pos = end;
+        const local = [];
+        for (const r of ranges) { const a = Math.max(r.start, start), b = Math.min(r.end, end); if (a < b) local.push([a - start, b - start]); }
+        if (!local.length) continue;
+        const frag = document.createDocumentFragment(); let cur = 0;
+        for (const seg of local) {
+          if (seg[0] > cur) frag.appendChild(document.createTextNode(text.slice(cur, seg[0])));
+          const mark = document.createElement("mark"); mark.className = cls; mark.textContent = text.slice(seg[0], seg[1]);
+          frag.appendChild(mark); cur = seg[1];
+        }
+        if (cur < text.length) frag.appendChild(document.createTextNode(text.slice(cur)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    }
+    function updInsertAtOffset(container, off, node) {
+      const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let pos = 0, tn;
+      while ((tn = tw.nextNode())) {
+        const len = tn.nodeValue.length;
+        if (off <= pos + len) {
+          const local = off - pos, parent = tn.parentNode;
+          if (!parent) return;
+          if (local <= 0) { parent.insertBefore(node, tn); return; }
+          if (local >= len) { parent.insertBefore(node, tn.nextSibling); return; }
+          const after = tn.splitText(local);
+          parent.insertBefore(node, after);
+          return;
+        }
+        pos += len;
+      }
+      container.appendChild(node);
+    }
+    function updInlineChange(newEl, oldText, newText) {
+      const ops = updCharOps(oldText, newText);
+      if (!ops) return;
+      const addRanges = [], delInserts = [];
+      let no = 0;
+      for (const op of ops) {
+        if (op.t === "same") { no += op.text.length; }
+        else if (op.t === "add") { addRanges.push({ start: no, end: no + op.text.length }); no += op.text.length; }
+        else { delInserts.push({ off: no, text: op.text }); }
+      }
+      updWrapRanges(newEl, addRanges, "upd-add");          // additions: offsets stay valid
+      delInserts.sort(function (a, b) { return b.off - a.off; }); // descending so inserts don't shift earlier offsets
+      for (const d of delInserts) {
+        const mark = document.createElement("mark"); mark.className = "upd-del"; mark.textContent = d.text;
+        updInsertAtOffset(newEl, d.off, mark);
+      }
+    }
+    function updNote(container, msg) {
+      const n = document.createElement("div"); n.className = "upd-note"; n.textContent = "📝 " + msg;
+      container.insertBefore(n, container.firstChild);
+    }
+    function annotateUpdateDiff(newContainer, oldContainer, oldContent, newContent) {
+      const diff = updLineDiff(oldContent, newContent);
+      const oldLines = oldContent.split("\n"), newLines = newContent.split("\n");
+      const blank = function (s) { return !s || !s.trim(); };
+      const seen = new Set();
+      for (const pr of diff.pairs) {
+        if (blank(oldLines[pr.o]) && blank(newLines[pr.n])) continue;
+        const ne = updAnchorForLine(newContainer, pr.n), oe = updAnchorForLine(oldContainer, pr.o);
+        if (!ne || !oe || seen.has(ne)) continue;
+        if ((ne.closest && ne.closest(".mermaid-wrap")) || (ne.classList && ne.classList.contains("mermaid-wrap"))) continue;
+        seen.add(ne);
+        try { updInlineChange(ne, oe.textContent || "", ne.textContent || ""); } catch (e) {}
+      }
+      for (const ln of diff.addedNew) {
+        if (blank(newLines[ln])) continue;          // blank lines have no rendered block
+        const ne = updAnchorForLine(newContainer, ln);
+        if (ne && !seen.has(ne)) ne.classList.add("upd-add-block");
+      }
+      const insertedRemoved = new Set();
+      for (const rm of diff.removedOld) {
+        if (blank(oldLines[rm.o])) continue;        // skip removed blank lines
+        const oe = updAnchorForLine(oldContainer, rm.o);
+        if (!oe || insertedRemoved.has(oe)) continue; // avoid duplicate inserts for the same block
+        const txt = (oe.textContent || "").replace(/\s+/g, " ").trim();
+        if (!txt) continue;
+        insertedRemoved.add(oe);
+        const block = document.createElement("div");
+        block.className = "upd-removed-block";
+        block.textContent = txt;
+        const anchor = rm.afterNew >= 0 ? updAnchorForLine(newContainer, rm.afterNew) : null;
+        if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(block, anchor.nextSibling);
+        else newContainer.insertBefore(block, newContainer.firstChild);
+      }
+    }
+    async function renderUpdateDiff(container, data) {
+      const path = state.selectedPath;
+      const newContent = (data && data.content) || "";
+      // Visible: the working markdown, with source-line tracking for mapping.
+      await renderMarkdownInto(container, newContent, "markdown", { trackSourceLines: true });
+      let oldContent = null;
+      try {
+        const r = await fetch("/api/git/filelog?path=" + encodeURIComponent(path));
+        const log = await r.json();
+        if (log && log.available && Array.isArray(log.commits) && log.commits.length) {
+          const headC = await updGitShow(path, log.commits[0].hash);
+          if (headC != null && headC.replace(/\r/g, "") !== newContent.replace(/\r/g, "")) {
+            oldContent = headC;                                   // dirty: HEAD → working
+          } else if (log.commits[1]) {
+            oldContent = await updGitShow(path, log.commits[1].hash); // clean: prev → HEAD(=working)
+          }
+        }
+      } catch (e) { /* fall through */ }
+      if (oldContent == null) { updNote(container, "마지막 커밋과 동일 — 변경 없음"); return; }
+      // Old version: parse + source-line stamp only (no mermaid/hljs needed — we
+      // just read rendered text per line).
+      const oldBox = document.createElement("div");
+      try { oldBox.innerHTML = marked.parse(oldContent); annotateSourceLines(oldBox, oldContent); } catch (e) { return; }
+      try { annotateUpdateDiff(container, oldBox, oldContent, newContent); } catch (e) {}
+    }
+
     async function renderPreview(data) {
       if (data.kind === "markdown") {
+        if (state.updMode && state.gitRepoRoot && state.selectedPath) {
+          try { await renderUpdateDiff(previewBodyEl, data); return; }
+          catch (e) { /* fall back to the normal render below */ }
+        }
         previewBodyEl.innerHTML = marked.parse(data.content);
         const blocks = previewBodyEl.querySelectorAll("pre code.language-mermaid");
         for (const code of blocks) {
@@ -7213,6 +7438,18 @@ const webAppHTML = `<!doctype html>
       applySearchPanelCollapsed();
     };
     previewModeButtonEl.onclick = () => setEditorMode("preview");
+    {
+      const updT = document.getElementById("updToggle");
+      if (updT) updT.onclick = () => {
+        state.updMode = !state.updMode;
+        try { localStorage.setItem("mdviewer.updMode", state.updMode ? "1" : "0"); } catch (e) {}
+        updateUpdToggle();
+        // Re-render the preview from disk so the diff reflects the current copy.
+        if (state.editorMode === "preview" && state.selectedPath) {
+          selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" });
+        }
+      };
+    }
     editModeButtonEl.onclick = () => {
       if (!canEditKind(state.selectedKind)) return;
       setEditorMode("edit");
@@ -7444,6 +7681,19 @@ const webAppHTML = `<!doctype html>
       const btn = document.getElementById("versionButton");
       if (!btn) return;
       btn.hidden = !(state.gitRepoRoot && state.selectedPath);
+      updateUpdToggle();
+    }
+    // The "업데이트 내역" toggle: only for git-managed markdown/text files in
+    // preview mode. Reflects state.updMode.
+    function updateUpdToggle() {
+      const t = document.getElementById("updToggle");
+      if (!t) return;
+      const eligible = !!state.gitRepoRoot && !!state.selectedPath &&
+        state.selectedKind === "markdown" &&
+        state.editorMode === "preview";
+      t.hidden = !eligible;
+      t.classList.toggle("active", eligible && state.updMode);
+      t.setAttribute("aria-checked", (eligible && state.updMode) ? "true" : "false");
     }
 
     // ── Git version compare (before/after) ──
