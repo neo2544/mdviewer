@@ -1485,6 +1485,11 @@ const webAppHTML = `<!doctype html>
     .preview-body .upd-add-block { background: color-mix(in oklab, #3fb950 14%, transparent); box-shadow: inset 3px 0 0 color-mix(in oklab, #3fb950 60%, transparent); border-radius: 4px; }
     /* Inserted "removed" block (entire deleted line/paragraph). */
     .upd-removed-block { background: color-mix(in oklab, #e0533f 12%, transparent); box-shadow: inset 3px 0 0 color-mix(in oklab, #e0533f 60%, transparent); border-radius: 4px; text-decoration: line-through; color: color-mix(in oklab, var(--text) 60%, var(--muted)); opacity: .85; margin: 4px 0; padding: 2px 6px; }
+    /* Per-line code change rows in the Changes overlay (word marks reuse .upd-add/.upd-del). */
+    .preview-body tr.upd-code-chg > td.hljs-ln-code { background: color-mix(in oklab, #d29922 18%, transparent); }
+    .preview-body tr.upd-code-add > td.hljs-ln-code { background: color-mix(in oklab, #3fb950 18%, transparent); }
+    .preview-body tr.upd-code-removed-line > td.hljs-ln-code { background: color-mix(in oklab, #e0533f 12%, transparent); text-decoration: line-through; color: color-mix(in oklab, var(--text) 60%, var(--muted)); opacity: .85; }
+    .preview-body tr.upd-code-removed-line > td.hljs-ln-numbers { color: color-mix(in oklab, #e0533f 80%, var(--muted)); }
     .section-chevron {
       display: inline-block;
       width: 12px;
@@ -7233,7 +7238,35 @@ const webAppHTML = `<!doctype html>
       const n = document.createElement("div"); n.className = "upd-note"; n.textContent = "📝 " + msg;
       container.insertBefore(n, container.firstChild);
     }
+    // Split each fenced code block into per-line rows (like the version-compare
+    // view) and stamp each row with its source line, so the Changes overlay can
+    // highlight individual code lines instead of tinting the whole <pre>.
+    // Code line k maps to source line fence+1+k. Used for both the working copy
+    // and the previous-version box.
+    function updStampCodeLines(container) {
+      const codes = container.querySelectorAll("pre > code");
+      for (const code of codes) {
+        if (code.classList.contains("language-mermaid")) continue;
+        const anc = code.closest("[data-source-line]");
+        if (!anc) continue;
+        const sl = parseInt(anc.getAttribute("data-source-line"), 10);
+        if (isNaN(sl)) continue;
+        if (!code.querySelector("table.hljs-ln")) {
+          try { applyLineNumbersManual(code); } catch (e) { continue; }
+        }
+        const rows = code.querySelectorAll("table.hljs-ln tbody tr");
+        for (let i = 0; i < rows.length; i++) rows[i].setAttribute("data-source-line", String(sl + 1 + i));
+      }
+    }
+    function updIsCodeRow(el) {
+      return !!(el && el.tagName === "TR" && el.closest && el.closest("table.hljs-ln"));
+    }
     function annotateUpdateDiff(newContainer, oldContainer, oldContent, newContent) {
+      // Break code blocks into per-line rows first so a change inside a fenced
+      // block highlights line-by-line (with word-level emphasis) rather than the
+      // whole <pre> being treated as one block.
+      try { updStampCodeLines(newContainer); } catch (e) {}
+      try { updStampCodeLines(oldContainer); } catch (e) {}
       const diff = updLineDiff(oldContent, newContent);
       const oldLines = oldContent.split("\n"), newLines = newContent.split("\n");
       const blank = function (s) { return !s || !s.trim(); };
@@ -7246,7 +7279,14 @@ const webAppHTML = `<!doctype html>
         if ((ne.closest && ne.closest(".mermaid-wrap")) || (ne.classList && ne.classList.contains("mermaid-wrap"))) continue;
         seen.add(ne);
         try {
-          if (ne.tagName === "TR" && oe.tagName === "TR") {
+          if (updIsCodeRow(ne)) {
+            // Changed code line: tint the row, emphasize the changed tokens in
+            // its code cell only (skip the line-number cell).
+            ne.classList.add("upd-code-chg");
+            const ncode = ne.querySelector(".hljs-ln-code") || ne;
+            const ocode = (updIsCodeRow(oe) ? oe.querySelector(".hljs-ln-code") : null) || oe;
+            updInlineChange(ncode, ocode.textContent || "", ncode.textContent || "");
+          } else if (ne.tagName === "TR" && oe.tagName === "TR") {
             // Diff each table cell on its own — inserting deleted text directly
             // into a <tr> (across <td> boundaries) corrupts the table layout.
             const nc = ne.children, oc = oe.children;
@@ -7264,16 +7304,40 @@ const webAppHTML = `<!doctype html>
       for (const ln of diff.addedNew) {
         if (blank(newLines[ln])) continue;          // blank lines have no rendered block
         const ne = updAnchorForLine(newContainer, ln);
-        if (ne && !seen.has(ne)) { ne.classList.add("upd-add-block"); seen.add(ne); anchors.push(ne); }
+        if (ne && !seen.has(ne)) {
+          ne.classList.add(updIsCodeRow(ne) ? "upd-code-add" : "upd-add-block");
+          seen.add(ne); anchors.push(ne);
+        }
       }
       const insertedRemoved = new Set();
+      const lastRemovedAfter = new Map(); // afterNew row -> last inserted code row, to keep deletions in order
       for (const rm of diff.removedOld) {
         if (blank(oldLines[rm.o])) continue;        // skip removed blank lines
         const oe = updAnchorForLine(oldContainer, rm.o);
         if (!oe || insertedRemoved.has(oe)) continue; // avoid duplicate inserts for the same block
+        insertedRemoved.add(oe);
+        if (updIsCodeRow(oe)) {
+          // Removed code line: insert a struck-through code row at the matching
+          // spot inside the working copy's code table.
+          const codeTxt = (oe.querySelector(".hljs-ln-code") || oe).textContent || "";
+          if (!codeTxt.trim()) continue;
+          const anchorRow = rm.afterNew >= 0 ? updAnchorForLine(newContainer, rm.afterNew) : null;
+          if (updIsCodeRow(anchorRow) && anchorRow.parentNode) {
+            const tr = document.createElement("tr");
+            tr.className = "upd-code-removed-line";
+            const numTd = document.createElement("td"); numTd.className = "hljs-ln-line hljs-ln-numbers"; numTd.textContent = "−";
+            const codeTd = document.createElement("td"); codeTd.className = "hljs-ln-line hljs-ln-code"; codeTd.textContent = codeTxt;
+            tr.appendChild(numTd); tr.appendChild(codeTd);
+            const after = lastRemovedAfter.get(anchorRow) || anchorRow; // chain successive deletions in order
+            after.parentNode.insertBefore(tr, after.nextSibling);
+            lastRemovedAfter.set(anchorRow, tr);
+            anchors.push(tr);
+            continue;
+          }
+          // else fall through to the generic removed-block below
+        }
         const txt = (oe.textContent || "").replace(/\s+/g, " ").trim();
         if (!txt) continue;
-        insertedRemoved.add(oe);
         const block = document.createElement("div");
         block.className = "upd-removed-block";
         block.textContent = txt;
