@@ -3896,7 +3896,7 @@ const webAppHTML = `<!doctype html>
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a3 3 0 0 1-3 3H9"/><circle cx="18" cy="6" r="3"/></svg>
             <span>Version</span>
           </button>
-          <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden title="마지막 버전에서 무엇이 바뀌었는지 미리보기에 인라인 표시 (추가=녹색, 삭제=빨강 취소선)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text">업데이트 내역</span></button>
+          <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden title="Show what changed since the last version, inline (additions green, deletions red strikethrough)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text">Changes</span></button>
           <div class="seg" role="tablist" aria-label="View mode">
             <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -7440,13 +7440,17 @@ const webAppHTML = `<!doctype html>
     previewModeButtonEl.onclick = () => setEditorMode("preview");
     {
       const updT = document.getElementById("updToggle");
-      if (updT) updT.onclick = () => {
+      if (updT) updT.onclick = async () => {
         state.updMode = !state.updMode;
         try { localStorage.setItem("mdviewer.updMode", state.updMode ? "1" : "0"); } catch (e) {}
         updateUpdToggle();
-        // Re-render the preview from disk so the diff reflects the current copy.
+        // Re-render in place (no reload) and keep the reader's scroll position.
         if (state.editorMode === "preview" && state.selectedPath) {
-          selectFile(state.selectedPath, { hash: state.selectedHash, historyMode: "replace" });
+          const top = previewBodyEl.scrollTop;
+          await renderCurrentView();
+          previewBodyEl.scrollTop = top;
+          // Diff annotations / mermaid can shift layout a frame later; re-apply.
+          requestAnimationFrame(() => { previewBodyEl.scrollTop = top; });
         }
       };
     }
