@@ -141,7 +141,11 @@ func (s *webServer) handleAliases(w http.ResponseWriter, r *http.Request) {
 func (s *webServer) handleUsage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(usageWebMD))
+	md := usageWebMD
+	if r.URL.Query().Get("lang") == "ko" {
+		md = usageWebKoMD
+	}
+	_, _ = w.Write([]byte(md))
 }
 
 func runWebServer(startDir, appRoot, addr string) error {
@@ -1590,6 +1594,7 @@ const webAppHTML = `<!doctype html>
         box-shadow 140ms ease;
     }
     .action { cursor: pointer; }
+    .lang-toggle { min-width: 34px; justify-content: center; font-weight: 700; font-size: 11px; letter-spacing: .04em; }
     /* Favorite toggle: accent "Add" vs red "Remove" — element+2-class
        selectors beat the generic .action.active rule below. */
     button.action.fav-add {
@@ -3929,6 +3934,7 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="accentBtn" type="button" title="강조 색상 선택" aria-label="Accent color">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2C6.5 2 2 6 2 11c0 4 3 7 7 7 1 0 1.5-.7 1.5-1.5 0-.4-.2-.7-.4-1-.3-.3-.5-.7-.5-1 0-.8.7-1.5 1.5-1.5H13c3.3 0 6-2.5 6-6 0-3.6-3.1-5-7-5Z"/></svg>
           </button>
+          <button class="action lang-toggle" id="langToggle" type="button" aria-label="Language">EN</button>
           <span class="chip" id="kindChip" data-kind="idle" aria-live="polite">Idle</span>
         </div>
       </div>
@@ -4319,6 +4325,10 @@ const webAppHTML = `<!doctype html>
       // aidlcMode is whether it's actually active (intent AND available).
       aidlc: { available: false, root: "", dir: "", files: [] },
       aidlcCwd: null,    // cwd the AI-DLC list was last resolved for
+      lang: (function () {
+        try { const s = localStorage.getItem("mdviewer.lang"); if (s === "ko" || s === "en") return s; } catch (e) {}
+        return (navigator.language || navigator.userLanguage || "").toLowerCase().indexOf("ko") === 0 ? "ko" : "en";
+      })(),
       aidlcWanted: localStorage.getItem("mdviewer.aidlcMode") === "1",
       aidlcMode: false,
       updMode: localStorage.getItem("mdviewer.updMode") === "1", // show inline changes vs last version
@@ -6037,24 +6047,69 @@ const webAppHTML = `<!doctype html>
       }
     }
 
-    let usageGuideCache = null;
+    // ── i18n (English / 한국어) ──
+    // Auto-detected from the browser, overridable with the header EN/한 toggle.
+    // Static markup is localized via data-i18n / data-i18n-title / data-i18n-ph
+    // attributes; dynamic strings call t(key). The dictionary grows as more of
+    // the UI is converted.
+    const I18N = {
+      en: {
+        guideBanner: "Built-in usage guide",
+        guideSubtitle: "Select a file from the left to open your content.",
+        guideMeta: "Usage guide",
+        langTitle: "Language: English — click for 한국어",
+      },
+      ko: {
+        guideBanner: "내장 사용 가이드",
+        guideSubtitle: "왼쪽에서 파일을 선택해 내용을 열어보세요.",
+        guideMeta: "사용 가이드",
+        langTitle: "언어: 한국어 — 클릭 시 English",
+      },
+    };
+    function t(key) {
+      const d = I18N[state.lang] || I18N.en;
+      if (d && d[key] != null) return d[key];
+      return (I18N.en[key] != null) ? I18N.en[key] : key;
+    }
+    // Apply translations to any tagged static element. Re-run on language change.
+    function applyI18n() {
+      document.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.getAttribute("data-i18n")); });
+      document.querySelectorAll("[data-i18n-title]").forEach(function (el) { el.title = t(el.getAttribute("data-i18n-title")); });
+      document.querySelectorAll("[data-i18n-ph]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-i18n-ph"))); });
+    }
+    function updateLangToggle() {
+      const b = document.getElementById("langToggle");
+      if (!b) return;
+      b.textContent = state.lang === "ko" ? "한" : "EN";
+      b.title = t("langTitle");
+    }
+    function setLang(lang) {
+      state.lang = (lang === "ko") ? "ko" : "en";
+      try { localStorage.setItem("mdviewer.lang", state.lang); } catch (e) {}
+      document.documentElement.setAttribute("lang", state.lang);
+      applyI18n();
+      updateLangToggle();
+    }
+
+    let usageGuideCache = {}; // keyed by language
     async function showUsageGuide() {
-      // Render the embedded USAGE_WEB.md as a friendly welcome / help screen
-      // whenever the user has no file selected.
+      // Render the embedded usage guide (localized by language) as a friendly
+      // welcome / help screen whenever the user has no file selected.
       try {
-        if (!usageGuideCache) {
-          const res = await fetch("/api/usage");
+        const lang = state.lang || "en";
+        if (!usageGuideCache[lang]) {
+          const res = await fetch("/api/usage?lang=" + encodeURIComponent(lang));
           if (!res.ok) throw new Error(await res.text());
-          usageGuideCache = await res.text();
+          usageGuideCache[lang] = await res.text();
         }
-        const rendered = marked.parse(usageGuideCache);
+        const rendered = marked.parse(usageGuideCache[lang]);
         previewBodyEl.innerHTML =
           '<div class="usage-guide">' +
           '<div class="usage-guide-banner">' +
           '<span class="usage-guide-icon">📘</span>' +
           '<div class="usage-guide-text">' +
-          '<div class="usage-guide-title">Built-in usage guide</div>' +
-          '<div class="usage-guide-subtitle">Select a file from the left to open your content.</div>' +
+          '<div class="usage-guide-title">' + escapeHTML(t("guideBanner")) + '</div>' +
+          '<div class="usage-guide-subtitle">' + escapeHTML(t("guideSubtitle")) + '</div>' +
           '<a class="usage-guide-git-link" href="https://github.com/neo2544/mdviewer" target="_blank" rel="noopener">↗ MD Viewer on GitHub  ·  github.com/neo2544/mdviewer</a>' +
           '</div>' +
           '</div>' +
@@ -6088,7 +6143,7 @@ const webAppHTML = `<!doctype html>
         previewTitleEl.textContent = "Markdown Browser";
         previewTitleEl.classList.remove("copyable");
         previewTitleEl.removeAttribute("title");
-        previewMetaEl.textContent = "Usage guide";
+        previewMetaEl.textContent = t("guideMeta");
         kindChipEl.textContent = "Help";
         kindChipEl.setAttribute("data-kind", "help");
       } catch (err) {
@@ -9317,6 +9372,22 @@ const webAppHTML = `<!doctype html>
       syncHljsTheme(theme);
     }
     applyTheme(currentTheme());
+
+    // ── Language toggle init (English / 한국어) ──
+    {
+      const langBtn = document.getElementById("langToggle");
+      if (langBtn) {
+        langBtn.addEventListener("click", function () {
+          setLang(state.lang === "ko" ? "en" : "ko");
+          // Re-render the welcome guide in the new language if it's showing.
+          if (!state.selectedPath) showUsageGuide();
+        });
+      }
+      document.documentElement.setAttribute("lang", state.lang);
+      applyI18n();
+      updateLangToggle();
+    }
+
     // In auto mode the effective theme can flip when the OS toggles dark
     // mode at runtime; keep the hljs stylesheet in step.
     if (window.matchMedia) {

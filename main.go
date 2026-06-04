@@ -32,6 +32,9 @@ import (
 //go:embed USAGE_WEB.md
 var usageWebMD string
 
+//go:embed USAGE_WEB.ko.md
+var usageWebKoMD string
+
 //go:embed USAGE_CMD.md
 var usageCmdMD string
 

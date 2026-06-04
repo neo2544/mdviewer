@@ -1,49 +1,70 @@
 # 📘 Markdown Browser — Welcome
 
-> 좌측에서 파일을 골라 **읽고·편집하고·다이어그램을 보는** 마크다운 뷰어입니다.
-> 이 안내는 파일이 선택되지 않았을 때 표시됩니다. 👋
+> A markdown viewer to **read, edit, and view diagrams** — pick a file on the left.
+> This guide is shown whenever no file is selected. 👋
 
 ---
 
-## 🗂️ 핵심 기능
+## 🗂️ Core features
 
-- **탐색** — 사이드바에서 파일·폴더 클릭, `..` 로 상위. *Search files* 로 필터, *Jump to path* 로 경로 점프.
-- **Recent / Favorites** — 사이드바엔 최대 3개만 노출, **Show all** 로 전체 보기. ⭐ **Toggle current** 로 현재 폴더를 즐겨찾기에 추가하고, 행을 **드래그해 순서 변경**하거나 **✎** 로 별칭을 붙일 수 있어요 (별칭은 서버 저장 → 기기 공유).
-- **변경 알림** — 파일명 옆 컬러 점: 🟦 new · 🟪 updated · 🟨 recent · ⭕ 자식 변경. 한 번 열면 사라집니다.
-- **미리보기** — Markdown 렌더, 이미지(클릭 시 라이트박스), sandbox `iframe` HTML, 텍스트/코드 원문.
-- **편집** — 우측 상단 **Edit** → `Cmd/Ctrl + S` 저장. 외부 변경과 충돌하면 경고합니다.
-- **테마** — 우측 상단 버튼으로 ◐ Auto → ☀ Light → 🌙 Dark 순환 (선택은 유지됨).
-
----
-
-## ⚡ 단축키
-
-| 키 | 동작 |
-|----|------|
-| `Cmd/Ctrl + K` | 빠른 열기 (Recent 팔레트) |
-| `Cmd/Ctrl + L` | 경로로 점프 |
-| `Cmd/Ctrl + S` | 저장 (편집 모드) |
-| `Cmd/Ctrl + Shift + .` | 숨김 파일 토글 |
-| `Esc` | 팔레트·팝업 닫기 |
-| `Alt/Option + 드래그` | Mermaid 텍스트 선택 |
+- **Browse** — click files/folders in the sidebar, `..` to go up. Filter with *Search files*, jump with *Jump to path*.
+- **Recent / Favorites** — the sidebar shows up to 3; **Show all** reveals the rest. ⭐ **Toggle current** adds the current folder to favorites; **drag rows to reorder** or **✎** to set an alias (aliases are saved on the server → shared across devices).
+- **Change badges** — colored dots next to filenames: 🟦 new · 🟪 updated · 🟨 recent · ⭕ child changed. They clear once you open the file.
+- **Preview** — rendered Markdown, images (click for a lightbox), sandboxed `iframe` HTML, raw text/code.
+- **Edit** — top-right **Edit** → `Cmd/Ctrl + S` to save. You're warned if an external change conflicts.
+- **Theme & accent** — cycle ◐ Auto → ☀ Light → 🌙 Dark, and pick your own accent color (🎨). Choices persist.
+- **Language** — auto-detected from your browser (English / 한국어); switch anytime with the EN/한 toggle in the header.
 
 ---
 
-## 🎯 Mermaid 다이어그램
+## 🔧 Git-aware features
 
-호버하면 **Copy text**, 클릭하면 라이트박스로 확대됩니다. 라이트박스에선 **💾** 로 PNG 저장, 하단 툴바로 주석을 그릴 수 있어요. 확대 상태에서 휠 줌·드래그 이동, 더블클릭으로 리셋.
+- **Version** — for files in a git repo, compare any two revisions side by side with a synchronized, color-coded diff (added = green, removed = red), jump between changes, and zoom diagrams.
+- **Changes** — toggle an inline "what changed since the last version" overlay right in the preview: additions in green, deletions in red strikethrough.
+- **AI-DLC** — when the repo root has an `aidlc-docs` folder, list every doc under it (newest first).
 
-아래가 보이면 mermaid 가 정상 동작하는 것입니다:
+---
+
+## ⚡ Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Cmd/Ctrl + K` | Quick open (Recent palette) |
+| `Cmd/Ctrl + L` | Jump to path |
+| `Cmd/Ctrl + S` | Save (edit mode) |
+| `Cmd/Ctrl + Shift + .` | Toggle hidden files |
+| `Esc` | Close palette / popups |
+| `Alt/Option + Drag` | Box-select diagram text (in the lightbox) |
+
+---
+
+## 🎯 Mermaid diagrams
+
+Hover to **Copy text**, click to open the lightbox. In the lightbox, **💾** saves a PNG and the bottom toolbar lets you annotate. While zoomed: wheel to zoom, drag to pan, double-click to reset.
+
+If you can see the diagram below, mermaid is working:
 
 ```mermaid
 flowchart LR
-    A[📁 사이드바] -->|파일 클릭| B[📄 Markdown]
-    B --> C{모드}
-    C -- Preview --> D[👀 렌더링]
-    C -- Edit --> E[✏️ 편집]
+    A[📁 Sidebar] -->|click a file| B[📄 Markdown]
+    B --> C{Mode}
+    C -- Preview --> D[👀 Rendered]
+    C -- Edit --> E[✏️ Editing]
     E --> F[💾 Cmd+S]
-    D -.수정-.-> E
+    D -.edit-.-> E
 ```
+
+---
+
+## 🕘 Version history (highlights)
+
+- **Git version compare** — side-by-side revision diff with synced scrolling, change navigation, table/code/mermaid-aware highlighting, and intra-line (character-level) emphasis.
+- **Inline "Changes" overlay** — see edits since the last version directly in the preview.
+- **Rendered-content search** — the in-file search matches the rendered text, even across inline markup (bold/code).
+- **Memo trash** — deleted memos go to a recoverable trash with restore / empty.
+- **Mermaid box-select** — ⌥+drag a region in the lightbox to copy its text, with a selection highlight.
+- **AI-DLC mode** — one flat, time-sorted view of every `aidlc-docs` file, labeled by subfolder.
+- **Accent color & i18n** — pick the app's accent color; English / 한국어 by browser language with a manual toggle.
 
 ---
 
