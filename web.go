@@ -3803,6 +3803,30 @@ const webAppHTML = `<!doctype html>
         if (a) document.documentElement.style.setProperty("--accent", a);
       } catch (e) {}
     })();
+
+    // Strikethrough only on double tilde (~~text~~), per the GFM spec. marked's
+    // default also treats a single "~" as strikethrough, which turns range
+    // notation like "0031~0033" or "10~20" into accidental <del>. Override the
+    // del tokenizer to require "~~" and consume a lone "~" as literal text.
+    (function () {
+      try {
+        if (typeof marked === "undefined" || !marked.use) return;
+        marked.use({
+          tokenizer: {
+            del: function (src) {
+              var m = /^~~(?=\S)([\s\S]*?\S)~~/.exec(src);
+              if (m) {
+                return { type: "del", raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) };
+              }
+              if (src.charCodeAt(0) === 126) { // a lone "~" → plain text, not <del>
+                return { type: "text", raw: "~", text: "~" };
+              }
+              return false; // not a tilde — let other tokenizers run
+            },
+          },
+        });
+      } catch (e) { /* fall back to marked's default strikethrough */ }
+    })();
   </script>
 </head>
 <body>
