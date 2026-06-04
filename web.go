@@ -3828,7 +3828,7 @@ const webAppHTML = `<!doctype html>
               <circle cx="7" cy="7" r="4.5" />
               <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
             </svg>
-            <input class="search-input" id="searchInput" type="search" placeholder="Search files" spellcheck="false" />
+            <input class="search-input" id="searchInput" type="search" data-i18n-ph="phSearchFiles" placeholder="Search files" spellcheck="false" />
             <button class="searchbox-browse-btn" id="browseSubfoldersBtn" title="하위 폴더 포함 탐색" type="button" aria-label="하위 폴더 탐색">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M1.5 3.5 C1.5 2.7 2.2 2 3 2 H5.5 L6.5 3 H13 c.8 0 1.5.7 1.5 1.5 V12.5 c0 .8-.7 1.5-1.5 1.5 H3 c-.8 0-1.5-.7-1.5-1.5 Z" />
@@ -3841,7 +3841,7 @@ const webAppHTML = `<!doctype html>
             <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M2.5 4.5 L8 4.5 L9.5 6 L13.5 6 L13.5 12.5 L2.5 12.5 Z" />
             </svg>
-            <input class="search-input" id="pathInput" type="text" placeholder="Jump to path (Enter)…  e.g. ~/notes/foo.md" spellcheck="false" autocomplete="off" />
+            <input class="search-input" id="pathInput" type="text" data-i18n-ph="phJumpPath" placeholder="Jump to path (Enter)…  e.g. ~/notes/foo.md" spellcheck="false" autocomplete="off" />
           </div>
         </div>
         <button class="action collapse-toggle" id="collapseSidebar" title="Collapse sidebar">‹</button>
@@ -3858,10 +3858,10 @@ const webAppHTML = `<!doctype html>
         <div class="section-head">
           <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
             <span class="section-chevron">▾</span>
-            <span class="section-title">Recent files</span>
+            <span class="section-title" data-i18n="secRecentFiles">Recent files</span>
           </button>
           <div class="section-actions">
-            <button class="action" id="showAllRecentFiles" title="Show all recent files" hidden>Show all</button>
+            <button class="action" id="showAllRecentFiles" data-i18n-title="showAllRecentFilesTitle" title="Show all recent files" hidden>Show all</button>
           </div>
         </div>
         <div class="section-list" id="recentFiles"></div>
@@ -3870,10 +3870,10 @@ const webAppHTML = `<!doctype html>
         <div class="section-head">
           <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
             <span class="section-chevron">▾</span>
-            <span class="section-title">Recent folders</span>
+            <span class="section-title" data-i18n="secRecentFolders">Recent folders</span>
           </button>
           <div class="section-actions">
-            <button class="action" id="showAllRecentDirs" title="Show all recent folders" hidden>Show all</button>
+            <button class="action" id="showAllRecentDirs" data-i18n-title="showAllRecentFoldersTitle" title="Show all recent folders" hidden>Show all</button>
           </div>
         </div>
         <div class="section-list" id="recentDirs"></div>
@@ -3882,10 +3882,10 @@ const webAppHTML = `<!doctype html>
         <div class="section-head">
           <button class="section-toggle" type="button" aria-expanded="true" title="Collapse section">
             <span class="section-chevron">▾</span>
-            <span class="section-title">Favorites</span>
+            <span class="section-title" data-i18n="secFavorites">Favorites</span>
           </button>
           <div class="section-actions">
-            <button class="action" id="showAllFavorites" title="Show all favorites" hidden>Show all</button>
+            <button class="action" id="showAllFavorites" data-i18n-title="showAllFavoritesTitle" title="Show all favorites" hidden>Show all</button>
             <button class="action" id="toggleFavorite">Toggle current</button>
           </div>
         </div>
@@ -3906,33 +3906,33 @@ const webAppHTML = `<!doctype html>
           <div class="subtle" id="previewMeta"></div>
         </div>
         <div class="actions">
-          <button class="action" id="versionButton" type="button" title="이 파일의 git 변경 이력을 버전별로 골라 좌/우로 비교" hidden>
+          <button class="action" id="versionButton" type="button" data-i18n-title="versionTitle" title="Compare this file's git revisions side by side" hidden>
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a3 3 0 0 1-3 3H9"/><circle cx="18" cy="6" r="3"/></svg>
-            <span>Version</span>
+            <span data-i18n="version">Version</span>
           </button>
-          <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden title="Show what changed since the last version, inline (additions green, deletions red strikethrough)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text">Changes</span></button>
+          <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden data-i18n-title="updToggleTitle" title="Show what changed since the last version, inline (additions green, deletions red strikethrough)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text" data-i18n="updToggleText">Changes</span></button>
           <span class="upd-nav" id="updNav" hidden>
-            <button class="action icon-only" id="updPrev" type="button" title="Previous change (↑)" aria-label="Previous change">▲</button>
+            <button class="action icon-only" id="updPrev" type="button" data-i18n-title="updPrevTitle" title="Previous change (↑)" aria-label="Previous change">▲</button>
             <span class="upd-nav-count" id="updNavCount"></span>
-            <button class="action icon-only" id="updNext" type="button" title="Next change (↓)" aria-label="Next change">▼</button>
+            <button class="action icon-only" id="updNext" type="button" data-i18n-title="updNextTitle" title="Next change (↓)" aria-label="Next change">▼</button>
           </span>
           <div class="seg" role="tablist" aria-label="View mode">
-            <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" title="Preview mode — rendered markdown">
+            <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" data-i18n-title="previewTitle" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span>Preview</span>
+              <span data-i18n="preview">Preview</span>
             </button>
-            <button class="seg-btn" id="editModeButton" type="button" role="tab" aria-selected="false" title="Edit mode — raw source in a textarea (⌘S to save)">
+            <button class="seg-btn" id="editModeButton" type="button" role="tab" aria-selected="false" data-i18n-title="editTitle" title="Edit mode — raw source in a textarea (⌘S to save)">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
-              <span>Edit</span>
+              <span data-i18n="edit">Edit</span>
             </button>
-            <button class="seg-btn" id="splitModeButton" type="button" role="tab" aria-selected="false" title="Split mode — editor + live preview side by side">
+            <button class="seg-btn" id="splitModeButton" type="button" role="tab" aria-selected="false" data-i18n-title="splitTitle" title="Split mode — editor + live preview side by side">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 6h6M4 10h6M4 14h6M4 18h6M14 6h6M14 10h6M14 14h6M14 18h6"/></svg>
-              <span>Split</span>
+              <span data-i18n="split">Split</span>
             </button>
           </div>
-          <button class="action" id="saveButton" type="button" title="Save changes to disk (⌘S)">
+          <button class="action" id="saveButton" type="button" data-i18n-title="saveTitle" title="Save changes to disk (⌘S)">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
-            <span>Save</span>
+            <span data-i18n="save">Save</span>
             <kbd>⌘S</kbd>
           </button>
           <button class="action icon-only" id="refreshButton" type="button" title="Refresh — reload current file from disk (prompts if unsaved changes)" aria-label="Refresh">
@@ -3969,9 +3969,9 @@ const webAppHTML = `<!doctype html>
       <button class="action collapse-search-panel" id="collapseSearchPanel" type="button" title="Hide panel">&#x203A;</button>
       <div class="search-panel-body">
         <div class="panel-tabs" role="tablist" aria-label="Panel sections">
-          <button type="button" class="panel-tab" id="panelTabOutline" data-tab="outline" role="tab">📑 Outline</button>
-          <button type="button" class="panel-tab active" id="panelTabSearch" data-tab="search" role="tab">🔍 Search</button>
-          <button type="button" class="panel-tab" id="panelTabMemo" data-tab="memo" role="tab">📝 Memo</button>
+          <button type="button" class="panel-tab" id="panelTabOutline" data-tab="outline" role="tab" data-i18n="tabOutline">📑 Outline</button>
+          <button type="button" class="panel-tab active" id="panelTabSearch" data-tab="search" role="tab" data-i18n="tabSearch">🔍 Search</button>
+          <button type="button" class="panel-tab" id="panelTabMemo" data-tab="memo" role="tab" data-i18n="tabMemo">📝 Memo</button>
         </div>
 
         <div class="panel-pane" data-pane="outline" hidden>
@@ -5243,7 +5243,7 @@ const webAppHTML = `<!doctype html>
       if (!el) return;
       const list = Array.isArray(state.favorites) ? state.favorites : [];
       const isFav = !!state.cwd && list.indexOf(state.cwd) !== -1;
-      el.textContent = isFav ? "★ Remove favorite" : "Add to favorites";
+      el.textContent = isFav ? t("removeFavorite") : t("addToFavorites");
       el.classList.toggle("active", isFav);
       // Distinct colors: accent "add" vs red "remove" so the two states read
       // clearly differently at a glance.
@@ -5650,7 +5650,7 @@ const webAppHTML = `<!doctype html>
       if (!btn) return;
       if (totalCount > SIDEBAR_RECENT_LIMIT) {
         btn.hidden = false;
-        btn.textContent = "Show all (" + totalCount + ")";
+        btn.textContent = t("showAll") + " (" + totalCount + ")";
       } else {
         btn.hidden = true;
       }
@@ -6074,6 +6074,20 @@ const webAppHTML = `<!doctype html>
         langTitle: "Language: English — click for 한국어",
         updNoChange: "No changes since the last version.",
         updNoneShown: "no changes",
+        version: "Version", versionTitle: "Compare this file's git revisions side by side",
+        updToggleText: "Changes", updToggleTitle: "Show what changed since the last version, inline (additions green, deletions red strikethrough)",
+        updPrevTitle: "Previous change (↑)", updNextTitle: "Next change (↓)",
+        preview: "Preview", previewTitle: "Preview mode — rendered markdown",
+        edit: "Edit", editTitle: "Edit mode — raw source in a textarea (⌘S to save)",
+        split: "Split", splitTitle: "Split mode — editor + live preview side by side",
+        save: "Save", saveTitle: "Save changes to disk (⌘S)",
+        tabOutline: "📑 Outline", tabSearch: "🔍 Search", tabMemo: "📝 Memo",
+        secRecentFiles: "Recent files", secRecentFolders: "Recent folders", secFavorites: "Favorites",
+        showAll: "Show all", showAllRecentFilesTitle: "Show all recent files",
+        showAllRecentFoldersTitle: "Show all recent folders", showAllFavoritesTitle: "Show all favorites",
+        toggleCurrent: "Toggle current",
+        removeFavorite: "★ Remove favorite", addToFavorites: "Add to favorites",
+        phSearchFiles: "Search files", phJumpPath: "Jump to path (Enter)…  e.g. ~/notes/foo.md",
       },
       ko: {
         guideBanner: "내장 사용 가이드",
@@ -6082,6 +6096,20 @@ const webAppHTML = `<!doctype html>
         langTitle: "언어: 한국어 — 클릭 시 English",
         updNoChange: "마지막 버전과 동일 — 변경 없음.",
         updNoneShown: "변경 없음",
+        version: "버전", versionTitle: "이 파일의 git 변경 이력을 버전별로 골라 좌/우로 비교",
+        updToggleText: "변경 표시", updToggleTitle: "마지막 버전에서 무엇이 바뀌었는지 미리보기에 인라인 표시 (추가=녹색, 삭제=빨강 취소선)",
+        updPrevTitle: "이전 변경점 (↑)", updNextTitle: "다음 변경점 (↓)",
+        preview: "미리보기", previewTitle: "미리보기 모드 — 렌더된 마크다운",
+        edit: "편집", editTitle: "편집 모드 — 원본 텍스트 (⌘S로 저장)",
+        split: "분할", splitTitle: "분할 모드 — 편집기 + 실시간 미리보기",
+        save: "저장", saveTitle: "디스크에 저장 (⌘S)",
+        tabOutline: "📑 개요", tabSearch: "🔍 검색", tabMemo: "📝 메모",
+        secRecentFiles: "최근 파일", secRecentFolders: "최근 폴더", secFavorites: "즐겨찾기",
+        showAll: "전체 보기", showAllRecentFilesTitle: "최근 파일 전체 보기",
+        showAllRecentFoldersTitle: "최근 폴더 전체 보기", showAllFavoritesTitle: "즐겨찾기 전체 보기",
+        toggleCurrent: "현재 추가/제거",
+        removeFavorite: "★ 즐겨찾기 제거", addToFavorites: "즐겨찾기에 추가",
+        phSearchFiles: "파일 검색", phJumpPath: "경로로 점프 (Enter)…  예: ~/notes/foo.md",
       },
     };
     function t(key) {
@@ -6107,6 +6135,10 @@ const webAppHTML = `<!doctype html>
       document.documentElement.setAttribute("lang", state.lang);
       applyI18n();
       updateLangToggle();
+      // Refresh labels whose text is set dynamically (not via data-i18n).
+      try { if (typeof updateToggleFavoriteLabel === "function") updateToggleFavoriteLabel(); } catch (e) {}
+      try { if (typeof renderRecents === "function") renderRecents(); } catch (e) {}
+      try { if (typeof renderFavorites === "function") renderFavorites(); } catch (e) {}
     }
 
     let usageGuideCache = {}; // keyed by language
