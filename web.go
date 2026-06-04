@@ -3977,36 +3977,36 @@ const webAppHTML = `<!doctype html>
         <div class="panel-pane" data-pane="outline" hidden>
           <div class="outline-section" id="outlineSection" hidden>
             <div class="search-section-head">
-              <div class="search-section-title"><span class="sec-ico">&#x1F4D1;</span>Outline</div>
+              <div class="search-section-title"><span class="sec-ico">&#x1F4D1;</span><span data-i18n="secOutline">Outline</span></div>
               <div class="memo-actions">
-                <button type="button" class="search-sort-btn" id="outlineLevel" title="표시할 헤딩 레벨 (클릭하여 변경)">H1–3</button>
-                <button type="button" class="search-sort-btn" id="outlineToggle" title="Collapse outline">&#x25BE;</button>
+                <button type="button" class="search-sort-btn" id="outlineLevel" data-i18n-title="outlineLevelTitle" title="Heading levels to show (click to change)">H1–3</button>
+                <button type="button" class="search-sort-btn" id="outlineToggle" data-i18n-title="outlineCollapseTitle" title="Collapse outline">&#x25BE;</button>
               </div>
             </div>
             <div class="outline-list" id="outlineList"></div>
           </div>
-          <div class="search-empty" id="outlineEmpty">이 문서에는 헤딩이 없습니다.</div>
+          <div class="search-empty" id="outlineEmpty" data-i18n="outlineEmpty">No headings in this document.</div>
         </div>
 
         <div class="panel-pane" data-pane="search">
-          <input type="search" class="search-input" id="searchPanelInput" placeholder="&#x1F50D; Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
+          <input type="search" class="search-input" id="searchPanelInput" data-i18n-ph="phSearchFolder" placeholder="&#x1F50D; Search in this folder&#x2026;" spellcheck="false" autocomplete="off" />
           <div>
             <div class="search-section-head">
-              <div class="search-section-title"><span class="sec-ico">&#x1F4C4;</span>In this file</div>
+              <div class="search-section-title"><span class="sec-ico">&#x1F4C4;</span><span data-i18n="secInThisFile">In this file</span></div>
               <div class="search-sort" role="group" aria-label="Sort hits">
-                <button type="button" class="search-sort-btn active" id="searchSortLine" data-sort="line" title="Sort by line position">Line</button>
-                <button type="button" class="search-sort-btn" id="searchSortPriority" data-sort="priority" title="Sort by importance (heading first)">Priority</button>
+                <button type="button" class="search-sort-btn active" id="searchSortLine" data-sort="line" data-i18n="sortLine" data-i18n-title="sortLineTitle" title="Sort by line position">Line</button>
+                <button type="button" class="search-sort-btn" id="searchSortPriority" data-sort="priority" data-i18n="sortPriority" data-i18n-title="sortPriorityTitle" title="Sort by importance (heading first)">Priority</button>
               </div>
             </div>
-            <div class="search-summary" id="searchInFileSummary">Type to search.</div>
+            <div class="search-summary" id="searchInFileSummary" data-i18n="searchTypeToSearch">Type to search.</div>
             <div class="search-hit-list" id="searchInFileHits"></div>
           </div>
           <div>
             <div class="search-section-head">
               <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span><span id="searchFolderTitle">Same folder</span></div>
               <div class="search-sort" role="group" aria-label="Search scope">
-                <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" title="현재 폴더만 검색">이 폴더</button>
-                <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" title="상위 Git 저장소 전체 검색">Git 전체</button>
+                <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" data-i18n="scopeFolder" data-i18n-title="scopeFolderTitle" title="Search the current folder only">This folder</button>
+                <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" data-i18n="scopeGit" data-i18n-title="scopeGitTitle" title="Search the whole enclosing Git repo">Git repo</button>
               </div>
             </div>
             <div class="search-hit-list" id="searchFolderHits"></div>
@@ -4016,37 +4016,37 @@ const webAppHTML = `<!doctype html>
         <div class="panel-pane" data-pane="memo" hidden>
         <div class="memo-section">
           <div class="search-section-head">
-            <div class="search-section-title"><span class="sec-ico">&#x1F4DD;</span>Memo</div>
+            <div class="search-section-title"><span class="sec-ico">&#x1F4DD;</span><span data-i18n="secMemo">Memo</span></div>
             <div class="memo-actions">
-              <button type="button" class="search-sort-btn" id="memoNewBtn" title="New memo">＋ New</button>
-              <button type="button" class="search-sort-btn" id="memoCopyBtn" title="Copy with filename header">📋 Copy</button>
+              <button type="button" class="search-sort-btn" id="memoNewBtn" data-i18n="memoNew" data-i18n-title="memoNewTitle" title="New memo">＋ New</button>
+              <button type="button" class="search-sort-btn" id="memoCopyBtn" data-i18n="memoCopy" data-i18n-title="memoCopyTitle" title="Copy with filename header">📋 Copy</button>
             </div>
           </div>
           <div class="memo-controls" id="memoControls" hidden>
-            <input type="search" class="memo-filter" id="memoFilter" placeholder="🔍 메모 검색…" spellcheck="false" autocomplete="off" />
+            <input type="search" class="memo-filter" id="memoFilter" data-i18n-ph="phMemoFilter" placeholder="🔍 Search memos…" spellcheck="false" autocomplete="off" />
             <div class="search-sort" role="group" aria-label="Sort memos">
-              <button type="button" class="search-sort-btn active" id="memoSortUpdated" data-sort="updated" title="Sort by last modified">Updated</button>
-              <button type="button" class="search-sort-btn" id="memoSortCreated" data-sort="created" title="Sort by created">Created</button>
-              <button type="button" class="search-sort-btn" id="memoSortTitle" data-sort="title" title="Sort by title A–Z">Title</button>
+              <button type="button" class="search-sort-btn active" id="memoSortUpdated" data-sort="updated" data-i18n="memoSortUpdated" data-i18n-title="memoSortUpdatedTitle" title="Sort by last modified">Updated</button>
+              <button type="button" class="search-sort-btn" id="memoSortCreated" data-sort="created" data-i18n="memoSortCreated" data-i18n-title="memoSortCreatedTitle" title="Sort by created">Created</button>
+              <button type="button" class="search-sort-btn" id="memoSortTitle" data-sort="title" data-i18n="memoSortTitle" data-i18n-title="memoSortTitleTitle" title="Sort by title A–Z">Title</button>
             </div>
           </div>
           <div class="memo-list" id="memoList"></div>
-          <div class="memo-empty" id="memoEmpty" hidden>메모가 없습니다. ＋ New로 추가하세요.</div>
-          <div class="memo-empty" id="memoNoMatch" hidden>검색 결과 없음</div>
+          <div class="memo-empty" id="memoEmpty" data-i18n="memoEmpty" hidden>No memos yet. Add one with ＋ New.</div>
+          <div class="memo-empty" id="memoNoMatch" data-i18n="memoNoMatch" hidden>No matches</div>
           <div class="memo-editor" id="memoEditor" hidden>
-            <input type="text" class="memo-title-input" id="memoTitleInput" spellcheck="false" placeholder="제목(선택)" />
-            <textarea class="memo-area" id="memoArea" spellcheck="false" placeholder="이 파일을 보면서 기억해두고 싶은 메모…"></textarea>
+            <input type="text" class="memo-title-input" id="memoTitleInput" spellcheck="false" data-i18n-ph="phMemoTitle" placeholder="Title (optional)" />
+            <textarea class="memo-area" id="memoArea" spellcheck="false" data-i18n-ph="phMemoArea" placeholder="A note to remember while reading this file…"></textarea>
             <a class="memo-backlink" id="memoBacklink" hidden></a>
             <div class="memo-sync-state" id="memoSyncState"></div>
           </div>
           <div class="memo-trash" id="memoTrash" hidden>
             <div class="memo-trash-head">
-              <button type="button" class="memo-trash-toggle" id="memoTrashToggle" aria-expanded="false" title="삭제한 메모 (클릭하여 펼치기)">
+              <button type="button" class="memo-trash-toggle" id="memoTrashToggle" aria-expanded="false" data-i18n-title="memoTrashToggleTitle" title="Deleted memos (click to expand)">
                 <span class="memo-trash-caret" id="memoTrashCaret">&#x25B8;</span>
-                <span>&#x1F5D1; 휴지통</span>
+                <span>&#x1F5D1; <span data-i18n="memoTrash">Trash</span></span>
                 <span class="memo-trash-count" id="memoTrashCount">0</span>
               </button>
-              <button type="button" class="memo-trash-empty-btn" id="memoTrashEmptyBtn" title="휴지통 비우기 (영구 삭제)">비우기</button>
+              <button type="button" class="memo-trash-empty-btn" id="memoTrashEmptyBtn" data-i18n="memoTrashEmpty" data-i18n-title="memoTrashEmptyTitle" title="Empty trash (permanent delete)">Empty</button>
             </div>
             <div class="memo-trash-list" id="memoTrashList" hidden></div>
           </div>
@@ -4055,8 +4055,8 @@ const webAppHTML = `<!doctype html>
       </div>
     </aside>
   </div>
-  <button class="action reveal-sidebar" id="revealSidebar" title="Show sidebar">☰ Files</button>
-  <button class="action reveal-search-panel" id="revealSearchPanel" type="button" title="Show panel (Outline · Search · Memo)" hidden>&#x25A4; Panel</button>
+  <button class="action reveal-sidebar" id="revealSidebar" data-i18n="revealSidebar" data-i18n-title="revealSidebarTitle" title="Show sidebar">☰ Files</button>
+  <button class="action reveal-search-panel" id="revealSearchPanel" type="button" data-i18n="revealPanel" data-i18n-title="revealPanelTitle" title="Show panel (Outline · Search · Memo)" hidden>&#x25A4; Panel</button>
   <div class="floating-tooltip" id="floatingTooltip"></div>
   <div class="update-overlay" id="updateOverlay" hidden>
     <div class="update-overlay-card">
@@ -4065,9 +4065,9 @@ const webAppHTML = `<!doctype html>
     </div>
   </div>
   <div class="memo-selection-bar" id="memoSelectionBar" hidden>
-    <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn">📝 메모</button>
-    <button type="button" class="memo-selection-btn" id="memoSelectionSearchBtn">🔍 검색</button>
-    <button type="button" class="memo-selection-btn" id="memoSelectionCopyBtn">📋 복사</button>
+    <button type="button" class="memo-selection-btn" id="memoSelectionMemoBtn" data-i18n="selMemo">📝 Memo</button>
+    <button type="button" class="memo-selection-btn" id="memoSelectionSearchBtn" data-i18n="selSearch">🔍 Search</button>
+    <button type="button" class="memo-selection-btn" id="memoSelectionCopyBtn" data-i18n="selCopy">📋 Copy</button>
   </div>
   <div class="popup-modal" id="listPopup" hidden>
     <div class="popup-card">
@@ -5845,14 +5845,16 @@ const webAppHTML = `<!doctype html>
     function renderInFileResults(needle, hits) {
       searchInFileHitsEl.innerHTML = "";
       if (!needle) {
-        searchInFileSummaryEl.textContent = "Type to search.";
+        searchInFileSummaryEl.textContent = t("searchTypeToSearch");
         return;
       }
       if (!hits.length) {
-        searchInFileSummaryEl.textContent = "No matches in this file.";
+        searchInFileSummaryEl.textContent = t("searchNoMatches");
         return;
       }
-      searchInFileSummaryEl.textContent = hits.length + " match" + (hits.length === 1 ? "" : "es");
+      searchInFileSummaryEl.textContent = (state.lang === "ko")
+        ? (hits.length + "개 일치")
+        : (hits.length + " match" + (hits.length === 1 ? "" : "es"));
       // Build ranked index list, preserving the original hits[] order
       // for focusHit (since it scrolls by index in document order).
       const ranked = hits.map(function (h, i) {
@@ -6088,6 +6090,20 @@ const webAppHTML = `<!doctype html>
         toggleCurrent: "Toggle current",
         removeFavorite: "★ Remove favorite", addToFavorites: "Add to favorites",
         phSearchFiles: "Search files", phJumpPath: "Jump to path (Enter)…  e.g. ~/notes/foo.md",
+        secOutline: "Outline", outlineLevelTitle: "Heading levels to show (click to change)", outlineCollapseTitle: "Collapse outline", outlineEmpty: "No headings in this document.",
+        phSearchFolder: "🔍 Search in this folder…", secInThisFile: "In this file",
+        sortLine: "Line", sortLineTitle: "Sort by line position", sortPriority: "Priority", sortPriorityTitle: "Sort by importance (heading first)",
+        searchTypeToSearch: "Type to search.", searchNoMatches: "No matches in this file.",
+        scopeFolder: "This folder", scopeFolderTitle: "Search the current folder only", scopeGit: "Git repo", scopeGitTitle: "Search the whole enclosing Git repo",
+        folderSame: "Same folder", folderGit: "Git repo",
+        secMemo: "Memo", memoNew: "＋ New", memoNewTitle: "New memo", memoCopy: "📋 Copy", memoCopyTitle: "Copy with filename header",
+        phMemoFilter: "🔍 Search memos…",
+        memoSortUpdated: "Updated", memoSortUpdatedTitle: "Sort by last modified", memoSortCreated: "Created", memoSortCreatedTitle: "Sort by created", memoSortTitle: "Title", memoSortTitleTitle: "Sort by title A–Z",
+        memoEmpty: "No memos yet. Add one with ＋ New.", memoNoMatch: "No matches",
+        phMemoTitle: "Title (optional)", phMemoArea: "A note to remember while reading this file…",
+        memoTrash: "Trash", memoTrashEmpty: "Empty", memoTrashEmptyTitle: "Empty trash (permanent delete)", memoTrashToggleTitle: "Deleted memos (click to expand)",
+        revealSidebar: "☰ Files", revealSidebarTitle: "Show sidebar", revealPanel: "▤ Panel", revealPanelTitle: "Show panel (Outline · Search · Memo)",
+        selMemo: "📝 Memo", selSearch: "🔍 Search", selCopy: "📋 Copy",
       },
       ko: {
         guideBanner: "내장 사용 가이드",
@@ -6110,6 +6126,20 @@ const webAppHTML = `<!doctype html>
         toggleCurrent: "현재 추가/제거",
         removeFavorite: "★ 즐겨찾기 제거", addToFavorites: "즐겨찾기에 추가",
         phSearchFiles: "파일 검색", phJumpPath: "경로로 점프 (Enter)…  예: ~/notes/foo.md",
+        secOutline: "개요", outlineLevelTitle: "표시할 헤딩 레벨 (클릭하여 변경)", outlineCollapseTitle: "개요 접기", outlineEmpty: "이 문서에는 헤딩이 없습니다.",
+        phSearchFolder: "🔍 이 폴더에서 검색…", secInThisFile: "이 파일에서",
+        sortLine: "줄", sortLineTitle: "줄 위치순 정렬", sortPriority: "중요도", sortPriorityTitle: "중요도순 정렬 (헤딩 우선)",
+        searchTypeToSearch: "검색어를 입력하세요.", searchNoMatches: "이 파일에 일치 항목이 없습니다.",
+        scopeFolder: "이 폴더", scopeFolderTitle: "현재 폴더만 검색", scopeGit: "Git 전체", scopeGitTitle: "상위 Git 저장소 전체 검색",
+        folderSame: "같은 폴더", folderGit: "Git 저장소",
+        secMemo: "메모", memoNew: "＋ 새로", memoNewTitle: "새 메모", memoCopy: "📋 복사", memoCopyTitle: "파일명 헤더와 함께 복사",
+        phMemoFilter: "🔍 메모 검색…",
+        memoSortUpdated: "수정순", memoSortUpdatedTitle: "최근 수정순 정렬", memoSortCreated: "생성순", memoSortCreatedTitle: "생성순 정렬", memoSortTitle: "제목", memoSortTitleTitle: "제목순 정렬 (A–Z)",
+        memoEmpty: "메모가 없습니다. ＋ 새로로 추가하세요.", memoNoMatch: "검색 결과 없음",
+        phMemoTitle: "제목(선택)", phMemoArea: "이 파일을 보면서 기억해두고 싶은 메모…",
+        memoTrash: "휴지통", memoTrashEmpty: "비우기", memoTrashEmptyTitle: "휴지통 비우기 (영구 삭제)", memoTrashToggleTitle: "삭제한 메모 (클릭하여 펼치기)",
+        revealSidebar: "☰ 파일", revealSidebarTitle: "사이드바 보기", revealPanel: "▤ 패널", revealPanelTitle: "패널 보기 (개요 · 검색 · 메모)",
+        selMemo: "📝 메모", selSearch: "🔍 검색", selCopy: "📋 복사",
       },
     };
     function t(key) {
@@ -6139,6 +6169,8 @@ const webAppHTML = `<!doctype html>
       try { if (typeof updateToggleFavoriteLabel === "function") updateToggleFavoriteLabel(); } catch (e) {}
       try { if (typeof renderRecents === "function") renderRecents(); } catch (e) {}
       try { if (typeof renderFavorites === "function") renderFavorites(); } catch (e) {}
+      try { if (typeof applyFolderScope === "function") applyFolderScope(state.folderSearchScope); } catch (e) {}
+      try { if (typeof renderInFileResults === "function") renderInFileResults(state.searchQueryRight || "", state.searchInFileHits || []); } catch (e) {}
     }
 
     let usageGuideCache = {}; // keyed by language
@@ -7635,7 +7667,7 @@ const webAppHTML = `<!doctype html>
       const titleEl = document.getElementById("searchFolderTitle");
       if (btnFolder) btnFolder.classList.toggle("active", state.folderSearchScope === "folder");
       if (btnGit) btnGit.classList.toggle("active", state.folderSearchScope === "git");
-      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? "Git repo" : "Same folder";
+      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? t("folderGit") : t("folderSame");
       if (state.searchQueryRight) runFolderSearch(state.searchQueryRight);
     }
     {
