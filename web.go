@@ -8961,7 +8961,7 @@ const webAppHTML = `<!doctype html>
       }
 
       function createMemoFromSelection(text, source) {
-        const t = nowISO();
+        const ts = nowISO();
         // Keep a quote of the selection so the backlink can jump to and
         // highlight the exact spot (capped to stay light).
         const quote = (text || "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -8971,7 +8971,7 @@ const webAppHTML = `<!doctype html>
           sourceHash: (source && source.hash) || "",
           sourceHeading: (source && source.heading) || "",
           sourceQuote: quote,
-          createdAt: t, updatedAt: t,
+          createdAt: ts, updatedAt: ts,
         };
         m.memos.unshift(memo);
         m.dirty.add(memo.id);
