@@ -7487,14 +7487,20 @@ const webAppHTML = `<!doctype html>
         return { left: left, right: right, groups: groups };
       }
 
-      // Tint each top-level rendered block whose source-line range overlaps a
-      // changed line. Block range = [its start, next block's start).
+      // Tint the rendered element that owns each changed line. We consider
+      // every [data-source-line] element (top-level blocks AND the per-row
+      // <tr> / per-item <li> markers annotateSourceLines stamps), then pick the
+      // most specific one per changed line — so a single changed table row or
+      // list item is highlighted instead of the whole table/list.
       function applyBlockHighlight(bodyEl, changedSet) {
         if (!changedSet || !changedSet.size) return;
-        const blocks = Array.from(bodyEl.querySelectorAll(":scope > [data-source-line]"))
-          .map((el) => ({ el: el, line: parseInt(el.getAttribute("data-source-line"), 10) }))
+        function depthOf(el) { let d = 0; while (el && el !== bodyEl) { el = el.parentElement; d++; } return d; }
+        const blocks = Array.from(bodyEl.querySelectorAll("[data-source-line]"))
+          .map((el) => ({ el: el, line: parseInt(el.getAttribute("data-source-line"), 10), depth: depthOf(el) }))
           .filter((b) => !isNaN(b.line))
-          .sort((a, b) => a.line - b.line);
+          // line asc, then depth asc: at the same start line the deeper (more
+          // specific) element sorts last, so "rightmost start <= line" prefers it.
+          .sort((a, b) => (a.line - b.line) || (a.depth - b.depth));
         if (!blocks.length) return;
         const starts = blocks.map((b) => b.line);
         for (const ln of changedSet) {
