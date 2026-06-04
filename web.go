@@ -7105,13 +7105,19 @@ const webAppHTML = `<!doctype html>
       let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
       let sa = a.length, sb = b.length; while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
       const ops = updLcs(a.slice(p, sa), b.slice(p, sb));
-      const addedNew = new Set(), pairs = [], removedOld = [];
+      const addedNew = new Set(), addedRun = new Map(), pairs = [], removedOld = [];
       let oLine = p, nLine = p, dels = [], adds = [], lastNew = p - 1;
+      // Each maximal run of changes (del/add lines uninterrupted by a "same"
+      // line) gets one runId, so adjacent changed lines count as a single
+      // change point for ▲/▼ navigation — matching the version-compare view.
+      let runId = 0;
       function flush() {
+        if (!dels.length && !adds.length) return; // no change → no run id
+        runId++;
         const k = Math.min(dels.length, adds.length);
-        for (let i = 0; i < k; i++) pairs.push({ o: dels[i], n: adds[i] });
-        for (let i = k; i < dels.length; i++) removedOld.push({ o: dels[i], afterNew: lastNew });
-        for (let i = k; i < adds.length; i++) addedNew.add(adds[i]);
+        for (let i = 0; i < k; i++) pairs.push({ o: dels[i], n: adds[i], run: runId });
+        for (let i = k; i < dels.length; i++) removedOld.push({ o: dels[i], afterNew: lastNew, run: runId });
+        for (let i = k; i < adds.length; i++) { addedNew.add(adds[i]); addedRun.set(adds[i], runId); }
         dels = []; adds = [];
       }
       for (const op of ops) {
@@ -7120,7 +7126,7 @@ const webAppHTML = `<!doctype html>
         else { adds.push(nLine); nLine++; lastNew = nLine - 1; }
       }
       flush();
-      return { addedNew: addedNew, pairs: pairs, removedOld: removedOld };
+      return { addedNew: addedNew, addedRun: addedRun, pairs: pairs, removedOld: removedOld };
     }
     // Split a string into diff tokens so highlighting lands on whole words/
     // numbers instead of fragmenting them char-by-char. A token is a run of
@@ -7271,6 +7277,7 @@ const webAppHTML = `<!doctype html>
       const oldLines = oldContent.split("\n"), newLines = newContent.split("\n");
       const blank = function (s) { return !s || !s.trim(); };
       const seen = new Set();
+      const seenRun = new Set(); // one ▲/▼ anchor per change run (adjacent lines = 1)
       const anchors = []; // change locations, for ▲/▼ navigation
       for (const pr of diff.pairs) {
         if (blank(oldLines[pr.o]) && blank(newLines[pr.n])) continue;
@@ -7299,14 +7306,16 @@ const webAppHTML = `<!doctype html>
             updInlineChange(ne, oe.textContent || "", ne.textContent || "");
           }
         } catch (e) {}
-        anchors.push(ne);
+        if (!seenRun.has(pr.run)) { seenRun.add(pr.run); anchors.push(ne); }
       }
       for (const ln of diff.addedNew) {
         if (blank(newLines[ln])) continue;          // blank lines have no rendered block
         const ne = updAnchorForLine(newContainer, ln);
         if (ne && !seen.has(ne)) {
           ne.classList.add(updIsCodeRow(ne) ? "upd-code-add" : "upd-add-block");
-          seen.add(ne); anchors.push(ne);
+          seen.add(ne);
+          const run = diff.addedRun.get(ln);
+          if (!seenRun.has(run)) { seenRun.add(run); anchors.push(ne); }
         }
       }
       const insertedRemoved = new Set();
@@ -7331,7 +7340,7 @@ const webAppHTML = `<!doctype html>
             const after = lastRemovedAfter.get(anchorRow) || anchorRow; // chain successive deletions in order
             after.parentNode.insertBefore(tr, after.nextSibling);
             lastRemovedAfter.set(anchorRow, tr);
-            anchors.push(tr);
+            if (!seenRun.has(rm.run)) { seenRun.add(rm.run); anchors.push(tr); }
             continue;
           }
           // else fall through to the generic removed-block below
@@ -7344,7 +7353,7 @@ const webAppHTML = `<!doctype html>
         const anchor = rm.afterNew >= 0 ? updAnchorForLine(newContainer, rm.afterNew) : null;
         if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(block, anchor.nextSibling);
         else newContainer.insertBefore(block, newContainer.firstChild);
-        anchors.push(block);
+        if (!seenRun.has(rm.run)) { seenRun.add(rm.run); anchors.push(block); }
       }
       // Order anchors by document position so ▲/▼ navigation walks top→bottom.
       anchors.sort(function (a, b) {
