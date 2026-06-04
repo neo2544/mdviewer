@@ -4061,7 +4061,7 @@ const webAppHTML = `<!doctype html>
   <div class="update-overlay" id="updateOverlay" hidden>
     <div class="update-overlay-card">
       <div class="update-spinner"></div>
-      <div id="updateOverlayMsg">업데이트 중…</div>
+      <div id="updateOverlayMsg" data-i18n="updating">Updating…</div>
     </div>
   </div>
   <div class="memo-selection-bar" id="memoSelectionBar" hidden>
@@ -4074,25 +4074,25 @@ const webAppHTML = `<!doctype html>
       <div class="popup-head">
         <div class="popup-title" id="popupTitle">Items</div>
         <div class="popup-head-actions">
-          <button type="button" class="action" id="popupClear" title="Clear list" hidden>Clear</button>
-          <button type="button" class="popup-close" id="popupClose" title="Close">✕</button>
+          <button type="button" class="action" id="popupClear" data-i18n="clear" data-i18n-title="clearListTitle" title="Clear list" hidden>Clear</button>
+          <button type="button" class="popup-close" id="popupClose" data-i18n-title="closeTitle" title="Close">✕</button>
         </div>
       </div>
-      <input type="text" id="popupSearch" placeholder="Filter…" autocomplete="off" spellcheck="false" />
+      <input type="text" id="popupSearch" data-i18n-ph="phFilter" placeholder="Filter…" autocomplete="off" spellcheck="false" />
       <div id="popupResults" class="popup-results"></div>
-      <div class="popup-foot subtle">Click to open · Esc to close</div>
+      <div class="popup-foot subtle" data-i18n="popupFoot">Click to open · Esc to close</div>
     </div>
   </div>
   <div class="popup-modal" id="folderBrowseModal" hidden>
     <div class="popup-card">
       <div class="popup-head">
-        <div class="popup-title" id="folderBrowseTitle">하위 폴더 탐색</div>
+        <div class="popup-title" id="folderBrowseTitle" data-i18n="fbTitle">Browse subfolders</div>
         <div class="popup-head-actions">
-          <div class="search-sort" role="group" aria-label="탐색 범위">
-            <button type="button" class="search-sort-btn active" id="fbScopeFolder" title="현재 폴더 하위 탐색">하위 폴더</button>
-            <button type="button" class="search-sort-btn" id="fbScopeGit" title="Git 저장소 전체 탐색">Git repo</button>
+          <div class="search-sort" role="group" aria-label="Scope">
+            <button type="button" class="search-sort-btn active" id="fbScopeFolder" data-i18n="fbScopeFolder" data-i18n-title="fbScopeFolderTitle" title="Browse under the current folder">Subfolders</button>
+            <button type="button" class="search-sort-btn" id="fbScopeGit" data-i18n="scopeGit" data-i18n-title="fbScopeGitTitle" title="Browse the whole Git repo">Git repo</button>
           </div>
-          <button type="button" class="popup-close" id="folderBrowseClose" title="닫기">✕</button>
+          <button type="button" class="popup-close" id="folderBrowseClose" data-i18n-title="closeTitle" title="Close">✕</button>
         </div>
       </div>
       <div class="fb-search-wrap">
@@ -4100,16 +4100,16 @@ const webAppHTML = `<!doctype html>
           <circle cx="7" cy="7" r="4.5" />
           <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
         </svg>
-        <input type="search" id="fbSearch" placeholder="파일명 검색…" autocomplete="off" spellcheck="false" />
+        <input type="search" id="fbSearch" data-i18n-ph="phFbSearch" placeholder="Search filenames…" autocomplete="off" spellcheck="false" />
       </div>
       <div id="fbResults" class="popup-results"></div>
-      <div class="popup-foot subtle">클릭하면 파일 열기 · Esc로 닫기</div>
+      <div class="popup-foot subtle" data-i18n="fbFoot">Click to open · Esc to close</div>
     </div>
   </div>
   <div class="popup-modal" id="memoConflictModal" hidden>
     <div class="popup-card">
       <div class="popup-head">
-        <div class="popup-title">⚠️ 메모 충돌 <span id="memoConflictCount" class="memo-conflict-count"></span></div>
+        <div class="popup-title">⚠️ <span data-i18n="memoConflict">Memo conflict</span> <span id="memoConflictCount" class="memo-conflict-count"></span></div>
       </div>
       <div id="memoConflictBody" class="memo-conflict-body"></div>
     </div>
@@ -4135,8 +4135,8 @@ const webAppHTML = `<!doctype html>
   </div>
   <div class="palette" id="palette" hidden>
     <div class="palette-card">
-      <input type="text" id="paletteInput" placeholder="Search recent files & folders… (Cmd/Ctrl+K)" autocomplete="off" spellcheck="false" />
-      <div class="palette-hint">↑↓ navigate · Enter open · Esc close</div>
+      <input type="text" id="paletteInput" data-i18n-ph="phPalette" placeholder="Search recent files & folders… (Cmd/Ctrl+K)" autocomplete="off" spellcheck="false" />
+      <div class="palette-hint" data-i18n="paletteHint">↑↓ navigate · Enter open · Esc close</div>
       <div id="paletteResults" class="palette-results"></div>
     </div>
   </div>
@@ -4390,8 +4390,8 @@ const webAppHTML = `<!doctype html>
       const name = (previewTitleEl.textContent || "").trim();
       if (!name) return;
       const ok = await copyTextToClipboard(name);
-      if (ok) showToast("파일 이름을 복사했어요: " + name, { kind: "ok", icon: "📋" });
-      else showToast("클립보드 복사 실패", { kind: "err", icon: "⚠️" });
+      if (ok) showToast(t("toastFileNameCopied") + name, { kind: "ok", icon: "📋" });
+      else showToast(t("toastCopyFail"), { kind: "err", icon: "⚠️" });
     });
     const previewMetaEl = document.getElementById("previewMeta");
     const previewBodyEl = document.getElementById("previewBody");
@@ -6068,7 +6068,12 @@ const webAppHTML = `<!doctype html>
     // Static markup is localized via data-i18n / data-i18n-title / data-i18n-ph
     // attributes; dynamic strings call t(key). The dictionary grows as more of
     // the UI is converted.
-    const I18N = {
+    // Hoisted + lazy so t() works even when called during early init (before
+    // this line would otherwise run) — avoids a const temporal-dead-zone error.
+    var _I18N;
+    function i18nDict() {
+      if (_I18N) return _I18N;
+      _I18N = {
       en: {
         guideBanner: "Built-in usage guide",
         guideSubtitle: "Select a file from the left to open your content.",
@@ -6104,6 +6109,15 @@ const webAppHTML = `<!doctype html>
         memoTrash: "Trash", memoTrashEmpty: "Empty", memoTrashEmptyTitle: "Empty trash (permanent delete)", memoTrashToggleTitle: "Deleted memos (click to expand)",
         revealSidebar: "☰ Files", revealSidebarTitle: "Show sidebar", revealPanel: "▤ Panel", revealPanelTitle: "Show panel (Outline · Search · Memo)",
         selMemo: "📝 Memo", selSearch: "🔍 Search", selCopy: "📋 Copy",
+        updating: "Updating…", clear: "Clear", clearListTitle: "Clear list", closeTitle: "Close", phFilter: "Filter…", popupFoot: "Click to open · Esc to close",
+        fbTitle: "Browse subfolders", fbScopeFolder: "Subfolders", fbScopeFolderTitle: "Browse under the current folder", fbScopeGitTitle: "Browse the whole Git repo", phFbSearch: "Search filenames…", fbFoot: "Click to open · Esc to close",
+        memoConflict: "Memo conflict", phPalette: "Search recent files & folders… (Cmd/Ctrl+K)", paletteHint: "↑↓ navigate · Enter open · Esc close",
+        toastFileNameCopied: "Copied filename: ", toastCopyFail: "Copy failed",
+        toastGitLogFail: "Couldn't load git history", toastNotInGit: "This file isn't in a git repo", toastNoCommits: "This file has no commit history",
+        toastMemoRestored: "Memo restored", toastTrashEmptied: "Trash emptied", toastMemoSaved: "Saved the selection as a memo", toastMemoTrashed: "Moved to trash", toastMemoEmpty: "Memo is empty",
+        toastSelCopied: "Copied the selection", toastBoxCopied: "Copied the text in the selected region", toastBoxEmpty: "No text in the selected region",
+        toastMemoCopiedTitle: "Copied the memo with a title link", toastMemoCopiedFile: "Copied the memo with the filename",
+        toastNoText: "No text to copy", toastMermaidCopied: "Copied the mermaid text to the clipboard",
       },
       ko: {
         guideBanner: "내장 사용 가이드",
@@ -6140,12 +6154,24 @@ const webAppHTML = `<!doctype html>
         memoTrash: "휴지통", memoTrashEmpty: "비우기", memoTrashEmptyTitle: "휴지통 비우기 (영구 삭제)", memoTrashToggleTitle: "삭제한 메모 (클릭하여 펼치기)",
         revealSidebar: "☰ 파일", revealSidebarTitle: "사이드바 보기", revealPanel: "▤ 패널", revealPanelTitle: "패널 보기 (개요 · 검색 · 메모)",
         selMemo: "📝 메모", selSearch: "🔍 검색", selCopy: "📋 복사",
+        updating: "업데이트 중…", clear: "지우기", clearListTitle: "목록 지우기", closeTitle: "닫기", phFilter: "필터…", popupFoot: "클릭하면 열기 · Esc로 닫기",
+        fbTitle: "하위 폴더 탐색", fbScopeFolder: "하위 폴더", fbScopeFolderTitle: "현재 폴더 하위 탐색", fbScopeGitTitle: "Git 저장소 전체 탐색", phFbSearch: "파일명 검색…", fbFoot: "클릭하면 파일 열기 · Esc로 닫기",
+        memoConflict: "메모 충돌", phPalette: "최근 파일·폴더 검색… (Cmd/Ctrl+K)", paletteHint: "↑↓ 이동 · Enter 열기 · Esc 닫기",
+        toastFileNameCopied: "파일 이름을 복사했어요: ", toastCopyFail: "클립보드 복사 실패",
+        toastGitLogFail: "git 이력을 불러오지 못했어요", toastNotInGit: "이 파일은 git 저장소에 없습니다", toastNoCommits: "이 파일의 커밋 이력이 없습니다",
+        toastMemoRestored: "메모를 복원했어요", toastTrashEmptied: "휴지통을 비웠어요", toastMemoSaved: "선택한 내용을 메모로 저장했어요", toastMemoTrashed: "휴지통으로 이동했어요", toastMemoEmpty: "메모가 비어 있어요",
+        toastSelCopied: "선택한 내용을 복사했어요", toastBoxCopied: "선택 영역의 글자를 복사했어요", toastBoxEmpty: "선택 영역에 글자가 없어요",
+        toastMemoCopiedTitle: "메모를 제목 링크와 함께 복사했어요", toastMemoCopiedFile: "메모를 파일명과 함께 복사했어요",
+        toastNoText: "복사할 텍스트가 없어요", toastMermaidCopied: "머메이드 텍스트를 클립보드에 복사했어요",
       },
-    };
+      };
+      return _I18N;
+    }
     function t(key) {
-      const d = I18N[state.lang] || I18N.en;
+      const M = i18nDict();
+      const d = M[state.lang] || M.en;
       if (d && d[key] != null) return d[key];
-      return (I18N.en[key] != null) ? I18N.en[key] : key;
+      return (M.en[key] != null) ? M.en[key] : key;
     }
     // Apply translations to any tagged static element. Re-run on language change.
     function applyI18n() {
@@ -8342,8 +8368,8 @@ const webAppHTML = `<!doctype html>
         try {
           const r = await fetch("/api/git/filelog?path=" + encodeURIComponent(state.selectedPath));
           data = await r.json();
-        } catch (e) { showToast("git 이력을 불러오지 못했어요", { kind: "err", icon: "⚠️" }); return; }
-        if (!data || !data.available) { showToast("이 파일은 git 저장소에 없습니다", { kind: "err", icon: "⚠️" }); return; }
+        } catch (e) { showToast(t("toastGitLogFail"), { kind: "err", icon: "⚠️" }); return; }
+        if (!data || !data.available) { showToast(t("toastNotInGit"), { kind: "err", icon: "⚠️" }); return; }
         const commits = Array.isArray(data.commits) ? data.commits : [];
         entries = [];
         if (data.dirty) entries.push({ value: "WORKING", label: "● 현재 작업본 (저장된 디스크 내용)" });
@@ -8351,7 +8377,7 @@ const webAppHTML = `<!doctype html>
           const tag = (i === 0 && !data.dirty) ? "  (최신)" : "";
           entries.push({ value: c.hash, label: c.short + " · " + c.date + " · " + (c.subject || "") + tag });
         });
-        if (!entries.length) { showToast("이 파일의 커밋 이력이 없습니다", { kind: "err", icon: "⚠️" }); return; }
+        if (!entries.length) { showToast(t("toastNoCommits"), { kind: "err", icon: "⚠️" }); return; }
 
         // Defaults: right = newest, left = the one before it (before/after).
         const rightVal = entries[0].value;
@@ -8631,7 +8657,7 @@ const webAppHTML = `<!doctype html>
         persistLocal();
         setActive(memo.id);                   // re-renders list + trash
         scheduleSync();
-        showToast("메모를 복원했어요", { kind: "ok", icon: "↩" });
+        showToast(t("toastMemoRestored"), { kind: "ok", icon: "↩" });
       }
       function purgeMemo(id) {
         const memo = m.trash.find(function (x) { return x.id === id; });
@@ -8647,7 +8673,7 @@ const webAppHTML = `<!doctype html>
         m.trash = [];
         persistTrash();
         renderTrash();
-        showToast("휴지통을 비웠어요", { kind: "ok", icon: "🗑" });
+        showToast(t("toastTrashEmptied"), { kind: "ok", icon: "🗑" });
       }
 
       function syncActiveEditor() {
@@ -8733,7 +8759,7 @@ const webAppHTML = `<!doctype html>
         persistLocal();
         setActive(memo.id);
         scheduleSync();
-        showToast("선택한 내용을 메모로 저장했어요", { kind: "ok", icon: "📝" });
+        showToast(t("toastMemoSaved"), { kind: "ok", icon: "📝" });
       }
 
       function togglePin(id) {
@@ -8764,7 +8790,7 @@ const webAppHTML = `<!doctype html>
         persistTrash();
         renderList();
         syncActiveEditor();
-        showToast("휴지통으로 이동했어요", { kind: "ok", icon: "🗑" });
+        showToast(t("toastMemoTrashed"), { kind: "ok", icon: "🗑" });
         // Remove from the server too, so other sessions also drop it. The trash
         // is local-only; restoring re-pushes the memo as new.
         try {
@@ -9214,7 +9240,7 @@ const webAppHTML = `<!doctype html>
             const s = currentPreviewSelection();
             if (!s) { hideSelectionBtn(); return; }
             const ok = await copyTextToClipboard(s.text);
-            showToast(ok ? "선택한 내용을 복사했어요" : "복사 실패",
+            showToast(ok ? t("toastSelCopied") : t("toastCopyFail"),
               ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
             hideSelectionBtn();
             if (window.getSelection) window.getSelection().removeAllRanges();
@@ -9245,7 +9271,7 @@ const webAppHTML = `<!doctype html>
           const memo = getMemo(m.activeId);
           const body = memo ? (memo.body || "") : "";
           if (!body.trim()) {
-            showToast("메모가 비어 있어요", { kind: "err", icon: "⚠️" });
+            showToast(t("toastMemoEmpty"), { kind: "err", icon: "⚠️" });
             return;
           }
           const title = memo ? (memo.title || "").trim() : "";
@@ -9276,7 +9302,7 @@ const webAppHTML = `<!doctype html>
               document.execCommand("copy");
               document.body.removeChild(ta);
             }
-            showToast(title ? "메모를 제목 링크와 함께 복사했어요" : "메모를 파일명과 함께 복사했어요", { kind: "ok", icon: "📋" });
+            showToast(title ? t("toastMemoCopiedTitle") : t("toastMemoCopiedFile"), { kind: "ok", icon: "📋" });
           } catch (e) {
             showToast("클립보드 복사 실패: " + (e && e.message || e), { kind: "err", icon: "⚠️" });
           }
@@ -11602,11 +11628,11 @@ const webAppHTML = `<!doctype html>
       const svg = lightboxStageEl.querySelector("svg");
       if (!svg) return;
       const res = extractMermaidTextInBox(svg, rect);
-      if (!res.text) { showToast("선택 영역에 글자가 없어요", { kind: "err", icon: "⚠️" }); return; }
+      if (!res.text) { showToast(t("toastBoxEmpty"), { kind: "err", icon: "⚠️" }); return; }
       // Show what was captured (selection-style highlight) before copying.
       showCopiedHighlights(res.rects);
       const ok = await copyTextToClipboard(res.text);
-      showToast(ok ? "선택 영역의 글자를 복사했어요" : "복사 실패",
+      showToast(ok ? t("toastBoxCopied") : t("toastCopyFail"),
         ok ? { kind: "ok", icon: "📋" } : { kind: "err", icon: "⚠️" });
     }
     // Collect text whose bounding box is fully contained in the screen-space
@@ -11716,13 +11742,13 @@ const webAppHTML = `<!doctype html>
       const text = extractMermaidText(svg);
       if (!text) {
         if (btn) flashButton(btn, "Empty", false);
-        showToast("복사할 텍스트가 없어요", { kind: "err", icon: "⚠️" });
+        showToast(t("toastNoText"), { kind: "err", icon: "⚠️" });
         return;
       }
       try {
         await navigator.clipboard.writeText(text);
         if (btn) flashButton(btn, "Copied ✓", true);
-        showToast("머메이드 텍스트를 클립보드에 복사했어요", { kind: "ok", icon: "📋" });
+        showToast(t("toastMermaidCopied"), { kind: "ok", icon: "📋" });
       } catch (err) {
         console.error("copy failed:", err);
         if (btn) flashButton(btn, "Copy failed", false);
