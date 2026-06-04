@@ -7093,26 +7093,40 @@ const webAppHTML = `<!doctype html>
       flush();
       return { addedNew: addedNew, pairs: pairs, removedOld: removedOld };
     }
+    // Split a string into diff tokens so highlighting lands on whole words/
+    // numbers instead of fragmenting them char-by-char. A token is a run of
+    // word characters (latin/digits/_ + Hangul/CJK/Kana), a run of whitespace,
+    // or a single other char (punctuation/symbol). Returns {text, start} so
+    // callers can map token spans back to character offsets.
+    function tokenizeForDiff(s) {
+      const re = /[A-Za-z0-9_À-ɏ가-힯぀-ヿ一-鿿]+|\s+|[^\s]/g;
+      const toks = []; let m;
+      while ((m = re.exec(s)) !== null) { toks.push({ text: m[0], start: m.index }); }
+      return toks;
+    }
     function updCharOps(a, b) {
-      const n = a.length, m = b.length;
-      if (!n && !m) return [];
+      if (!a.length && !b.length) return [];
       const ops = [];
-      function push(t, ch) { const last = ops[ops.length - 1]; if (last && last.t === t) last.text += ch; else ops.push({ t: t, text: ch }); }
-      // Trim the common prefix/suffix before the O(n*m) DP so a small edit
-      // inside a long string (e.g. one char changed in a 600-char table cell)
-      // doesn't blow the budget — only the differing middle is diffed.
-      let p = 0; while (p < n && p < m && a[p] === b[p]) p++;
-      let ea = n, eb = m; while (ea > p && eb > p && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
-      if (p > 0) push("same", a.slice(0, p));
-      const am = a.slice(p, ea), bm = b.slice(p, eb);
+      function push(t, txt) { const last = ops[ops.length - 1]; if (last && last.t === t) last.text += txt; else ops.push({ t: t, text: txt }); }
+      // Token-level LCS: diff whole words/numbers, not individual characters,
+      // so a changed token is highlighted as a unit (e.g. 1.58 → 1.59 instead
+      // of "1.589"). Trim the common token prefix/suffix first so a small edit
+      // in a long string stays within the O(n*m) budget.
+      const A = tokenizeForDiff(a).map(function (x) { return x.text; });
+      const B = tokenizeForDiff(b).map(function (x) { return x.text; });
+      const n = A.length, m = B.length;
+      let p = 0; while (p < n && p < m && A[p] === B[p]) p++;
+      let ea = n, eb = m; while (ea > p && eb > p && A[ea - 1] === B[eb - 1]) { ea--; eb--; }
+      if (p > 0) push("same", A.slice(0, p).join(""));
+      const am = A.slice(p, ea), bm = B.slice(p, eb);
       const an = am.length, bn = bm.length;
       if (an * bn > 200000) return null;
-      const dp = []; for (let i = 0; i <= an; i++) dp.push(new Uint16Array(bn + 1));
+      const dp = []; for (let i = 0; i <= an; i++) dp.push(new Uint32Array(bn + 1));
       for (let i = an - 1; i >= 0; i--) for (let j = bn - 1; j >= 0; j--) dp[i][j] = am[i] === bm[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
       let i = 0, j = 0;
       while (i < an && j < bn) { if (am[i] === bm[j]) { push("same", am[i]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", am[i]); i++; } else { push("add", bm[j]); j++; } }
       while (i < an) { push("del", am[i]); i++; } while (j < bn) { push("add", bm[j]); j++; }
-      if (ea < n) push("same", a.slice(ea));
+      if (ea < n) push("same", A.slice(ea).join(""));
       return ops;
     }
     function updAnchorForLine(body, line) {
@@ -7175,12 +7189,21 @@ const webAppHTML = `<!doctype html>
         else if (op.t === "add") { addRanges.push({ start: no, end: no + op.text.length }); no += op.text.length; }
         else { delInserts.push({ off: no, text: op.text }); }
       }
-      updWrapRanges(newEl, addRanges, "upd-add");          // additions: offsets stay valid
-      delInserts.sort(function (a, b) { return b.off - a.off; }); // descending so inserts don't shift earlier offsets
-      for (const d of delInserts) {
+      // Insert deletions first, into the still-plain text, so a deletion never
+      // lands inside an addition <mark> — which happens when a whole token is
+      // replaced and the deletion offset coincides with the addition's start.
+      // Each inserted deletion grows the text, so shift the addition ranges and
+      // any later deletions that sit at/after that offset.
+      delInserts.sort(function (a, b) { return a.off - b.off; });
+      for (let k = 0; k < delInserts.length; k++) {
+        const d = delInserts[k];
         const mark = document.createElement("mark"); mark.className = "upd-del"; mark.textContent = d.text;
         updInsertAtOffset(newEl, d.off, mark);
+        const grow = d.text.length;
+        for (const r of addRanges) { if (r.start >= d.off) { r.start += grow; r.end += grow; } }
+        for (let q = k + 1; q < delInserts.length; q++) { if (delInserts[q].off >= d.off) delInserts[q].off += grow; }
       }
+      updWrapRanges(newEl, addRanges, "upd-add");
     }
     function updNote(container, msg) {
       const n = document.createElement("div"); n.className = "upd-note"; n.textContent = "📝 " + msg;
@@ -8384,25 +8407,34 @@ const webAppHTML = `<!doctype html>
       }
 
       // ── Intra-line emphasis: within each changed line pair, highlight the
-      // exact characters that were removed (left) / added (right). ──
-      // Character-level LCS over the two rendered strings → removed ranges in a,
-      // added ranges in b.
+      // tokens (whole words/numbers) that were removed (left) / added (right). ──
+      // Token-level LCS over the two rendered strings, returning character
+      // offset ranges into a (del) and b (add) so wrapRanges can mark them.
+      // Token granularity keeps a changed word intact instead of fragmenting
+      // it ("1.58"→"1.59", not "1.589").
       function charDiff(a, b) {
-        const n = a.length, m = b.length;
-        if (!n || !m) return null;
-        // Trim the common prefix/suffix so a small edit inside a long string
-        // (e.g. one char changed in a long table cell) doesn't exceed the
-        // O(n*m) budget — only the differing middle is diffed, then offsets
-        // are shifted back by the prefix length.
-        let p = 0; while (p < n && p < m && a[p] === b[p]) p++;
-        let ea = n, eb = m; while (ea > p && eb > p && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
-        const am = a.slice(p, ea), bm = b.slice(p, eb);
+        if (!a.length || !b.length) return null;
+        const ta = tokenizeForDiff(a), tb = tokenizeForDiff(b);
+        const A = ta.map(function (x) { return x.text; });
+        const B = tb.map(function (x) { return x.text; });
+        const n = A.length, m = B.length;
+        // Trim common token prefix/suffix so a small edit in a long string
+        // stays within the O(n*m) budget.
+        let p = 0; while (p < n && p < m && A[p] === B[p]) p++;
+        let ea = n, eb = m; while (ea > p && eb > p && A[ea - 1] === B[eb - 1]) { ea--; eb--; }
+        const am = A.slice(p, ea), bm = B.slice(p, eb);
         const an = am.length, bn = bm.length;
         if (an * bn > 200000) return null; // skip pathological middles
         const del = [], add = [];
         if (!an && !bn) return { del: del, add: add };
+        // Map a token-index span [s,e) (in the trimmed-middle coordinates) back
+        // to a character range in the original string via the token list.
+        function rng(toks, s, e) {
+          const first = toks[p + s], last = toks[p + e - 1];
+          return { start: first.start, end: last.start + last.text.length };
+        }
         const dp = [];
-        for (let i = 0; i <= an; i++) dp.push(new Uint16Array(bn + 1));
+        for (let i = 0; i <= an; i++) dp.push(new Uint32Array(bn + 1));
         for (let i = an - 1; i >= 0; i--) {
           for (let j = bn - 1; j >= 0; j--) {
             dp[i][j] = am[i] === bm[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
@@ -8411,8 +8443,8 @@ const webAppHTML = `<!doctype html>
         let i = 0, j = 0, ds = -1, as = -1;
         while (i < an && j < bn) {
           if (am[i] === bm[j]) {
-            if (ds >= 0) { del.push({ start: ds + p, end: i + p }); ds = -1; }
-            if (as >= 0) { add.push({ start: as + p, end: j + p }); as = -1; }
+            if (ds >= 0) { del.push(rng(ta, ds, i)); ds = -1; }
+            if (as >= 0) { add.push(rng(tb, as, j)); as = -1; }
             i++; j++;
           } else if (dp[i + 1][j] >= dp[i][j + 1]) {
             if (ds < 0) ds = i; i++;
@@ -8422,8 +8454,8 @@ const webAppHTML = `<!doctype html>
         }
         while (i < an) { if (ds < 0) ds = i; i++; }
         while (j < bn) { if (as < 0) as = j; j++; }
-        if (ds >= 0) del.push({ start: ds + p, end: an + p });
-        if (as >= 0) add.push({ start: as + p, end: bn + p });
+        if (ds >= 0) del.push(rng(ta, ds, an));
+        if (as >= 0) add.push(rng(tb, as, bn));
         return { del: del, add: add };
       }
       // Wrap the given character ranges (offsets into container.textContent) in
