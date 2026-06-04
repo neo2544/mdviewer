@@ -7095,14 +7095,24 @@ const webAppHTML = `<!doctype html>
     }
     function updCharOps(a, b) {
       const n = a.length, m = b.length;
-      if (n * m > 200000) return null;
       if (!n && !m) return [];
-      const dp = []; for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
-      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-      const ops = []; let i = 0, j = 0;
+      const ops = [];
       function push(t, ch) { const last = ops[ops.length - 1]; if (last && last.t === t) last.text += ch; else ops.push({ t: t, text: ch }); }
-      while (i < n && j < m) { if (a[i] === b[j]) { push("same", a[i]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", a[i]); i++; } else { push("add", b[j]); j++; } }
-      while (i < n) { push("del", a[i]); i++; } while (j < m) { push("add", b[j]); j++; }
+      // Trim the common prefix/suffix before the O(n*m) DP so a small edit
+      // inside a long string (e.g. one char changed in a 600-char table cell)
+      // doesn't blow the budget — only the differing middle is diffed.
+      let p = 0; while (p < n && p < m && a[p] === b[p]) p++;
+      let ea = n, eb = m; while (ea > p && eb > p && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
+      if (p > 0) push("same", a.slice(0, p));
+      const am = a.slice(p, ea), bm = b.slice(p, eb);
+      const an = am.length, bn = bm.length;
+      if (an * bn > 200000) return null;
+      const dp = []; for (let i = 0; i <= an; i++) dp.push(new Uint16Array(bn + 1));
+      for (let i = an - 1; i >= 0; i--) for (let j = bn - 1; j >= 0; j--) dp[i][j] = am[i] === bm[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      let i = 0, j = 0;
+      while (i < an && j < bn) { if (am[i] === bm[j]) { push("same", am[i]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", am[i]); i++; } else { push("add", bm[j]); j++; } }
+      while (i < an) { push("del", am[i]); i++; } while (j < bn) { push("add", bm[j]); j++; }
+      if (ea < n) push("same", a.slice(ea));
       return ops;
     }
     function updAnchorForLine(body, line) {
@@ -8379,20 +8389,30 @@ const webAppHTML = `<!doctype html>
       // added ranges in b.
       function charDiff(a, b) {
         const n = a.length, m = b.length;
-        if (!n || !m || n * m > 200000) return null; // skip pathological lines
+        if (!n || !m) return null;
+        // Trim the common prefix/suffix so a small edit inside a long string
+        // (e.g. one char changed in a long table cell) doesn't exceed the
+        // O(n*m) budget — only the differing middle is diffed, then offsets
+        // are shifted back by the prefix length.
+        let p = 0; while (p < n && p < m && a[p] === b[p]) p++;
+        let ea = n, eb = m; while (ea > p && eb > p && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
+        const am = a.slice(p, ea), bm = b.slice(p, eb);
+        const an = am.length, bn = bm.length;
+        if (an * bn > 200000) return null; // skip pathological middles
+        const del = [], add = [];
+        if (!an && !bn) return { del: del, add: add };
         const dp = [];
-        for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
-        for (let i = n - 1; i >= 0; i--) {
-          for (let j = m - 1; j >= 0; j--) {
-            dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        for (let i = 0; i <= an; i++) dp.push(new Uint16Array(bn + 1));
+        for (let i = an - 1; i >= 0; i--) {
+          for (let j = bn - 1; j >= 0; j--) {
+            dp[i][j] = am[i] === bm[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
           }
         }
-        const del = [], add = [];
         let i = 0, j = 0, ds = -1, as = -1;
-        while (i < n && j < m) {
-          if (a[i] === b[j]) {
-            if (ds >= 0) { del.push({ start: ds, end: i }); ds = -1; }
-            if (as >= 0) { add.push({ start: as, end: j }); as = -1; }
+        while (i < an && j < bn) {
+          if (am[i] === bm[j]) {
+            if (ds >= 0) { del.push({ start: ds + p, end: i + p }); ds = -1; }
+            if (as >= 0) { add.push({ start: as + p, end: j + p }); as = -1; }
             i++; j++;
           } else if (dp[i + 1][j] >= dp[i][j + 1]) {
             if (ds < 0) ds = i; i++;
@@ -8400,10 +8420,10 @@ const webAppHTML = `<!doctype html>
             if (as < 0) as = j; j++;
           }
         }
-        while (i < n) { if (ds < 0) ds = i; i++; }
-        while (j < m) { if (as < 0) as = j; j++; }
-        if (ds >= 0) del.push({ start: ds, end: n });
-        if (as >= 0) add.push({ start: as, end: m });
+        while (i < an) { if (ds < 0) ds = i; i++; }
+        while (j < bn) { if (as < 0) as = j; j++; }
+        if (ds >= 0) del.push({ start: ds + p, end: an + p });
+        if (as >= 0) add.push({ start: as + p, end: bn + p });
         return { del: del, add: add };
       }
       // Wrap the given character ranges (offsets into container.textContent) in
