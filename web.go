@@ -7558,6 +7558,8 @@ const webAppHTML = `<!doctype html>
           try { applyLineNumbersManual(code); } catch (e) { continue; }
           const rows = code.querySelectorAll("table.hljs-ln tbody tr");
           for (let i = 0; i < rows.length; i++) {
+            // Stamp each row's source line so change-navigation can anchor to it.
+            rows[i].setAttribute("data-source-line", String(sl + 1 + i));
             if (changedSet.has(sl + 1 + i)) rows[i].classList.add("vcd-chg-line");
           }
         }
@@ -7683,11 +7685,18 @@ const webAppHTML = `<!doctype html>
       // ── Change navigation (▲ prev / ▼ next) ──
       function anchorForLine(body, line) {
         if (line === null || line === undefined) return null;
-        const raw = body.querySelector(".vcd-rawwrap");
-        if (raw) { const ch = raw.children; return ch[Math.min(line, ch.length - 1)] || null; }
-        const blocks = Array.from(body.querySelectorAll(":scope > [data-source-line]"))
-          .map((el) => ({ el: el, line: parseInt(el.getAttribute("data-source-line"), 10) }))
-          .filter((b) => !isNaN(b.line)).sort((a, b) => a.line - b.line);
+        // Non-markdown raw render: the whole pane is one .vcd-rawwrap of lines.
+        // (Must be a DIRECT child — a mermaid source view also uses .vcd-rawwrap.)
+        const rawTop = body.querySelector(":scope > .vcd-rawwrap");
+        if (rawTop) { const ch = rawTop.children; return ch[Math.min(line, ch.length - 1)] || null; }
+        // Markdown: consider every [data-source-line] element (top-level blocks
+        // plus stamped table rows, list items and code lines) and pick the most
+        // specific one for this line, so navigation lands inside the block.
+        function depthOf(el) { let d = 0; while (el && el !== body) { el = el.parentElement; d++; } return d; }
+        const blocks = Array.from(body.querySelectorAll("[data-source-line]"))
+          .map((el) => ({ el: el, line: parseInt(el.getAttribute("data-source-line"), 10), depth: depthOf(el) }))
+          .filter((b) => !isNaN(b.line))
+          .sort((a, b) => (a.line - b.line) || (a.depth - b.depth));
         if (!blocks.length) return null;
         let lo = 0, hi = blocks.length - 1, idx = 0;
         while (lo <= hi) { const mid = (lo + hi) >> 1; if (blocks[mid].line <= line) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
