@@ -2637,6 +2637,22 @@ const webAppHTML = `<!doctype html>
     }
     .vcd-rawwrap { font: 12.5px/1.55 ui-monospace, SFMono-Regular, monospace; tab-size: 4; }
     .vcd-rawline { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; padding: 0 6px; }
+    /* Changed code/source lines: raw-line divs and hljs line-number rows. */
+    .vcompare-pane-body.side-l div.vcd-chg-line { background: color-mix(in oklab, #e0533f 16%, transparent); }
+    .vcompare-pane-body.side-r div.vcd-chg-line { background: color-mix(in oklab, #3fb950 18%, transparent); }
+    .vcompare-pane-body.side-l tr.vcd-chg-line > td { background: color-mix(in oklab, #e0533f 16%, transparent); }
+    .vcompare-pane-body.side-r tr.vcd-chg-line > td { background: color-mix(in oklab, #3fb950 18%, transparent); }
+    /* Changed mermaid diagram: flag it and offer a source toggle. */
+    .vcd-mermaid-card { border-radius: 8px; margin: 6px 0; }
+    .vcompare-pane-body.side-l .vcd-mermaid-card { outline: 2px solid color-mix(in oklab, #e0533f 55%, transparent); outline-offset: -2px; }
+    .vcompare-pane-body.side-r .vcd-mermaid-card { outline: 2px solid color-mix(in oklab, #3fb950 55%, transparent); outline-offset: -2px; }
+    .vcd-mermaid-bar { display: flex; align-items: center; gap: 8px; padding: 4px 6px; }
+    .vcd-mermaid-badge { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+    .vcompare-pane-body.side-l .vcd-mermaid-badge { color: #e0533f; background: color-mix(in oklab, #e0533f 16%, transparent); }
+    .vcompare-pane-body.side-r .vcd-mermaid-badge { color: #2f9e4f; background: color-mix(in oklab, #3fb950 18%, transparent); }
+    .vcd-mermaid-toggle { margin-left: auto; font-size: 11px; border: 1px solid color-mix(in oklab, var(--line) 70%, transparent); background: color-mix(in oklab, var(--panel-2) 70%, transparent); color: var(--text); border-radius: 7px; padding: 2px 8px; cursor: pointer; }
+    .vcd-mermaid-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .vcd-mermaid-src { padding: 6px 8px; }
     .vcompare-empty { color: var(--muted); font-size: 12px; padding: 12px; }
     /* .action sets display:inline-flex, which would defeat the [hidden] attr. */
     #versionButton[hidden] { display: none; }
@@ -6642,7 +6658,14 @@ const webAppHTML = `<!doctype html>
         if (srcLine !== null) wrap.setAttribute("data-source-line", srcLine);
         code.parentElement.replaceWith(wrap);
       }
-      await new Promise((r) => requestAnimationFrame(r));
+      // Let layout settle before mermaid measures. rAF never fires in a hidden
+      // tab, so race it with a short timeout to avoid hanging there.
+      await new Promise((r) => {
+        let done = false;
+        const fin = () => { if (!done) { done = true; r(); } };
+        requestAnimationFrame(fin);
+        setTimeout(fin, 60);
+      });
       try {
         await mermaid.run({ nodes: container.querySelectorAll(".mermaid") });
       } catch (e) {
@@ -7510,11 +7533,97 @@ const webAppHTML = `<!doctype html>
         }
       }
 
+      // Fenced code blocks render as one <pre> stamped at the opening fence's
+      // line, so a whole-block tint hides behind the hljs background. Instead
+      // split into per-line rows (reusing the file viewer's line numbering) and
+      // tint just the changed lines. Code line k maps to source line fence+1+k.
+      function highlightCodeLineDiffs(bodyEl, changedSet) {
+        if (!changedSet || !changedSet.size) return;
+        // decorateCodeBlocks wraps each <pre> in a .code-wrap that carries the
+        // data-source-line, so find code blocks and read the line off whichever
+        // ancestor holds it.
+        const codes = bodyEl.querySelectorAll("pre > code");
+        for (const code of codes) {
+          if (code.classList.contains("language-mermaid")) continue;
+          const anc = code.closest("[data-source-line]");
+          if (!anc) continue;
+          const sl = parseInt(anc.getAttribute("data-source-line"), 10);
+          if (isNaN(sl)) continue;
+          const lineCount = (code.textContent || "").split("\n").length;
+          let hit = false;
+          for (let i = 0; i < lineCount; i++) { if (changedSet.has(sl + 1 + i)) { hit = true; break; } }
+          if (!hit) continue;
+          anc.classList.remove("vcd-chg-block");
+          (code.closest("pre") || code).classList.add("vcd-code-diff");
+          try { applyLineNumbersManual(code); } catch (e) { continue; }
+          const rows = code.querySelectorAll("table.hljs-ln tbody tr");
+          for (let i = 0; i < rows.length; i++) {
+            if (changedSet.has(sl + 1 + i)) rows[i].classList.add("vcd-chg-line");
+          }
+        }
+      }
+
+      // Two mermaid SVGs can't be diffed by background colour, so for a diagram
+      // whose source changed we flag it and offer a "</> 소스" toggle that shows
+      // the raw mermaid source with the changed lines tinted.
+      function markChangedMermaid(bodyEl, content, changedSet) {
+        if (!changedSet || !changedSet.size) return;
+        const FENCE = String.fromCharCode(96, 96, 96); // triple-backtick (no literal here: Go raw string)
+        const lines = content.split("\n");
+        const wraps = bodyEl.querySelectorAll(":scope > .mermaid-wrap, :scope > .mermaid");
+        for (const wrap of wraps) {
+          const sl = parseInt(wrap.getAttribute("data-source-line"), 10);
+          if (isNaN(sl)) continue;
+          let end = lines.length;
+          for (let k = sl + 1; k < lines.length; k++) { if (lines[k].trim().indexOf(FENCE) === 0) { end = k; break; } }
+          let hit = false;
+          for (let i = sl; i <= end && i < lines.length; i++) { if (changedSet.has(i)) { hit = true; break; } }
+          if (!hit) continue;
+
+          const card = document.createElement("div");
+          card.className = "vcd-mermaid-card";
+          const bar = document.createElement("div");
+          bar.className = "vcd-mermaid-bar";
+          const badge = document.createElement("span");
+          badge.className = "vcd-mermaid-badge";
+          badge.textContent = "변경됨";
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "vcd-mermaid-toggle";
+          toggle.textContent = "</> 소스";
+          bar.appendChild(badge);
+          bar.appendChild(toggle);
+
+          const src = document.createElement("div");
+          src.className = "vcd-mermaid-src vcd-rawwrap";
+          src.hidden = true;
+          for (let i = sl + 1; i < end; i++) {
+            const d = document.createElement("div");
+            d.className = "vcd-rawline" + (changedSet.has(i) ? " vcd-chg-line" : "");
+            d.textContent = (lines[i] === "" ? " " : lines[i]);
+            src.appendChild(d);
+          }
+
+          wrap.parentNode.insertBefore(card, wrap);
+          card.appendChild(bar);
+          card.appendChild(wrap);
+          card.appendChild(src);
+          toggle.addEventListener("click", function () {
+            const showSrc = wrap.hidden !== true ? true : false;
+            wrap.hidden = showSrc;
+            src.hidden = !showSrc;
+            toggle.textContent = showSrc ? "🖼 다이어그램" : "</> 소스";
+          });
+        }
+      }
+
       async function renderSide(bodyEl, content, changedSet) {
         const kind = state.selectedKind;
         if (kind === "markdown" || kind === "text") {
           await renderMarkdownInto(bodyEl, content, kind, { trackSourceLines: true });
-          applyBlockHighlight(bodyEl, changedSet);
+          try { applyBlockHighlight(bodyEl, changedSet); } catch (e) {}
+          try { highlightCodeLineDiffs(bodyEl, changedSet); } catch (e) {}
+          try { markChangedMermaid(bodyEl, content, changedSet); } catch (e) {}
           // Make diagrams/images zoomable just like the main viewer.
           try { attachZoomToPreview(bodyEl); } catch (e) {}
         } else {
