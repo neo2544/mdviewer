@@ -2642,6 +2642,11 @@ const webAppHTML = `<!doctype html>
     .vcompare-pane-body.side-r div.vcd-chg-line { background: color-mix(in oklab, #3fb950 18%, transparent); }
     .vcompare-pane-body.side-l tr.vcd-chg-line > td { background: color-mix(in oklab, #e0533f 16%, transparent); }
     .vcompare-pane-body.side-r tr.vcd-chg-line > td { background: color-mix(in oklab, #3fb950 18%, transparent); }
+    /* Intra-line emphasis: the exact removed/added characters within a changed
+       line, on top of the subtle whole-line tint. */
+    .vcompare-pane-body mark.vcd-ic { color: inherit; border-radius: 2px; padding: 0 1px; }
+    .vcompare-pane-body mark.vcd-ic-del { background: color-mix(in oklab, #e0533f 48%, transparent); }
+    .vcompare-pane-body mark.vcd-ic-add { background: color-mix(in oklab, #3fb950 52%, transparent); }
     /* Changed mermaid diagram: flag it and offer a source toggle. */
     .vcd-mermaid-card { border-radius: 8px; margin: 6px 0; }
     .vcompare-pane-body.side-l .vcd-mermaid-card { outline: 2px solid color-mix(in oklab, #e0533f 55%, transparent); outline-offset: -2px; }
@@ -7488,26 +7493,35 @@ const webAppHTML = `<!doctype html>
         while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
         const left = new Set(), right = new Set();
         const groups = [];          // each maximal run of changes → one nav anchor
+        const pairs = [];           // del-line ↔ add-line, for intra-line emphasis
         const ops = diffMiddle(a.slice(p, sa), b.slice(p, sb));
-        let lLine = p, rLine = p, cur = null;
+        let lLine = p, rLine = p, cur = null, dels = [], adds = [];
+        function flushRun() {
+          if (cur) { groups.push(cur); cur = null; }
+          const k = Math.min(dels.length, adds.length);
+          for (let i = 0; i < k; i++) pairs.push({ l: dels[i], r: adds[i] });
+          dels = []; adds = [];
+        }
         for (const op of ops) {
           if (op.t === "same") {
-            if (cur) { groups.push(cur); cur = null; }
+            flushRun();
             lLine++; rLine++;
           } else if (op.t === "del") {
             left.add(lLine);
             if (!cur) cur = { left: null, right: null };
             if (cur.left === null) cur.left = lLine;
+            dels.push(lLine);
             lLine++;
           } else {
             right.add(rLine);
             if (!cur) cur = { left: null, right: null };
             if (cur.right === null) cur.right = rLine;
+            adds.push(rLine);
             rLine++;
           }
         }
-        if (cur) groups.push(cur);
-        return { left: left, right: right, groups: groups };
+        flushRun();
+        return { left: left, right: right, groups: groups, pairs: pairs };
       }
 
       // Tint the rendered element that owns each changed line. We consider
@@ -7661,6 +7675,7 @@ const webAppHTML = `<!doctype html>
         await renderSide(leftBody, lc, changed.left);
         if (token !== renderToken) return;
         await renderSide(rightBody, rc, changed.right);
+        try { applyWordDiffs(changed.pairs); } catch (e) {}
         leftBody.scrollTop = 0;
         rightBody.scrollTop = 0;
         updateNavUI();
@@ -7706,6 +7721,99 @@ const webAppHTML = `<!doctype html>
         if (!el) return;
         const br = body.getBoundingClientRect(), er = el.getBoundingClientRect();
         body.scrollTop += (er.top - br.top) - 16;
+      }
+
+      // ── Intra-line emphasis: within each changed line pair, highlight the
+      // exact characters that were removed (left) / added (right). ──
+      // Character-level LCS over the two rendered strings → removed ranges in a,
+      // added ranges in b.
+      function charDiff(a, b) {
+        const n = a.length, m = b.length;
+        if (!n || !m || n * m > 200000) return null; // skip pathological lines
+        const dp = [];
+        for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
+        for (let i = n - 1; i >= 0; i--) {
+          for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+          }
+        }
+        const del = [], add = [];
+        let i = 0, j = 0, ds = -1, as = -1;
+        while (i < n && j < m) {
+          if (a[i] === b[j]) {
+            if (ds >= 0) { del.push({ start: ds, end: i }); ds = -1; }
+            if (as >= 0) { add.push({ start: as, end: j }); as = -1; }
+            i++; j++;
+          } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            if (ds < 0) ds = i; i++;
+          } else {
+            if (as < 0) as = j; j++;
+          }
+        }
+        while (i < n) { if (ds < 0) ds = i; i++; }
+        while (j < m) { if (as < 0) as = j; j++; }
+        if (ds >= 0) del.push({ start: ds, end: n });
+        if (as >= 0) add.push({ start: as, end: m });
+        return { del: del, add: add };
+      }
+      // Wrap the given character ranges (offsets into container.textContent) in
+      // <mark class=cls> by walking the container's text nodes.
+      function wrapRanges(container, ranges, cls) {
+        if (!ranges || !ranges.length) return;
+        const nodes = [];
+        const tw = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+        let nd; while ((nd = tw.nextNode())) nodes.push(nd);
+        let pos = 0;
+        for (const node of nodes) {
+          const text = node.nodeValue;
+          const start = pos, end = pos + text.length;
+          pos = end;
+          const local = [];
+          for (const r of ranges) {
+            const a = Math.max(r.start, start), b = Math.min(r.end, end);
+            if (a < b) local.push([a - start, b - start]);
+          }
+          if (!local.length) continue;
+          const frag = document.createDocumentFragment();
+          let cur = 0;
+          for (const seg of local) {
+            if (seg[0] > cur) frag.appendChild(document.createTextNode(text.slice(cur, seg[0])));
+            const mark = document.createElement("mark");
+            mark.className = cls;
+            mark.textContent = text.slice(seg[0], seg[1]);
+            frag.appendChild(mark);
+            cur = seg[1];
+          }
+          if (cur < text.length) frag.appendChild(document.createTextNode(text.slice(cur)));
+          node.parentNode.replaceChild(frag, node);
+        }
+      }
+      // The text container to diff/highlight for an anchored element.
+      function textTarget(el) {
+        if (el.tagName === "TR") return el.querySelector(".hljs-ln-code") || el;
+        return el;
+      }
+      function wordDiffHighlight(leftEl, rightEl) {
+        const lt = textTarget(leftEl), rt = textTarget(rightEl);
+        const a = lt.textContent || "", b = rt.textContent || "";
+        if (a === b || !a || !b) return;
+        const d = charDiff(a, b);
+        if (!d) return;
+        wrapRanges(lt, d.del, "vcd-ic vcd-ic-del");
+        wrapRanges(rt, d.add, "vcd-ic vcd-ic-add");
+      }
+      function applyWordDiffs(pairs) {
+        if (!pairs || !pairs.length) return;
+        const seen = new Set();
+        for (const p of pairs) {
+          const le = anchorForLine(leftBody, p.l), re = anchorForLine(rightBody, p.r);
+          if (!le || !re || seen.has(le)) continue;
+          // Diagrams aren't text — skip mermaid blocks.
+          if (le.closest(".vcd-mermaid-card") || re.closest(".vcd-mermaid-card")) continue;
+          if (le.classList.contains("mermaid-wrap") || le.classList.contains("mermaid")) continue;
+          seen.add(le);
+          try { wordDiffHighlight(le, re); } catch (e) {}
+        }
       }
       function flash(el) {
         if (!el) return;
