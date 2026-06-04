@@ -7021,7 +7021,20 @@ const webAppHTML = `<!doctype html>
         if (!ne || !oe || seen.has(ne)) continue;
         if ((ne.closest && ne.closest(".mermaid-wrap")) || (ne.classList && ne.classList.contains("mermaid-wrap"))) continue;
         seen.add(ne);
-        try { updInlineChange(ne, oe.textContent || "", ne.textContent || ""); } catch (e) {}
+        try {
+          if (ne.tagName === "TR" && oe.tagName === "TR") {
+            // Diff each table cell on its own — inserting deleted text directly
+            // into a <tr> (across <td> boundaries) corrupts the table layout.
+            const nc = ne.children, oc = oe.children;
+            for (let c = 0; c < nc.length; c++) {
+              const ocell = oc[c];
+              if (!ocell) continue;
+              updInlineChange(nc[c], ocell.textContent || "", nc[c].textContent || "");
+            }
+          } else {
+            updInlineChange(ne, oe.textContent || "", ne.textContent || "");
+          }
+        } catch (e) {}
         anchors.push(ne);
       }
       for (const ln of diff.addedNew) {
