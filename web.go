@@ -5633,7 +5633,7 @@ const webAppHTML = `<!doctype html>
 
     // AI-DLC mode: fetch the file list under <gitroot>/aidlc-docs (if present).
     // The list is sorted by the server most-recently-modified first.
-    async function refreshAidlc() {
+    async function refreshAidlc(silent) {
       try {
         const r = await fetch("/api/aidlc?dir=" + encodeURIComponent(state.cwd || ""));
         if (!r.ok) throw 0;
@@ -5656,6 +5656,8 @@ const webAppHTML = `<!doctype html>
         };
         state.aidlcCwd = state.cwd;
       } catch (e) {
+        // Transient poll failure: keep the current list rather than dropping it.
+        if (silent) return;
         state.aidlc = { available: false, root: "", dir: "", files: [] };
       }
       applyAidlcMode();
@@ -12501,6 +12503,12 @@ const webAppHTML = `<!doctype html>
     setInterval(() => { renderRecents(); }, 60 * 1000);
     setInterval(refreshSelected, 2000);
     setInterval(refreshCurrentDir, 2500);
+    // AI-DLC mode shows the aidlc-docs listing, which the 2.5s dir poll
+    // deliberately skips (to avoid hammering git every tick). Re-poll it on a
+    // gentler cadence while the mode is on, so edits to those files surface
+    // (mod_time / order) without a manual refresh. Keeps the list on a
+    // transient failure (silent).
+    setInterval(() => { if (state.aidlcMode && state.aidlc && state.aidlc.available) refreshAidlc(true); }, 5000);
     restoreRoute(routeFromLocation(), "replace");
   </script>
 </body>
