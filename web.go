@@ -1468,6 +1468,34 @@ const webAppHTML = `<!doctype html>
     .upd-nav[hidden] { display: none; }
     .upd-nav .action { padding: 5px 7px; }
     .upd-nav-count { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 30px; text-align: center; white-space: nowrap; }
+    /* "Changes" toggle + base picker + nav, grouped in one pill like the view-mode seg. */
+    .upd-seg[hidden] { display: none; }
+    .upd-seg { align-items: center; gap: 3px; padding: 3px 5px; }
+    .upd-seg .upd-toggle { border: none; background: transparent; padding: 3px 6px; }
+    .upd-seg .upd-toggle:hover { border-color: transparent; background: color-mix(in oklab, var(--text) 7%, transparent); }
+    .upd-seg .upd-toggle.active { border-color: transparent; background: transparent; }
+    .upd-base-btn[hidden] { display: none; }
+    .upd-base-btn { display: inline-flex; align-items: center; gap: 2px; appearance: none; border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 3px 6px; border-radius: 999px; font-size: 10.5px; white-space: nowrap; transition: background 130ms ease, color 130ms ease; }
+    .upd-base-btn:hover { background: color-mix(in oklab, var(--text) 7%, transparent); color: var(--text); }
+    .upd-base-btn.custom { color: var(--accent); }
+    .upd-base-label { font-variant-numeric: tabular-nums; }
+    .upd-base-label:empty { display: none; }
+    .upd-base-caret { font-size: 9px; opacity: .8; }
+    .upd-base-pop[hidden] { display: none; }
+    .upd-base-pop { position: absolute; z-index: 60; min-width: 290px; max-width: 380px; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 10px 34px rgba(0,0,0,.20); font-size: 12px; }
+    .upd-base-pop-title { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 8px 6px; }
+    .upd-base-list { max-height: 300px; overflow-y: auto; }
+    .upd-base-item { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+    .upd-base-item:hover { background: color-mix(in oklab, var(--accent) 12%, transparent); }
+    .upd-base-item.active { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
+    .upd-base-item .ub-date { color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+    .upd-base-item.active .ub-date { color: inherit; }
+    .upd-base-item .ub-hash { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; flex: 0 0 auto; }
+    .upd-base-item.active .ub-hash { color: inherit; }
+    .upd-base-item .ub-subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+    .upd-base-date-row { display: flex; align-items: center; gap: 8px; padding: 8px; border-top: 1px solid var(--line); margin-top: 4px; }
+    .upd-base-date-label { color: var(--muted); font-size: 11px; flex: 0 0 auto; }
+    .upd-base-date { flex: 1 1 auto; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; }
     .preview-body .upd-flash { animation: updFlash 0.95s ease; border-radius: 4px; }
     @keyframes updFlash {
       0% { outline: 2px solid color-mix(in oklab, var(--accent) 75%, transparent); outline-offset: 2px; }
@@ -3939,12 +3967,15 @@ const webAppHTML = `<!doctype html>
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a3 3 0 0 1-3 3H9"/><circle cx="18" cy="6" r="3"/></svg>
             <span data-i18n="version">Version</span>
           </button>
-          <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" hidden data-i18n-title="updToggleTitle" title="Show what changed since the last version, inline (additions green, deletions red strikethrough)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text" data-i18n="updToggleText">Changes</span></button>
-          <span class="upd-nav" id="updNav" hidden>
-            <button class="action icon-only" id="updPrev" type="button" data-i18n-title="updPrevTitle" title="Previous change (↑)" aria-label="Previous change">▲</button>
-            <span class="upd-nav-count" id="updNavCount"></span>
-            <button class="action icon-only" id="updNext" type="button" data-i18n-title="updNextTitle" title="Next change (↓)" aria-label="Next change">▼</button>
-          </span>
+          <div class="seg upd-seg" id="updSeg" hidden>
+            <button class="upd-toggle" id="updToggle" type="button" role="switch" aria-checked="false" data-i18n-title="updToggleTitle" title="Show what changed since the last version, inline (additions green, deletions red strikethrough)"><span class="upd-switch"><span class="upd-knob"></span></span><span class="upd-toggle-text" data-i18n="updToggleText">Changes</span></button>
+            <button class="upd-base-btn" id="updBaseBtn" type="button" hidden data-i18n-title="updBaseTitle" title="Choose the comparison base" aria-label="Comparison base"><span class="upd-base-label" id="updBaseLabel"></span><span class="upd-base-caret">▾</span></button>
+            <span class="upd-nav" id="updNav" hidden>
+              <button class="action icon-only" id="updPrev" type="button" data-i18n-title="updPrevTitle" title="Previous change (↑)" aria-label="Previous change">▲</button>
+              <span class="upd-nav-count" id="updNavCount"></span>
+              <button class="action icon-only" id="updNext" type="button" data-i18n-title="updNextTitle" title="Next change (↓)" aria-label="Next change">▼</button>
+            </span>
+          </div>
           <div class="seg" role="tablist" aria-label="View mode">
             <button class="seg-btn" id="previewModeButton" type="button" role="tab" aria-selected="false" data-i18n-title="previewTitle" title="Preview mode — rendered markdown">
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -4178,6 +4209,14 @@ const webAppHTML = `<!doctype html>
     </label>
     <button type="button" class="accent-reset" id="accentReset" data-i18n="accentReset">기본값(핑크)으로</button>
   </div>
+  <div class="upd-base-pop" id="updBasePop" hidden role="dialog" data-i18n-aria="updBaseTitle" aria-label="Comparison base">
+    <div class="upd-base-pop-title" data-i18n="updBasePopTitle">Compare against</div>
+    <div class="upd-base-list" id="updBaseList"></div>
+    <div class="upd-base-date-row">
+      <label class="upd-base-date-label" for="updBaseDate" data-i18n="updBaseByDate">By date</label>
+      <input type="date" id="updBaseDate" class="upd-base-date" />
+    </div>
+  </div>
   <div class="vcompare" id="vcompare" hidden>
     <div class="vcompare-head">
       <div class="vcompare-title" id="vcompareTitle" data-i18n="vcompareTitle">버전 비교</div>
@@ -4375,6 +4414,8 @@ const webAppHTML = `<!doctype html>
       aidlcWanted: localStorage.getItem("mdviewer.aidlcMode") === "1",
       aidlcMode: false,
       updMode: localStorage.getItem("mdviewer.updMode") === "1", // show inline changes vs last version
+      updBaseRev: null,          // null = auto (last version); else a commit hash to compare the working copy against
+      updBaseLabel: "",          // short label for the chosen base (e.g. "6/4"), shown on the picker button
       gitFileHasHistory: false,                                  // current file is tracked w/ commits
       aidlcPrevSort: null, // sort to restore when leaving AI-DLC mode
       sidebarWidth: Number(localStorage.getItem("mdviewer.sidebarWidth") || 320),
@@ -6027,6 +6068,8 @@ const webAppHTML = `<!doctype html>
       const prevScrollTop = (options.preserveScroll && path === state.selectedPath)
         ? previewBodyEl.scrollTop
         : null;
+      // A different file has its own git history — reset the pinned Changes base.
+      if (path !== state.selectedPath) { state.updBaseRev = null; state.updBaseLabel = ""; }
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
       if (!state.cwd || !path.startsWith(state.cwd + "/")) {
@@ -6111,6 +6154,8 @@ const webAppHTML = `<!doctype html>
         version: "Version", versionTitle: "Compare this file's git revisions side by side",
         updToggleText: "Changes", updToggleTitle: "Show what changed since the last version, inline (additions green, deletions red strikethrough)",
         updPrevTitle: "Previous change (↑)", updNextTitle: "Next change (↓)",
+        updBaseTitle: "Choose the comparison base", updBasePopTitle: "Compare against",
+        updBaseAuto: "Automatic (last version)", updBaseByDate: "By date",
         preview: "Preview", previewTitle: "Preview mode — rendered markdown",
         edit: "Edit", editTitle: "Edit mode — raw source in a textarea (⌘S to save)",
         split: "Split", splitTitle: "Split mode — editor + live preview side by side",
@@ -6225,6 +6270,8 @@ const webAppHTML = `<!doctype html>
         version: "버전", versionTitle: "이 파일의 git 변경 이력을 버전별로 골라 좌/우로 비교",
         updToggleText: "변경 표시", updToggleTitle: "마지막 버전에서 무엇이 바뀌었는지 미리보기에 인라인 표시 (추가=녹색, 삭제=빨강 취소선)",
         updPrevTitle: "이전 변경점 (↑)", updNextTitle: "다음 변경점 (↓)",
+        updBaseTitle: "비교 기준 선택", updBasePopTitle: "비교 대상",
+        updBaseAuto: "자동 (직전 버전)", updBaseByDate: "날짜로 선택",
         preview: "미리보기", previewTitle: "미리보기 모드 — 렌더된 마크다운",
         edit: "편집", editTitle: "편집 모드 — 원본 텍스트 (⌘S로 저장)",
         split: "분할", splitTitle: "분할 모드 — 편집기 + 실시간 미리보기",
@@ -7397,19 +7444,30 @@ const webAppHTML = `<!doctype html>
       // Visible: the working markdown, with source-line tracking for mapping.
       await renderMarkdownInto(container, newContent, "markdown", { trackSourceLines: true });
       let oldContent = null;
-      try {
-        const r = await fetch("/api/git/filelog?path=" + encodeURIComponent(path));
-        const log = await r.json();
-        const norm = function (s) { return (s || "").replace(/\r/g, "").replace(/\s+$/, ""); };
-        if (log && log.available && Array.isArray(log.commits) && log.commits.length) {
-          const headC = await updGitShow(path, log.commits[0].hash);
-          if (headC != null && norm(headC) !== norm(newContent)) {
-            oldContent = headC;                                   // dirty: HEAD → working
-          } else if (log.commits[1]) {
-            oldContent = await updGitShow(path, log.commits[1].hash); // clean: prev → HEAD(=working)
-          }
+      // Pinned base: compare the working copy against the chosen revision.
+      if (state.updBaseRev) {
+        oldContent = await updGitShow(path, state.updBaseRev);
+        if (oldContent == null) {            // rev not in this file's history → revert to auto
+          state.updBaseRev = null; state.updBaseLabel = "";
+          try { updateUpdBaseLabel(); } catch (e) {}
         }
-      } catch (e) { /* fall through */ }
+      }
+      // Auto base: dirty → HEAD, clean → previous commit.
+      if (oldContent == null && !state.updBaseRev) {
+        try {
+          const r = await fetch("/api/git/filelog?path=" + encodeURIComponent(path));
+          const log = await r.json();
+          const norm = function (s) { return (s || "").replace(/\r/g, "").replace(/\s+$/, ""); };
+          if (log && log.available && Array.isArray(log.commits) && log.commits.length) {
+            const headC = await updGitShow(path, log.commits[0].hash);
+            if (headC != null && norm(headC) !== norm(newContent)) {
+              oldContent = headC;                                   // dirty: HEAD → working
+            } else if (log.commits[1]) {
+              oldContent = await updGitShow(path, log.commits[1].hash); // clean: prev → HEAD(=working)
+            }
+          }
+        } catch (e) { /* fall through */ }
+      }
       buildUpdNav([]); // reset nav until we have anchors
       if (oldContent == null) { updNote(container, t("updNoChange")); return; }
       // Old version: parse + source-line stamp only (no mermaid/hljs needed — we
@@ -7947,6 +8005,101 @@ const webAppHTML = `<!doctype html>
       if (updPrevB) updPrevB.onclick = () => updGoToChange(updNavIdx - 1);
       if (updNextB) updNextB.onclick = () => updGoToChange(updNavIdx + 1);
     }
+
+    // ── "Changes" comparison-base picker (commit list + date) ──
+    // null base = auto (last version). Choosing a commit/date pins the overlay
+    // to compare the working copy against that revision instead.
+    function updateUpdBaseLabel() {
+      const btn = document.getElementById("updBaseBtn");
+      const lbl = document.getElementById("updBaseLabel");
+      if (!btn || !lbl) return;
+      lbl.textContent = state.updBaseRev ? (state.updBaseLabel || "") : "";
+      btn.classList.toggle("custom", !!state.updBaseRev);
+    }
+    async function setUpdBase(rev, label) {
+      state.updBaseRev = rev || null;
+      state.updBaseLabel = rev ? (label || "") : "";
+      updateUpdBaseLabel();
+      if (state.editorMode === "preview" && state.selectedPath && state.updMode) {
+        const top = previewBodyEl.scrollTop;
+        await renderCurrentView();
+        previewBodyEl.scrollTop = top;
+        requestAnimationFrame(() => { previewBodyEl.scrollTop = top; });
+      }
+    }
+    {
+      const baseBtn = document.getElementById("updBaseBtn");
+      const pop = document.getElementById("updBasePop");
+      const listEl = document.getElementById("updBaseList");
+      const dateEl = document.getElementById("updBaseDate");
+      let baseCommits = []; // newest-first [{hash, short, date, subject}]
+      const pad2 = function (n) { return String(n).padStart(2, "0"); };
+      function fmtCommitDate(iso) {
+        const ts = Date.parse(iso);
+        if (isNaN(ts)) return iso || "";
+        const d = new Date(ts);
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+      }
+      function shortDate(iso) {
+        const ts = Date.parse(iso);
+        if (isNaN(ts)) return "";
+        const d = new Date(ts);
+        return (d.getMonth() + 1) + "/" + d.getDate();
+      }
+      function closePop() { if (pop) pop.hidden = true; }
+      function renderBaseList() {
+        if (!listEl) return;
+        listEl.innerHTML = "";
+        const auto = document.createElement("div");
+        auto.className = "upd-base-item" + (state.updBaseRev ? "" : " active");
+        auto.textContent = t("updBaseAuto");
+        auto.addEventListener("click", function () { setUpdBase(null); closePop(); });
+        listEl.appendChild(auto);
+        for (const c of baseCommits) {
+          const item = document.createElement("div");
+          item.className = "upd-base-item" + (state.updBaseRev === c.hash ? " active" : "");
+          const d = document.createElement("span"); d.className = "ub-date"; d.textContent = fmtCommitDate(c.date);
+          const h = document.createElement("span"); h.className = "ub-hash"; h.textContent = c.short || (c.hash || "").slice(0, 7);
+          const s = document.createElement("span"); s.className = "ub-subj"; s.textContent = c.subject || "";
+          item.appendChild(d); item.appendChild(h); item.appendChild(s);
+          item.addEventListener("click", (function (cc) { return function () { setUpdBase(cc.hash, shortDate(cc.date)); closePop(); }; })(c));
+          listEl.appendChild(item);
+        }
+      }
+      async function openPop() {
+        if (!pop || !baseBtn) return;
+        const r = baseBtn.getBoundingClientRect();
+        pop.hidden = false;                       // unhide first so offsetWidth is real
+        const w = pop.offsetWidth || 320;
+        pop.style.top = (r.bottom + 6) + "px";
+        pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+        if (listEl) listEl.innerHTML = "<div class='upd-base-item'>" + t("searchLoading") + "</div>";
+        try {
+          const resp = await fetch("/api/git/filelog?path=" + encodeURIComponent(state.selectedPath));
+          const log = await resp.json();
+          baseCommits = (log && log.available && Array.isArray(log.commits)) ? log.commits : [];
+        } catch (e) { baseCommits = []; }
+        renderBaseList();
+      }
+      if (baseBtn) baseBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (pop && pop.hidden) openPop(); else closePop();
+      });
+      if (dateEl) dateEl.addEventListener("change", function () {
+        const v = dateEl.value; if (!v) return;
+        const target = Date.parse(v + "T23:59:59"); // last commit on/before that day
+        let pick = null;
+        for (const c of baseCommits) { const ct = Date.parse(c.date); if (!isNaN(ct) && ct <= target) { pick = c; break; } }
+        if (pick) { setUpdBase(pick.hash, shortDate(pick.date)); closePop(); }
+      });
+      document.addEventListener("click", function (e) {
+        if (!pop || pop.hidden) return;
+        if (pop.contains(e.target) || (baseBtn && baseBtn.contains(e.target))) return;
+        closePop();
+      });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape" && pop && !pop.hidden) closePop(); });
+    }
+
     editModeButtonEl.onclick = () => {
       if (!canEditKind(state.selectedKind)) return;
       setEditorMode("edit");
@@ -8185,17 +8338,22 @@ const webAppHTML = `<!doctype html>
     // The "업데이트 내역" toggle: only for git-managed markdown/text files in
     // preview mode. Reflects state.updMode.
     function updateUpdToggle() {
+      const seg = document.getElementById("updSeg");
       const t = document.getElementById("updToggle");
-      if (!t) return;
+      if (!seg || !t) return;
       const eligible = !!state.gitRepoRoot && !!state.selectedPath &&
         state.selectedKind === "markdown" &&
         state.editorMode === "preview";
-      t.hidden = !eligible;
-      t.classList.toggle("active", eligible && state.updMode);
-      t.setAttribute("aria-checked", (eligible && state.updMode) ? "true" : "false");
-      // The change-nav only makes sense while the overlay is on; buildUpdNav
-      // re-shows it after a diff renders.
-      if (!(eligible && state.updMode)) { const nav = document.getElementById("updNav"); if (nav) nav.hidden = true; }
+      seg.hidden = !eligible;            // the whole pill shows only when eligible
+      const on = eligible && state.updMode;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-checked", on ? "true" : "false");
+      // Base picker + change-nav only make sense while the overlay is on;
+      // buildUpdNav re-shows the nav after a diff renders.
+      const baseBtn = document.getElementById("updBaseBtn");
+      if (baseBtn) baseBtn.hidden = !on;
+      if (!on) { const nav = document.getElementById("updNav"); if (nav) nav.hidden = true; }
+      try { updateUpdBaseLabel(); } catch (e) {}
     }
 
     // ── Git version compare (before/after) ──
