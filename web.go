@@ -3868,13 +3868,15 @@ const webAppHTML = `<!doctype html>
       <div class="topbar sidebar-topbar">
         <div>
           <div class="brand-row">
-            <svg class="brand-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"
-                 fill="none" stroke="currentColor" stroke-width="7"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="5" y="11" width="90" height="78" rx="10" />
-              <path d="M 21.5 27.5 L 21.5 72.5 M 21.5 27.5 L 37.2 56.2 L 52.9 27.5 L 52.9 72.5" />
-              <line x1="69.2" y1="33.4" x2="69.2" y2="72.5" />
-              <polyline points="64.1,55.9 69.2,72.5 74.3,55.9" />
+            <svg class="brand-mark" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <defs>
+                <linearGradient id="brandG" x1="0.05" y1="0" x2="0.95" y2="1">
+                  <stop offset="0" stop-color="#f9a826" /><stop offset="0.5" stop-color="#fd5e7e" /><stop offset="1" stop-color="#b5179e" />
+                </linearGradient>
+              </defs>
+              <rect width="1024" height="1024" rx="228" fill="url(#brandG)" />
+              <text x="382" y="728" font-family="Helvetica, Arial, sans-serif" font-weight="900" font-size="600" fill="#ffffff" text-anchor="middle">M</text>
+              <g fill="#ffffff"><rect x="741" y="296" width="100" height="270" rx="10" /><polygon points="676,558 906,558 791,728" /></g>
             </svg>
             <span class="brand-name">MD Viewer</span>
           </div>

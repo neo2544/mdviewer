@@ -89,9 +89,10 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 		// "document opening session" machinery — which our app doesn't
 		// implement, producing the silent "session already exists" log.
 		registerOpenHandler()
-		// Template icons render correctly in both light and dark menu bars
-		// (macOS inverts the alpha for us).
-		systray.SetTemplateIcon(menubarIconPNG, menubarIconRetinaPNG)
+		// Colorful icon (not a template): the sunset M↓ reads the same in light
+		// and dark menu bars, so we don't want macOS inverting it. Use the @2x
+		// bitmap so it stays crisp on Retina displays.
+		systray.SetIcon(menubarIconRetinaPNG)
 		systray.SetTooltip("MD Viewer · " + serverURL)
 
 		mOpen := systray.AddMenuItem("Open in Browser", "Open the viewer in your default browser")
