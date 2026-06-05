@@ -53,3 +53,6 @@ Desktop.ini
 # Knowledge-graph build artifacts produced by `graphify`; user-specific
 # and re-creatable. Keep `testdata/` for committed fixtures.
 graphify-out/
+
+# macOS app bundle (built by build-app.sh)
+/MdViewer.app/

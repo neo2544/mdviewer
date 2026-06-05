@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="gD" x1="0.05" y1="0" x2="0.95" y2="1">
+      <stop offset="0" stop-color="#f9a826"/><stop offset="0.5" stop-color="#fd5e7e"/><stop offset="1" stop-color="#b5179e"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#gD)"/>
+  <rect width="1024" height="1024" rx="228" fill="url(#sheen)"/>
+  <text x="382" y="728" font-family="Helvetica, Arial, sans-serif" font-weight="900" font-size="600" fill="#ffffff" text-anchor="middle">M</text>
+  <g fill="#ffffff">
+    <rect x="741" y="296" width="100" height="270" rx="10"/>
+    <polygon points="676,558 906,558 791,728"/>
+  </g>
+</svg>
