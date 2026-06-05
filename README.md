@@ -23,7 +23,7 @@ scripts/install.sh            # one line (requires Xcode CLT)
 What `install.sh` does:
 
 - ✅ Builds the `mdviewer` binary with version metadata embedded
-- ✅ Registers `~/Applications/MdViewer.app` as a menu-bar app (`LSUIElement` — no Dock icon)
+- ✅ Registers `~/Applications/MdViewer.app` as a menu-bar app (`LSUIElement` — no Dock icon), with a colorful M↓ app icon (`assets/app-icon.svg` → `.icns`)
 - ✅ Installs a LaunchAgent — auto-start at login + restart if it dies
 - ✅ Associates `.md` / `.markdown` / `.mdx` double-click → opens in the browser (Apple Event)
 - ✅ Keeps `http://127.0.0.1:8421/` always running

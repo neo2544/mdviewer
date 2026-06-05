@@ -19,7 +19,7 @@ scripts/install.sh            # 이 한 줄이면 끝 (Xcode CLT 필요)
 `install.sh`가 하는 일:
 
 - ✅ 버전 정보를 심어 `mdviewer` 바이너리 빌드
-- ✅ `~/Applications/MdViewer.app` 메뉴바 앱으로 등록 (`LSUIElement` — Dock에는 안 뜸)
+- ✅ `~/Applications/MdViewer.app` 메뉴바 앱으로 등록 (`LSUIElement` — Dock에는 안 뜸), 컬러 M↓ 앱 아이콘 (`assets/app-icon.svg` → `.icns`)
 - ✅ LaunchAgent 등록 — 로그인 시 자동 시작 + 죽으면 재시작
 - ✅ `.md` / `.markdown` / `.mdx` 더블클릭 → 바로 브라우저에서 열림 (Apple Event 연동)
 - ✅ `http://127.0.0.1:8421/` 가 항상 떠 있음

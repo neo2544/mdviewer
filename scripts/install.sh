@@ -79,10 +79,31 @@ mkdir -p "$TMP_APP/Contents/MacOS" "$TMP_APP/Contents/Resources"
 cp "$REPO_ROOT/mdviewer" "$TMP_APP/Contents/MacOS/${APP_NAME}"
 chmod +x "$TMP_APP/Contents/MacOS/${APP_NAME}"
 
-# Include the menu-bar icon as the app icon too (handy when listed in
-# Spotlight; the menu-bar icon itself is embedded in the binary already).
-# Prefer the hires source so Spotlight / Finder previews stay crisp.
-if [[ -f "$REPO_ROOT/assets/menubar-icon@hires.png" ]]; then
+# Regenerate AppIcon.icns from assets/app-icon.svg when librsvg is available
+# and the SVG is newer than the committed .icns (so editing the SVG is enough).
+ICNS_SRC="$REPO_ROOT/assets/app-icon.svg"
+ICNS_OUT="$REPO_ROOT/assets/AppIcon.icns"
+if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1 && [[ -f "$ICNS_SRC" ]]; then
+    if [[ ! -f "$ICNS_OUT" || "$ICNS_SRC" -nt "$ICNS_OUT" ]]; then
+        echo ">> rendering AppIcon.icns from app-icon.svg…"
+        ICONSET="$(mktemp -d)/AppIcon.iconset"; mkdir -p "$ICONSET"
+        for sz in 16 32 128 256 512; do
+            rsvg-convert -w "$sz" -h "$sz" "$ICNS_SRC" -o "$ICONSET/icon_${sz}x${sz}.png"
+            rsvg-convert -w "$((sz * 2))" -h "$((sz * 2))" "$ICNS_SRC" -o "$ICONSET/icon_${sz}x${sz}@2x.png"
+        done
+        iconutil -c icns "$ICONSET" -o "$ICNS_OUT"
+        rm -rf "$(dirname "$ICONSET")"
+    fi
+fi
+
+# App icon for Finder / Spotlight / Dock (the menu-bar icon itself is embedded
+# in the binary already). Prefer the colorful multi-resolution AppIcon.icns;
+# fall back to the hires menu-bar PNG if it's missing (e.g. no librsvg to build
+# the .icns from assets/app-icon.svg). CFBundleIconFile is "AppIcon" either way
+# — macOS picks AppIcon.icns over AppIcon.png automatically.
+if [[ -f "$REPO_ROOT/assets/AppIcon.icns" ]]; then
+    cp "$REPO_ROOT/assets/AppIcon.icns" "$TMP_APP/Contents/Resources/AppIcon.icns"
+elif [[ -f "$REPO_ROOT/assets/menubar-icon@hires.png" ]]; then
     cp "$REPO_ROOT/assets/menubar-icon@hires.png" "$TMP_APP/Contents/Resources/AppIcon.png"
 elif [[ -f "$REPO_ROOT/assets/menubar-icon@2x.png" ]]; then
     cp "$REPO_ROOT/assets/menubar-icon@2x.png" "$TMP_APP/Contents/Resources/AppIcon.png"
