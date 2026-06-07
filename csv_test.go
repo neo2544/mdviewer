@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -154,5 +158,95 @@ func TestReadCSVPageQuotedNewline(t *testing.T) {
 	want := [][]string{{"x\ny", "2"}, {"3", "4"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("rows = %v, want %v", rows, want)
+	}
+}
+
+func TestHandleCSVPagination(t *testing.T) {
+	// 75 data rows so that page_size=50 (an allowed size) spans two pages.
+	var b strings.Builder
+	b.WriteString("name,age\n")
+	for i := 1; i <= 75; i++ {
+		fmt.Fprintf(&b, "r%d,%d\n", i, i)
+	}
+	p := writeTempCSV(t, b.String())
+	s := &webServer{appRoot: t.TempDir()}
+
+	req := httptest.NewRequest("GET", "/api/csv?path="+url.QueryEscape(p)+"&page=1&page_size=50", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp csvResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.TotalRows != 75 {
+		t.Fatalf("total = %d, want 75", resp.TotalRows)
+	}
+	if !reflect.DeepEqual(resp.Header, []string{"name", "age"}) {
+		t.Fatalf("header = %v", resp.Header)
+	}
+	if len(resp.Rows) != 50 || resp.Rows[0][0] != "r1" || resp.Rows[49][0] != "r50" {
+		t.Fatalf("page1 rows (len %d) = %v", len(resp.Rows), resp.Rows)
+	}
+
+	// page 2 → remaining 25 rows (r51..r75)
+	req = httptest.NewRequest("GET", "/api/csv?path="+url.QueryEscape(p)+"&page=2&page_size=50", nil)
+	rec = httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Rows) != 25 || resp.Rows[0][0] != "r51" || resp.Rows[24][0] != "r75" {
+		t.Fatalf("page2 rows (len %d) = %v", len(resp.Rows), resp.Rows)
+	}
+}
+
+func TestHandleCSVTSVAndDefaults(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "data.tsv")
+	if err := os.WriteFile(p, []byte("a\tb\n1\t2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &webServer{appRoot: t.TempDir()}
+
+	// invalid page_size → defaults to 100; tab delimiter auto-detected
+	req := httptest.NewRequest("GET", "/api/csv?path="+url.QueryEscape(p)+"&page=0&page_size=7", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp csvResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Page != 1 || resp.PageSize != 100 {
+		t.Fatalf("page/size = %d/%d, want 1/100", resp.Page, resp.PageSize)
+	}
+	if resp.Delimiter != "\t" {
+		t.Fatalf("delimiter = %q, want tab", resp.Delimiter)
+	}
+	if resp.Rows[0][0] != "1" || resp.Rows[0][1] != "2" {
+		t.Fatalf("rows = %v", resp.Rows)
+	}
+}
+
+func TestHandleFileMarksCSVKind(t *testing.T) {
+	p := writeTempCSV(t, "a,b\n1,2\n")
+	s := &webServer{appRoot: t.TempDir()}
+	req := httptest.NewRequest("GET", "/api/file?path="+url.QueryEscape(p), nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	var resp fileResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Kind != "csv" {
+		t.Fatalf("kind = %q, want csv", resp.Kind)
+	}
+	if resp.Content != "" {
+		t.Fatalf("expected no inline content for csv, got %d bytes", len(resp.Content))
 	}
 }

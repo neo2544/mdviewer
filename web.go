@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -74,6 +75,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
 	mux.HandleFunc("/api/raw", s.handleRaw)
+	mux.HandleFunc("/api/csv", s.handleCSV)
 	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
 	mux.HandleFunc("/api/favorites/reorder", s.handleReorderFavorites)
 	mux.HandleFunc("/api/resolve", s.handleResolve)
@@ -508,7 +510,10 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 	case ".html", ".htm":
 		resp.Kind = "html"
 		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
-	case ".txt", ".log", ".csv", ".tsv",
+	case ".csv", ".tsv":
+		resp.Kind = "csv"
+		// Table data is fetched separately via /api/csv (paginated).
+	case ".txt", ".log",
 		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
 		".ps1", ".psm1", ".bat", ".cmd",
@@ -726,6 +731,128 @@ func readCSVPage(absPath string, idx *csvIndex, offset, limit int) ([][]string, 
 	return rows, nil
 }
 
+type csvResponse struct {
+	Path      string     `json:"path"`
+	Delimiter string     `json:"delimiter"`
+	Header    []string   `json:"header"`
+	Rows      [][]string `json:"rows"`
+	Page      int        `json:"page"`
+	PageSize  int        `json:"page_size"`
+	TotalRows int        `json:"total_rows"`
+}
+
+var csvPageSizes = map[int]bool{50: true, 100: true, 500: true}
+
+func (s *webServer) handleCSV(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "path is a directory", http.StatusBadRequest)
+		return
+	}
+
+	delim := ','
+	if strings.ToLower(filepath.Ext(absPath)) == ".tsv" {
+		delim = '\t'
+	}
+
+	page := 1
+	if v, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && v >= 1 {
+		page = v
+	}
+	pageSize := 100
+	if v, err := strconv.Atoi(r.URL.Query().Get("page_size")); err == nil && csvPageSizes[v] {
+		pageSize = v
+	}
+
+	idx, err := s.csv.get(absPath, delim)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := readCSVPage(absPath, idx, offset, pageSize)
+	if err != nil {
+		// Index/seek mismatch (rare LazyQuotes edge): drop cache and full re-parse.
+		rows, err = fallbackCSVPage(absPath, delim, offset, pageSize)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	delimStr := ","
+	if delim == '\t' {
+		delimStr = "\t"
+	}
+	s.writeJSON(w, http.StatusOK, csvResponse{
+		Path:      absPath,
+		Delimiter: delimStr,
+		Header:    idx.header,
+		Rows:      rows,
+		Page:      page,
+		PageSize:  pageSize,
+		TotalRows: idx.total,
+	})
+}
+
+// fallbackCSVPage re-parses from the start, skipping `offset` data rows. Used
+// when the cached offset index does not align with csv.Reader parsing.
+func fallbackCSVPage(absPath string, delim rune, offset, limit int) ([][]string, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	rd := csv.NewReader(f)
+	rd.Comma = delim
+	rd.FieldsPerRecord = -1
+	rd.LazyQuotes = true
+
+	// Skip header.
+	if _, err := rd.Read(); err != nil {
+		if err == io.EOF {
+			return [][]string{}, nil
+		}
+		return nil, err
+	}
+	// Skip `offset` data rows.
+	for i := 0; i < offset; i++ {
+		if _, err := rd.Read(); err != nil {
+			if err == io.EOF {
+				return [][]string{}, nil
+			}
+			return nil, err
+		}
+	}
+	rows := make([][]string, 0, limit)
+	for len(rows) < limit {
+		rec, err := rd.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, rec)
+	}
+	return rows, nil
+}
+
 func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -761,7 +888,7 @@ func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(absPath))
 	switch ext {
 	case ".md", ".markdown", ".mdx",
-		".txt", ".log", ".csv", ".tsv",
+		".txt", ".log",
 		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
 		".ps1", ".psm1", ".bat", ".cmd",
