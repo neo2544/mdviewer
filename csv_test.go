@@ -98,3 +98,61 @@ func TestCSVCacheLRUCap(t *testing.T) {
 		t.Fatalf("cache size = %d, want <= 16", len(cache.m))
 	}
 }
+
+func TestReadCSVPage(t *testing.T) {
+	p := writeTempCSV(t, "a,b\n1,2\n3,4\n5,6\n7,8\n")
+	var cache csvCache
+	idx, err := cache.get(p, ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx.total != 4 {
+		t.Fatalf("total = %d, want 4", idx.total)
+	}
+
+	// page 1, size 2 → rows 0,1
+	rows, err := readCSVPage(p, idx, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"1", "2"}, {"3", "4"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("page1 = %v, want %v", rows, want)
+	}
+
+	// page 2, size 2 → rows 2,3 (last page)
+	rows, err = readCSVPage(p, idx, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = [][]string{{"5", "6"}, {"7", "8"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("page2 = %v, want %v", rows, want)
+	}
+
+	// offset beyond range → empty
+	rows, err = readCSVPage(p, idx, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("out-of-range page = %v, want empty", rows)
+	}
+}
+
+func TestReadCSVPageQuotedNewline(t *testing.T) {
+	p := writeTempCSV(t, "a,b\n\"x\ny\",2\n3,4\n")
+	var cache csvCache
+	idx, err := cache.get(p, ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := readCSVPage(p, idx, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"x\ny", "2"}, {"3", "4"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows = %v, want %v", rows, want)
+	}
+}

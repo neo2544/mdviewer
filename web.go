@@ -693,6 +693,39 @@ func buildCSVIndex(absPath string, delim rune, info os.FileInfo) (*csvIndex, err
 	return idx, nil
 }
 
+// readCSVPage seeks to data row `offset` and returns up to `limit` rows.
+// Returns an empty slice if offset is at or beyond the end.
+func readCSVPage(absPath string, idx *csvIndex, offset, limit int) ([][]string, error) {
+	if offset < 0 || offset >= len(idx.offsets) || limit <= 0 {
+		return [][]string{}, nil
+	}
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(idx.offsets[offset], io.SeekStart); err != nil {
+		return nil, err
+	}
+	rd := csv.NewReader(f)
+	rd.Comma = idx.delim
+	rd.FieldsPerRecord = -1
+	rd.LazyQuotes = true
+
+	rows := make([][]string, 0, limit)
+	for len(rows) < limit {
+		rec, err := rd.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, rec)
+	}
+	return rows, nil
+}
+
 func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
