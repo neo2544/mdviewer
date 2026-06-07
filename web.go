@@ -559,13 +559,17 @@ func (s *webServer) handleRaw(w http.ResponseWriter, r *http.Request) {
 // scanCSVRecordOffsets returns the byte offset of the start of each CSV
 // record in r. Newlines inside double-quoted fields are not treated as
 // record terminators. A trailing newline does not produce a final empty
-// record. The first offset (0) corresponds to the header record.
+// record. Blank lines are skipped so the offsets stay in lock-step with
+// encoding/csv, which silently ignores blank lines. The first offset
+// corresponds to the header record.
 func scanCSVRecordOffsets(r io.Reader) ([]int64, error) {
 	br := bufio.NewReader(r)
 	var offsets []int64
 	var pos int64
 	inQuote := false
-	atRecordStart := true
+	atLineStart := true   // next byte begins a new line
+	recorded := false     // offset already appended for the current record
+	var lineStart int64   // candidate start offset of the current line
 	for {
 		b, err := br.ReadByte()
 		if err != nil {
@@ -574,16 +578,26 @@ func scanCSVRecordOffsets(r io.Reader) ([]int64, error) {
 			}
 			return nil, err
 		}
-		if atRecordStart {
-			offsets = append(offsets, pos)
-			atRecordStart = false
+		if atLineStart {
+			lineStart = pos
+			atLineStart = false
 		}
-		switch b {
-		case '"':
-			inQuote = !inQuote
-		case '\n':
-			if !inQuote {
-				atRecordStart = true
+		switch {
+		case b == '\n' && !inQuote:
+			// End of line. If the line had no content (blank line), no
+			// offset was recorded, matching encoding/csv's behavior.
+			atLineStart = true
+			recorded = false
+		case b == '\r' && !inQuote:
+			// Treat CR as a non-content byte (handles \r\n line endings);
+			// do not start a record on it.
+		default:
+			if b == '"' {
+				inQuote = !inQuote
+			}
+			if !recorded {
+				offsets = append(offsets, lineStart)
+				recorded = true
 			}
 		}
 		pos++
@@ -673,6 +687,7 @@ func buildCSVIndex(absPath string, delim rune, info os.FileInfo) (*csvIndex, err
 		modTime: info.ModTime(),
 		size:    info.Size(),
 		delim:   delim,
+		header:  []string{}, // non-nil so JSON renders [] not null
 	}
 	if len(all) == 0 {
 		return idx, nil // empty file: no header, no rows

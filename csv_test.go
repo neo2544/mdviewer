@@ -25,6 +25,10 @@ func TestScanCSVRecordOffsets(t *testing.T) {
 		{"crlf", "a,b\r\n1,2\r\n", []int64{0, 5}},
 		{"header only", "a,b\n", []int64{0}},
 		{"empty", "", nil},
+		// Blank lines must be skipped so offsets stay in lock-step with
+		// encoding/csv (which ignores them). h@0, A@2, (blank @4), B@5, C@7.
+		{"blank interior line", "h\nA\n\nB\nC\n", []int64{0, 2, 5, 7}},
+		{"blank crlf line", "h\r\nA\r\n\r\nB\r\n", []int64{0, 3, 8}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -248,5 +252,60 @@ func TestHandleFileMarksCSVKind(t *testing.T) {
 	}
 	if resp.Content != "" {
 		t.Fatalf("expected no inline content for csv, got %d bytes", len(resp.Content))
+	}
+}
+
+// Blank lines must not inflate total_rows or cause a row to appear on two
+// pages (the offset index must agree with encoding/csv, which skips them).
+func TestHandleCSVBlankLines(t *testing.T) {
+	p := writeTempCSV(t, "name\nA\n\nB\nC\n")
+	s := &webServer{appRoot: t.TempDir()}
+
+	get := func(page int) csvResponse {
+		req := httptest.NewRequest("GET", "/api/csv?path="+url.QueryEscape(p)+
+			"&page="+fmt.Sprint(page)+"&page_size=50", nil)
+		rec := httptest.NewRecorder()
+		s.routes().ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var resp csvResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	resp := get(1)
+	if resp.TotalRows != 3 {
+		t.Fatalf("total = %d, want 3 (blank line should not count)", resp.TotalRows)
+	}
+	want := [][]string{{"A"}, {"B"}, {"C"}}
+	if !reflect.DeepEqual(resp.Rows, want) {
+		t.Fatalf("rows = %v, want %v", resp.Rows, want)
+	}
+}
+
+// An empty file must produce header [] and rows [] (never null) so the
+// frontend can iterate without a nil check.
+func TestHandleCSVEmptyFileShape(t *testing.T) {
+	p := writeTempCSV(t, "")
+	s := &webServer{appRoot: t.TempDir()}
+	req := httptest.NewRequest("GET", "/api/csv?path="+url.QueryEscape(p)+"&page=1&page_size=50", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "\"header\":null") || strings.Contains(body, "\"rows\":null") {
+		t.Fatalf("expected [] not null for empty file, got: %s", body)
+	}
+	var resp csvResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.TotalRows != 0 {
+		t.Fatalf("total = %d, want 0", resp.TotalRows)
 	}
 }
