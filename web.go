@@ -13375,7 +13375,18 @@ func (s *webServer) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
 	if up == "" {
 		up = "origin/main"
 	}
-	behindStr, err := gitOutput(ctx, repo, "rev-list", "--count", "HEAD.."+up)
+	// Baseline the "behind" count on what is actually RUNNING, not the
+	// checkout's HEAD. For an installed binary (the .app launched by launchd),
+	// buildCommit is the version baked in at build time; the checkout HEAD may
+	// have moved ahead independently (e.g. a local merge/pull without a
+	// reinstall), which would otherwise make this report 0 while the running
+	// app is stale. Plain `go build`/`go run` leaves buildCommit empty, so
+	// developers still compare against HEAD.
+	base := "HEAD"
+	if buildCommit != "" {
+		base = buildCommit
+	}
+	behindStr, err := gitOutput(ctx, repo, "rev-list", "--count", base+".."+up)
 	if err != nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{"behind": 0, "error": "no upstream"})
 		return
