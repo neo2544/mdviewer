@@ -2428,7 +2428,10 @@ const webAppHTML = `<!doctype html>
     /* Markdown tables — give them an explicit grid so they stop looking
        like loose runs of text. Header row picks up the accent tint;
        body rows zebra-stripe for legibility. */
-    .preview-body table {
+    /* :not(.csv-table) keeps these markdown-table styles off the CSV viewer's
+       own table. In particular overflow:hidden here would become the sticky
+       scrollport and break the CSV frozen header. */
+    .preview-body table:not(.csv-table) {
       border-collapse: separate;
       border-spacing: 0;
       width: max-content;
@@ -2439,27 +2442,27 @@ const webAppHTML = `<!doctype html>
       overflow: hidden;
       font-size: 0.95em;
     }
-    .preview-body table th,
-    .preview-body table td {
+    .preview-body table:not(.csv-table) th,
+    .preview-body table:not(.csv-table) td {
       padding: 8px 12px;
       border-right: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
       border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
       text-align: left;
       vertical-align: top;
     }
-    .preview-body table th:last-child,
-    .preview-body table td:last-child { border-right: none; }
-    .preview-body table tr:last-child td { border-bottom: none; }
-    .preview-body table thead th {
+    .preview-body table:not(.csv-table) th:last-child,
+    .preview-body table:not(.csv-table) td:last-child { border-right: none; }
+    .preview-body table:not(.csv-table) tr:last-child td { border-bottom: none; }
+    .preview-body table:not(.csv-table) thead th {
       background: color-mix(in oklab, var(--accent) 18%, var(--panel));
       color: var(--text);
       font-weight: 600;
       border-bottom: 1px solid color-mix(in oklab, var(--line) 85%, transparent);
     }
-    .preview-body table tbody tr:nth-child(odd) {
+    .preview-body table:not(.csv-table) tbody tr:nth-child(odd) {
       background: color-mix(in oklab, var(--panel) 92%, transparent);
     }
-    .preview-body table tbody tr:nth-child(even) {
+    .preview-body table:not(.csv-table) tbody tr:nth-child(even) {
       background: color-mix(in oklab, var(--panel) 80%, var(--code));
     }
     .preview-body table tbody tr:hover {
@@ -2571,9 +2574,27 @@ const webAppHTML = `<!doctype html>
     .csv-info { font-size: 12px; color: var(--muted); }
     .csv-select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
     .csv-scroll { overflow: auto; flex: 1; border: 1px solid var(--line); border-radius: 8px; }
-    .csv-table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13px; }
-    .csv-table th, .csv-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
-    .csv-table thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; font-weight: 600; }
+    /* Excel-style: formula bar + frozen letter row / header row / row gutter. */
+    .csv-formula { display: flex; align-items: center; gap: 6px; }
+    .csv-namebox { width: 96px; flex: none; text-align: center; font-weight: 600; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font-variant-numeric: tabular-nums; }
+    .csv-fx { font-style: italic; color: var(--muted); font-size: 12px; padding: 0 2px; }
+    .csv-cellview { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-family: inherit; font-size: 13px; }
+    /* overflow:visible + max-width:none override the .preview-body table rule:
+       overflow:hidden on the table would make IT the sticky scrollport (killing
+       the frozen header), and max-width:100% would block horizontal scroll. */
+    .csv-table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; --csv-lh: 24px; overflow: visible; max-width: none; }
+    .csv-table th, .csv-table td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; background: var(--bg); }
+    .csv-table thead .csv-letter-row th { position: sticky; top: 0; z-index: 3; background: var(--panel); color: var(--muted); text-align: center; font-weight: 600; padding: 2px 6px; }
+    .csv-table thead .csv-corner { left: 0; z-index: 4; }
+    .csv-table thead .csv-header-row th { position: sticky; top: var(--csv-lh); z-index: 2; background: var(--panel); font-weight: 600; }
+    .csv-table thead .csv-header-row .csv-rownum { left: 0; z-index: 3; }
+    .csv-table tbody .csv-rownum { position: sticky; left: 0; z-index: 1; background: var(--panel); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+    .csv-table .csv-letter { position: relative; cursor: default; }
+    .csv-resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; }
+    .csv-resizer:hover { background: var(--accent); }
+    .csv-table td.csv-selected, .csv-table th.csv-selected { background: color-mix(in oklab, var(--accent) 22%, var(--bg)); outline: 2px solid var(--accent); outline-offset: -2px; cursor: default; }
+    .csv-table th.csv-head-active, .csv-table td.csv-head-active { background: color-mix(in oklab, var(--accent) 30%, var(--panel)); color: var(--text); }
+    .csv-table tbody td { cursor: cell; }
     .empty {
       color: var(--muted);
       display: grid;
@@ -7267,12 +7288,29 @@ const webAppHTML = `<!doctype html>
       code.innerHTML = '<table class="hljs-ln"><tbody>' + rows.join("") + '</tbody></table>';
     }
 
-    var csvState = { path: null, page: 1, pageSize: 100 };
+    // colWidths persists per file (across page turns); selected is per page.
+    var csvState = { path: null, page: 1, pageSize: 100, colWidths: {}, selected: null };
+    var CSV_DEFAULT_COLW = 200;
+
+    // csvColLetter maps a 0-based column index to a spreadsheet letter
+    // (0->A, 25->Z, 26->AA, \u2026).
+    function csvColLetter(n) {
+      var s = "";
+      n = n + 1;
+      while (n > 0) {
+        var r = (n - 1) % 26;
+        s = String.fromCharCode(65 + r) + s;
+        n = Math.floor((n - 1) / 26);
+      }
+      return s;
+    }
 
     async function renderCsv(data) {
       csvState.path = data.path;
       csvState.page = 1;
       csvState.pageSize = 100;
+      csvState.colWidths = {}; // reset widths when opening a different file
+      csvState.selected = null;
       await loadCsvPage();
     }
 
@@ -7288,6 +7326,7 @@ const webAppHTML = `<!doctype html>
         previewBodyEl.innerHTML = "<div class=\"empty\">" + t("csvError") + "</div>";
         return;
       }
+      csvState.selected = null; // clear selection on page/size change
       drawCsv(resp);
     }
 
@@ -7299,7 +7338,7 @@ const webAppHTML = `<!doctype html>
       var wrap = document.createElement("div");
       wrap.className = "csv-wrap";
 
-      // Controls
+      // \u2500\u2500 Controls \u2500\u2500
       var bar = document.createElement("div");
       bar.className = "csv-bar";
 
@@ -7346,37 +7385,172 @@ const webAppHTML = `<!doctype html>
       bar.appendChild(sizeSel);
       wrap.appendChild(bar);
 
-      // Table
+      // \u2500\u2500 Formula bar (read-only): [name box] fx [cell content] \u2500\u2500
+      var formula = document.createElement("div");
+      formula.className = "csv-formula";
+      var nameBox = document.createElement("input");
+      nameBox.className = "csv-namebox";
+      nameBox.readOnly = true;
+      var fx = document.createElement("span");
+      fx.className = "csv-fx";
+      fx.textContent = "fx";
+      var cellView = document.createElement("input");
+      cellView.className = "csv-cellview";
+      cellView.readOnly = true;
+      formula.appendChild(nameBox);
+      formula.appendChild(fx);
+      formula.appendChild(cellView);
+      wrap.appendChild(formula);
+
+      // \u2500\u2500 Table geometry \u2500\u2500
+      var header = resp.header || [];
+      var rows = resp.rows || [];
+      var ncols = header.length;
+      rows.forEach(function (r) { if (r.length > ncols) ncols = r.length; });
+
+      // Gutter width scales with the largest row number on this page.
+      var lastRow = (csvState.page - 1) * resp.page_size + rows.length + 1; // +1: header is row 1
+      var gutterW = Math.max(44, 16 + String(lastRow).length * 9);
+
       var scroll = document.createElement("div");
       scroll.className = "csv-scroll";
       var table = document.createElement("table");
       table.className = "csv-table";
 
+      // colgroup: gutter col + one col per data column (resizable widths).
+      var colgroup = document.createElement("colgroup");
+      var gcol = document.createElement("col");
+      gcol.style.width = gutterW + "px";
+      colgroup.appendChild(gcol);
+      var cols = [];
+      for (var c = 0; c < ncols; c++) {
+        var col = document.createElement("col");
+        col.style.width = (csvState.colWidths[c] || CSV_DEFAULT_COLW) + "px";
+        colgroup.appendChild(col);
+        cols.push(col);
+      }
+      table.appendChild(colgroup);
+
+      function recomputeTableWidth() {
+        var total = gutterW;
+        cols.forEach(function (cl) { total += parseInt(cl.style.width, 10) || CSV_DEFAULT_COLW; });
+        table.style.width = total + "px";
+      }
+
       var thead = document.createElement("thead");
-      var htr = document.createElement("tr");
-      (resp.header || []).forEach(function (h) {
-        var th = document.createElement("th");
-        th.textContent = h;
-        htr.appendChild(th);
-      });
-      thead.appendChild(htr);
+
+      // Row 1: spreadsheet column letters (A, B, C\u2026) with resize handles.
+      var letterTr = document.createElement("tr");
+      letterTr.className = "csv-letter-row";
+      var corner = document.createElement("th");
+      corner.className = "csv-corner";
+      letterTr.appendChild(corner);
+      for (var lc = 0; lc < ncols; lc++) {
+        (function (ci) {
+          var th = document.createElement("th");
+          th.className = "csv-letter";
+          th.textContent = csvColLetter(ci);
+          var grip = document.createElement("span");
+          grip.className = "csv-resizer";
+          grip.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var startX = e.clientX;
+            var startW = cols[ci].getBoundingClientRect().width;
+            function mm(ev) {
+              var w = Math.max(40, startW + (ev.clientX - startX));
+              cols[ci].style.width = w + "px";
+              csvState.colWidths[ci] = w;
+              recomputeTableWidth();
+            }
+            function mu() {
+              document.removeEventListener("mousemove", mm);
+              document.removeEventListener("mouseup", mu);
+              document.body.style.userSelect = "";
+            }
+            document.addEventListener("mousemove", mm);
+            document.addEventListener("mouseup", mu);
+            document.body.style.userSelect = "none";
+          });
+          th.appendChild(grip);
+          letterTr.appendChild(th);
+        })(lc);
+      }
+      thead.appendChild(letterTr);
+
+      // Row 2: the CSV header (file row 1).
+      var headerTr = document.createElement("tr");
+      headerTr.className = "csv-header-row";
+      headerTr.dataset.excelrow = "1";
+      var hGut = document.createElement("th");
+      hGut.className = "csv-rownum";
+      hGut.textContent = "1";
+      headerTr.appendChild(hGut);
+      for (var hc = 0; hc < ncols; hc++) {
+        var hth = document.createElement("th");
+        hth.className = "csv-headcell";
+        hth.dataset.col = String(hc);
+        hth.textContent = header[hc] != null ? header[hc] : "";
+        headerTr.appendChild(hth);
+      }
+      thead.appendChild(headerTr);
       table.appendChild(thead);
 
+      // \u2500\u2500 Body \u2500\u2500
       var tbody = document.createElement("tbody");
-      (resp.rows || []).forEach(function (row) {
+      rows.forEach(function (row, i) {
+        var excelRow = (csvState.page - 1) * resp.page_size + i + 2; // header=1, first data=2
         var tr = document.createElement("tr");
-        row.forEach(function (cell) {
+        tr.dataset.excelrow = String(excelRow);
+        var gut = document.createElement("td");
+        gut.className = "csv-rownum";
+        gut.textContent = String(excelRow);
+        tr.appendChild(gut);
+        for (var dc = 0; dc < ncols; dc++) {
           var td = document.createElement("td");
-          td.textContent = cell;
+          td.dataset.col = String(dc);
+          td.textContent = row[dc] != null ? row[dc] : "";
           tr.appendChild(td);
-        });
+        }
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
+
+      // \u2500\u2500 Cell selection \u2192 formula bar + header highlight \u2500\u2500
+      function clearSel() {
+        var prevSel = table.querySelector(".csv-selected");
+        if (prevSel) prevSel.classList.remove("csv-selected");
+        var actives = table.querySelectorAll(".csv-head-active");
+        for (var k = 0; k < actives.length; k++) actives[k].classList.remove("csv-head-active");
+      }
+      table.addEventListener("click", function (e) {
+        var cell = e.target.closest("td, th");
+        if (!cell) return;
+        if (!cell.dataset || cell.dataset.col == null) return; // gutter/letter/corner
+        var col = parseInt(cell.dataset.col, 10);
+        var tr = cell.parentElement;
+        var excelRow = parseInt(tr.dataset.excelrow, 10);
+        clearSel();
+        cell.classList.add("csv-selected");
+        // highlight the column letter and the row-number gutter
+        var letterTh = letterTr.children[col + 1];
+        if (letterTh) letterTh.classList.add("csv-head-active");
+        var gutCell = tr.children[0];
+        if (gutCell) gutCell.classList.add("csv-head-active");
+        nameBox.value = csvColLetter(col) + excelRow;
+        cellView.value = cell.textContent;
+        csvState.selected = { col: col, row: excelRow };
+      });
+
       scroll.appendChild(table);
       wrap.appendChild(scroll);
-
       previewBodyEl.appendChild(wrap);
+      recomputeTableWidth();
+      // Pin the CSV header row exactly below the (variable-height) letter row so
+      // both stay frozen on scroll without overlap or gap. getBoundingClientRect
+      // forces a synchronous layout, so the measured height is correct here.
+      var lh = letterTr.getBoundingClientRect().height;
+      if (lh > 0) table.style.setProperty("--csv-lh", lh + "px");
     }
 
     function renderCodeFile(data) {
