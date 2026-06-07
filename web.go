@@ -2124,6 +2124,7 @@ const webAppHTML = `<!doctype html>
     .chip[data-kind="image"]::before { background: var(--accent-2); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-2) 25%, transparent); }
     .chip[data-kind="mermaid"]::before { background: oklch(0.78 0.16 145); box-shadow: 0 0 0 2px oklch(0.78 0.16 145 / 0.25); }
     .chip[data-kind="html"]::before { background: oklch(0.76 0.17 50); box-shadow: 0 0 0 2px oklch(0.76 0.17 50 / 0.25); }
+    .chip[data-kind="csv"]::before { background: oklch(0.74 0.15 195); box-shadow: 0 0 0 2px oklch(0.74 0.15 195 / 0.25); }
 
     /* Sandboxed HTML preview — fills the preview body bleed-to-edge */
     .html-frame-wrap {
@@ -2563,6 +2564,16 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, oklch(0.7 0.18 150) 30%, var(--panel-2));
       border-color: color-mix(in oklab, oklch(0.7 0.18 150) 60%, transparent);
     }
+    .csv-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+    .csv-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 2px; }
+    .csv-btn { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+    .csv-btn:disabled { opacity: 0.4; cursor: default; }
+    .csv-info { font-size: 12px; color: var(--muted); }
+    .csv-select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
+    .csv-scroll { overflow: auto; flex: 1; border: 1px solid var(--line); border-radius: 8px; }
+    .csv-table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13px; }
+    .csv-table th, .csv-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+    .csv-table thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; font-weight: 600; }
     .empty {
       color: var(--muted);
       display: grid;
@@ -7246,6 +7257,119 @@ const webAppHTML = `<!doctype html>
       code.innerHTML = '<table class="hljs-ln"><tbody>' + rows.join("") + '</tbody></table>';
     }
 
+    var csvState = { path: null, page: 1, pageSize: 100, total: 0 };
+
+    async function renderCsv(data) {
+      csvState.path = data.path;
+      csvState.page = 1;
+      csvState.pageSize = 100;
+      await loadCsvPage();
+    }
+
+    async function loadCsvPage() {
+      var url = "/api/csv?path=" + encodeURIComponent(csvState.path) +
+                "&page=" + csvState.page + "&page_size=" + csvState.pageSize;
+      var resp;
+      try {
+        var res = await fetch(url);
+        if (!res.ok) throw new Error(await res.text());
+        resp = await res.json();
+      } catch (e) {
+        previewBodyEl.innerHTML = "<div class=\"empty\">" + t("csvError") + "</div>";
+        return;
+      }
+      csvState.total = resp.total_rows;
+      drawCsv(resp);
+    }
+
+    function drawCsv(resp) {
+      var totalPages = Math.max(1, Math.ceil(resp.total_rows / resp.page_size));
+      if (csvState.page > totalPages) { csvState.page = totalPages; }
+
+      previewBodyEl.innerHTML = "";
+      var wrap = document.createElement("div");
+      wrap.className = "csv-wrap";
+
+      // Controls
+      var bar = document.createElement("div");
+      bar.className = "csv-bar";
+
+      var prev = document.createElement("button");
+      prev.className = "csv-btn";
+      prev.textContent = t("csvPrev");
+      prev.disabled = csvState.page <= 1;
+      prev.onclick = function () { if (csvState.page > 1) { csvState.page--; loadCsvPage(); } };
+
+      var next = document.createElement("button");
+      next.className = "csv-btn";
+      next.textContent = t("csvNext");
+      next.disabled = csvState.page >= totalPages;
+      next.onclick = function () { if (csvState.page < totalPages) { csvState.page++; loadCsvPage(); } };
+
+      var info = document.createElement("span");
+      info.className = "csv-info";
+      info.textContent = csvState.page + " / " + totalPages + " " + t("csvPage") +
+                         " \u00b7 " + resp.total_rows + " " + t("csvRows");
+
+      var sizeLabel = document.createElement("span");
+      sizeLabel.className = "csv-info";
+      sizeLabel.textContent = t("csvPageSize") + ":";
+
+      var sizeSel = document.createElement("select");
+      sizeSel.className = "csv-select";
+      [50, 100, 500].forEach(function (n) {
+        var opt = document.createElement("option");
+        opt.value = String(n);
+        opt.textContent = String(n);
+        if (n === resp.page_size) opt.selected = true;
+        sizeSel.appendChild(opt);
+      });
+      sizeSel.onchange = function () {
+        csvState.pageSize = parseInt(sizeSel.value, 10);
+        csvState.page = 1;
+        loadCsvPage();
+      };
+
+      bar.appendChild(prev);
+      bar.appendChild(next);
+      bar.appendChild(info);
+      bar.appendChild(sizeLabel);
+      bar.appendChild(sizeSel);
+      wrap.appendChild(bar);
+
+      // Table
+      var scroll = document.createElement("div");
+      scroll.className = "csv-scroll";
+      var table = document.createElement("table");
+      table.className = "csv-table";
+
+      var thead = document.createElement("thead");
+      var htr = document.createElement("tr");
+      (resp.header || []).forEach(function (h) {
+        var th = document.createElement("th");
+        th.textContent = h;
+        htr.appendChild(th);
+      });
+      thead.appendChild(htr);
+      table.appendChild(thead);
+
+      var tbody = document.createElement("tbody");
+      (resp.rows || []).forEach(function (row) {
+        var tr = document.createElement("tr");
+        row.forEach(function (cell) {
+          var td = document.createElement("td");
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      scroll.appendChild(table);
+      wrap.appendChild(scroll);
+
+      previewBodyEl.appendChild(wrap);
+    }
+
     function renderCodeFile(data) {
       previewBodyEl.innerHTML = "";
       const wrap = document.createElement("div");
@@ -7865,6 +7989,10 @@ const webAppHTML = `<!doctype html>
         note.innerHTML = '<span>Sandboxed preview</span> · <a href="' + data.raw_url + '" target="_blank" rel="noopener">Open in new tab ↗</a>';
         wrap.appendChild(note);
         previewBodyEl.appendChild(wrap);
+        return;
+      }
+      if (data.kind === "csv") {
+        await renderCsv(data);
         return;
       }
       if (data.kind === "text") {
