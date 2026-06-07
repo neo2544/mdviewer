@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -20,6 +22,7 @@ import (
 type webServer struct {
 	startDir string
 	appRoot  string
+	csv      csvCache
 }
 
 type webEntry struct {
@@ -581,6 +584,113 @@ func scanCSVRecordOffsets(r io.Reader) ([]int64, error) {
 		pos++
 	}
 	return offsets, nil
+}
+
+const csvCacheCap = 16
+
+type csvIndex struct {
+	modTime time.Time
+	size    int64
+	header  []string
+	offsets []int64 // byte offset of each DATA record start (header excluded)
+	total   int     // data rows (== len(offsets))
+	delim   rune
+}
+
+type csvCache struct {
+	mu     sync.Mutex
+	m      map[string]*csvIndex
+	order  []string // LRU; most-recently-used at the end
+	builds int      // test instrumentation: number of (re)builds
+}
+
+// get returns a cached index for absPath, rebuilding if the file's modTime or
+// size changed since the cached entry. Safe for concurrent use; zero value ready.
+func (c *csvCache) get(absPath string, delim rune) (*csvIndex, error) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = make(map[string]*csvIndex)
+	}
+	if idx, ok := c.m[absPath]; ok &&
+		idx.modTime.Equal(info.ModTime()) && idx.size == info.Size() && idx.delim == delim {
+		c.touch(absPath)
+		return idx, nil
+	}
+	idx, err := buildCSVIndex(absPath, delim, info)
+	if err != nil {
+		return nil, err
+	}
+	c.builds++
+	c.m[absPath] = idx
+	c.touch(absPath)
+	c.evict()
+	return idx, nil
+}
+
+func (c *csvCache) touch(key string) {
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
+	}
+	c.order = append(c.order, key)
+}
+
+func (c *csvCache) evict() {
+	for len(c.order) > csvCacheCap {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.m, oldest)
+	}
+}
+
+// buildCSVIndex scans the whole file once to build the offset index and parse
+// the header.
+func buildCSVIndex(absPath string, delim rune, info os.FileInfo) (*csvIndex, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	all, err := scanCSVRecordOffsets(f)
+	if err != nil {
+		return nil, err
+	}
+
+	idx := &csvIndex{
+		modTime: info.ModTime(),
+		size:    info.Size(),
+		delim:   delim,
+	}
+	if len(all) == 0 {
+		return idx, nil // empty file: no header, no rows
+	}
+
+	// Parse the header record (record 0).
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	hr := csv.NewReader(f)
+	hr.Comma = delim
+	hr.FieldsPerRecord = -1
+	hr.LazyQuotes = true
+	header, err := hr.Read()
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	idx.header = header
+
+	// Data record offsets exclude the header.
+	idx.offsets = all[1:]
+	idx.total = len(idx.offsets)
+	return idx, nil
 }
 
 func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
