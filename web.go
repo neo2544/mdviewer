@@ -7261,7 +7261,7 @@ const webAppHTML = `<!doctype html>
       code.innerHTML = '<table class="hljs-ln"><tbody>' + rows.join("") + '</tbody></table>';
     }
 
-    var csvState = { path: null, page: 1, pageSize: 100, total: 0 };
+    var csvState = { path: null, page: 1, pageSize: 100 };
 
     async function renderCsv(data) {
       csvState.path = data.path;
@@ -7282,7 +7282,6 @@ const webAppHTML = `<!doctype html>
         previewBodyEl.innerHTML = "<div class=\"empty\">" + t("csvError") + "</div>";
         return;
       }
-      csvState.total = resp.total_rows;
       drawCsv(resp);
     }
 
