@@ -6409,8 +6409,14 @@ const webAppHTML = `<!doctype html>
       if (path !== state.selectedPath) { state.updBaseRev = null; state.updBaseLabel = ""; }
       state.selectedPath = path;
       state.selectedHash = options.hash || "";
-      if (!state.cwd || !path.startsWith(state.cwd + "/")) {
-        await loadDir(path.replace(/\/[^/]*$/, ""), { keepSelection: true });
+      // Re-root the file list to the folder that CONTAINS this file so the
+      // left pane follows path-jumps and search hits into SUBfolders too —
+      // not only when the file lives outside the current folder. Skip the
+      // reload when the parent already is the current folder (e.g. clicking
+      // a sibling, or an auto-refresh re-select) to avoid disrupting it.
+      const parentDir = path.replace(/\/[^/]*$/, "");
+      if (parentDir !== state.cwd) {
+        await loadDir(parentDir, { keepSelection: true });
       }
       renderFilePane();
       let data;
