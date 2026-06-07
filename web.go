@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -18,6 +23,7 @@ import (
 type webServer struct {
 	startDir string
 	appRoot  string
+	csv      csvCache
 }
 
 type webEntry struct {
@@ -69,6 +75,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
 	mux.HandleFunc("/api/raw", s.handleRaw)
+	mux.HandleFunc("/api/csv", s.handleCSV)
 	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
 	mux.HandleFunc("/api/favorites/reorder", s.handleReorderFavorites)
 	mux.HandleFunc("/api/resolve", s.handleResolve)
@@ -503,7 +510,10 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 	case ".html", ".htm":
 		resp.Kind = "html"
 		resp.RawURL = "/api/raw?path=" + url.QueryEscape(absPath)
-	case ".txt", ".log", ".csv", ".tsv",
+	case ".csv", ".tsv":
+		resp.Kind = "csv"
+		// Table data is fetched separately via /api/csv (paginated).
+	case ".txt", ".log",
 		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
 		".ps1", ".psm1", ".bat", ".cmd",
@@ -546,6 +556,318 @@ func (s *webServer) handleRaw(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, absPath)
 }
 
+// scanCSVRecordOffsets returns the byte offset of the start of each CSV
+// record in r. Newlines inside double-quoted fields are not treated as
+// record terminators. A trailing newline does not produce a final empty
+// record. Blank lines are skipped so the offsets stay in lock-step with
+// encoding/csv, which silently ignores blank lines. The first offset
+// corresponds to the header record.
+func scanCSVRecordOffsets(r io.Reader) ([]int64, error) {
+	br := bufio.NewReader(r)
+	var offsets []int64
+	var pos int64
+	inQuote := false
+	atLineStart := true   // next byte begins a new line
+	recorded := false     // offset already appended for the current record
+	var lineStart int64   // candidate start offset of the current line
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if atLineStart {
+			lineStart = pos
+			atLineStart = false
+		}
+		switch {
+		case b == '\n' && !inQuote:
+			// End of line. If the line had no content (blank line), no
+			// offset was recorded, matching encoding/csv's behavior.
+			atLineStart = true
+			recorded = false
+		case b == '\r' && !inQuote:
+			// Treat CR as a non-content byte (handles \r\n line endings);
+			// do not start a record on it.
+		default:
+			if b == '"' {
+				inQuote = !inQuote
+			}
+			if !recorded {
+				offsets = append(offsets, lineStart)
+				recorded = true
+			}
+		}
+		pos++
+	}
+	return offsets, nil
+}
+
+const csvCacheCap = 16
+
+type csvIndex struct {
+	modTime time.Time
+	size    int64
+	header  []string
+	offsets []int64 // byte offset of each DATA record start (header excluded)
+	total   int     // data rows (== len(offsets))
+	delim   rune
+}
+
+type csvCache struct {
+	mu     sync.Mutex
+	m      map[string]*csvIndex
+	order  []string // LRU; most-recently-used at the end
+	builds int      // test instrumentation: number of (re)builds
+}
+
+// get returns a cached index for absPath, rebuilding if the file's modTime or
+// size changed since the cached entry. Safe for concurrent use; zero value ready.
+func (c *csvCache) get(absPath string, delim rune) (*csvIndex, error) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = make(map[string]*csvIndex)
+	}
+	if idx, ok := c.m[absPath]; ok &&
+		idx.modTime.Equal(info.ModTime()) && idx.size == info.Size() && idx.delim == delim {
+		c.touch(absPath)
+		return idx, nil
+	}
+	idx, err := buildCSVIndex(absPath, delim, info)
+	if err != nil {
+		return nil, err
+	}
+	c.builds++
+	c.m[absPath] = idx
+	c.touch(absPath)
+	c.evict()
+	return idx, nil
+}
+
+func (c *csvCache) touch(key string) {
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
+	}
+	c.order = append(c.order, key)
+}
+
+func (c *csvCache) evict() {
+	for len(c.order) > csvCacheCap {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.m, oldest)
+	}
+}
+
+// buildCSVIndex scans the whole file once to build the offset index and parse
+// the header.
+func buildCSVIndex(absPath string, delim rune, info os.FileInfo) (*csvIndex, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	all, err := scanCSVRecordOffsets(f)
+	if err != nil {
+		return nil, err
+	}
+
+	idx := &csvIndex{
+		modTime: info.ModTime(),
+		size:    info.Size(),
+		delim:   delim,
+		header:  []string{}, // non-nil so JSON renders [] not null
+	}
+	if len(all) == 0 {
+		return idx, nil // empty file: no header, no rows
+	}
+
+	// Parse the header record (record 0).
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	hr := csv.NewReader(f)
+	hr.Comma = delim
+	hr.FieldsPerRecord = -1
+	hr.LazyQuotes = true
+	header, err := hr.Read()
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	idx.header = header
+
+	// Data record offsets exclude the header.
+	idx.offsets = all[1:]
+	idx.total = len(idx.offsets)
+	return idx, nil
+}
+
+// readCSVPage seeks to data row `offset` and returns up to `limit` rows.
+// Returns an empty slice if offset is at or beyond the end.
+func readCSVPage(absPath string, idx *csvIndex, offset, limit int) ([][]string, error) {
+	if offset < 0 || offset >= len(idx.offsets) || limit <= 0 {
+		return [][]string{}, nil
+	}
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(idx.offsets[offset], io.SeekStart); err != nil {
+		return nil, err
+	}
+	rd := csv.NewReader(f)
+	rd.Comma = idx.delim
+	rd.FieldsPerRecord = -1
+	rd.LazyQuotes = true
+
+	rows := make([][]string, 0, limit)
+	for len(rows) < limit {
+		rec, err := rd.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, rec)
+	}
+	return rows, nil
+}
+
+type csvResponse struct {
+	Path      string     `json:"path"`
+	Delimiter string     `json:"delimiter"`
+	Header    []string   `json:"header"`
+	Rows      [][]string `json:"rows"`
+	Page      int        `json:"page"`
+	PageSize  int        `json:"page_size"`
+	TotalRows int        `json:"total_rows"`
+}
+
+var csvPageSizes = map[int]bool{50: true, 100: true, 500: true}
+
+func (s *webServer) handleCSV(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "path is a directory", http.StatusBadRequest)
+		return
+	}
+
+	delim := ','
+	if strings.ToLower(filepath.Ext(absPath)) == ".tsv" {
+		delim = '\t'
+	}
+
+	page := 1
+	if v, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && v >= 1 {
+		page = v
+	}
+	pageSize := 100
+	if v, err := strconv.Atoi(r.URL.Query().Get("page_size")); err == nil && csvPageSizes[v] {
+		pageSize = v
+	}
+
+	idx, err := s.csv.get(absPath, delim)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := readCSVPage(absPath, idx, offset, pageSize)
+	if err != nil {
+		// Index/seek mismatch (rare LazyQuotes edge): drop cache and full re-parse.
+		rows, err = fallbackCSVPage(absPath, delim, offset, pageSize)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	delimStr := ","
+	if delim == '\t' {
+		delimStr = "\t"
+	}
+	s.writeJSON(w, http.StatusOK, csvResponse{
+		Path:      absPath,
+		Delimiter: delimStr,
+		Header:    idx.header,
+		Rows:      rows,
+		Page:      page,
+		PageSize:  pageSize,
+		TotalRows: idx.total,
+	})
+}
+
+// fallbackCSVPage re-parses from the start, skipping `offset` data rows. Used
+// when the cached offset index does not align with csv.Reader parsing.
+func fallbackCSVPage(absPath string, delim rune, offset, limit int) ([][]string, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	rd := csv.NewReader(f)
+	rd.Comma = delim
+	rd.FieldsPerRecord = -1
+	rd.LazyQuotes = true
+
+	// Skip header.
+	if _, err := rd.Read(); err != nil {
+		if err == io.EOF {
+			return [][]string{}, nil
+		}
+		return nil, err
+	}
+	// Skip `offset` data rows.
+	for i := 0; i < offset; i++ {
+		if _, err := rd.Read(); err != nil {
+			if err == io.EOF {
+				return [][]string{}, nil
+			}
+			return nil, err
+		}
+	}
+	rows := make([][]string, 0, limit)
+	for len(rows) < limit {
+		rec, err := rd.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, rec)
+	}
+	return rows, nil
+}
+
 func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -581,7 +903,7 @@ func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(absPath))
 	switch ext {
 	case ".md", ".markdown", ".mdx",
-		".txt", ".log", ".csv", ".tsv",
+		".txt", ".log",
 		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
 		".ps1", ".psm1", ".bat", ".cmd",
@@ -1802,6 +2124,7 @@ const webAppHTML = `<!doctype html>
     .chip[data-kind="image"]::before { background: var(--accent-2); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-2) 25%, transparent); }
     .chip[data-kind="mermaid"]::before { background: oklch(0.78 0.16 145); box-shadow: 0 0 0 2px oklch(0.78 0.16 145 / 0.25); }
     .chip[data-kind="html"]::before { background: oklch(0.76 0.17 50); box-shadow: 0 0 0 2px oklch(0.76 0.17 50 / 0.25); }
+    .chip[data-kind="csv"]::before { background: oklch(0.74 0.15 195); box-shadow: 0 0 0 2px oklch(0.74 0.15 195 / 0.25); }
 
     /* Sandboxed HTML preview — fills the preview body bleed-to-edge */
     .html-frame-wrap {
@@ -2241,6 +2564,16 @@ const webAppHTML = `<!doctype html>
       background: color-mix(in oklab, oklch(0.7 0.18 150) 30%, var(--panel-2));
       border-color: color-mix(in oklab, oklch(0.7 0.18 150) 60%, transparent);
     }
+    .csv-wrap { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+    .csv-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 2px; }
+    .csv-btn { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+    .csv-btn:disabled { opacity: 0.4; cursor: default; }
+    .csv-info { font-size: 12px; color: var(--muted); }
+    .csv-select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
+    .csv-scroll { overflow: auto; flex: 1; border: 1px solid var(--line); border-radius: 8px; }
+    .csv-table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13px; }
+    .csv-table th, .csv-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+    .csv-table thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; font-weight: 600; }
     .empty {
       color: var(--muted);
       display: grid;
@@ -6171,6 +6504,8 @@ const webAppHTML = `<!doctype html>
         toggleCurrent: "Toggle current",
         removeFavorite: "★ Remove favorite", addToFavorites: "Add to favorites",
         phSearchFiles: "Search files", phJumpPath: "Jump to path (Enter)…  e.g. ~/notes/foo.md",
+        csvPrev: "Previous", csvNext: "Next", csvPage: "page",
+        csvRows: "rows", csvPageSize: "Page size", csvError: "Cannot display as a table.",
         secOutline: "Outline", outlineLevelTitle: "Heading levels to show (click to change)", outlineCollapseTitle: "Collapse outline", outlineEmpty: "No headings in this document.",
         phSearchFolder: "🔍 Search in this folder…", secInThisFile: "In this file",
         sortLine: "Line", sortLineTitle: "Sort by line position", sortPriority: "Priority", sortPriorityTitle: "Sort by importance (heading first)",
@@ -6287,6 +6622,8 @@ const webAppHTML = `<!doctype html>
         toggleCurrent: "현재 추가/제거",
         removeFavorite: "★ 즐겨찾기 제거", addToFavorites: "즐겨찾기에 추가",
         phSearchFiles: "파일 검색", phJumpPath: "경로로 점프 (Enter)…  예: ~/notes/foo.md",
+        csvPrev: "이전", csvNext: "다음", csvPage: "페이지",
+        csvRows: "행", csvPageSize: "페이지 크기", csvError: "표로 표시할 수 없습니다.",
         secOutline: "개요", outlineLevelTitle: "표시할 헤딩 레벨 (클릭하여 변경)", outlineCollapseTitle: "개요 접기", outlineEmpty: "이 문서에는 헤딩이 없습니다.",
         phSearchFolder: "🔍 이 폴더에서 검색…", secInThisFile: "이 파일에서",
         sortLine: "줄", sortLineTitle: "줄 위치순 정렬", sortPriority: "중요도", sortPriorityTitle: "중요도순 정렬 (헤딩 우선)",
@@ -6924,6 +7261,118 @@ const webAppHTML = `<!doctype html>
       code.innerHTML = '<table class="hljs-ln"><tbody>' + rows.join("") + '</tbody></table>';
     }
 
+    var csvState = { path: null, page: 1, pageSize: 100 };
+
+    async function renderCsv(data) {
+      csvState.path = data.path;
+      csvState.page = 1;
+      csvState.pageSize = 100;
+      await loadCsvPage();
+    }
+
+    async function loadCsvPage() {
+      var url = "/api/csv?path=" + encodeURIComponent(csvState.path) +
+                "&page=" + csvState.page + "&page_size=" + csvState.pageSize;
+      var resp;
+      try {
+        var res = await fetch(url);
+        if (!res.ok) throw new Error(await res.text());
+        resp = await res.json();
+      } catch (e) {
+        previewBodyEl.innerHTML = "<div class=\"empty\">" + t("csvError") + "</div>";
+        return;
+      }
+      drawCsv(resp);
+    }
+
+    function drawCsv(resp) {
+      var totalPages = Math.max(1, Math.ceil(resp.total_rows / resp.page_size));
+      if (csvState.page > totalPages) { csvState.page = totalPages; }
+
+      previewBodyEl.innerHTML = "";
+      var wrap = document.createElement("div");
+      wrap.className = "csv-wrap";
+
+      // Controls
+      var bar = document.createElement("div");
+      bar.className = "csv-bar";
+
+      var prev = document.createElement("button");
+      prev.className = "csv-btn";
+      prev.textContent = t("csvPrev");
+      prev.disabled = csvState.page <= 1;
+      prev.onclick = function () { if (csvState.page > 1) { csvState.page--; loadCsvPage(); } };
+
+      var next = document.createElement("button");
+      next.className = "csv-btn";
+      next.textContent = t("csvNext");
+      next.disabled = csvState.page >= totalPages;
+      next.onclick = function () { if (csvState.page < totalPages) { csvState.page++; loadCsvPage(); } };
+
+      var info = document.createElement("span");
+      info.className = "csv-info";
+      info.textContent = csvState.page + " / " + totalPages + " " + t("csvPage") +
+                         " \u00b7 " + resp.total_rows + " " + t("csvRows");
+
+      var sizeLabel = document.createElement("span");
+      sizeLabel.className = "csv-info";
+      sizeLabel.textContent = t("csvPageSize") + ":";
+
+      var sizeSel = document.createElement("select");
+      sizeSel.className = "csv-select";
+      [50, 100, 500].forEach(function (n) {
+        var opt = document.createElement("option");
+        opt.value = String(n);
+        opt.textContent = String(n);
+        if (n === resp.page_size) opt.selected = true;
+        sizeSel.appendChild(opt);
+      });
+      sizeSel.onchange = function () {
+        csvState.pageSize = parseInt(sizeSel.value, 10);
+        csvState.page = 1;
+        loadCsvPage();
+      };
+
+      bar.appendChild(prev);
+      bar.appendChild(next);
+      bar.appendChild(info);
+      bar.appendChild(sizeLabel);
+      bar.appendChild(sizeSel);
+      wrap.appendChild(bar);
+
+      // Table
+      var scroll = document.createElement("div");
+      scroll.className = "csv-scroll";
+      var table = document.createElement("table");
+      table.className = "csv-table";
+
+      var thead = document.createElement("thead");
+      var htr = document.createElement("tr");
+      (resp.header || []).forEach(function (h) {
+        var th = document.createElement("th");
+        th.textContent = h;
+        htr.appendChild(th);
+      });
+      thead.appendChild(htr);
+      table.appendChild(thead);
+
+      var tbody = document.createElement("tbody");
+      (resp.rows || []).forEach(function (row) {
+        var tr = document.createElement("tr");
+        row.forEach(function (cell) {
+          var td = document.createElement("td");
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      scroll.appendChild(table);
+      wrap.appendChild(scroll);
+
+      previewBodyEl.appendChild(wrap);
+    }
+
     function renderCodeFile(data) {
       previewBodyEl.innerHTML = "";
       const wrap = document.createElement("div");
@@ -7543,6 +7992,10 @@ const webAppHTML = `<!doctype html>
         note.innerHTML = '<span>Sandboxed preview</span> · <a href="' + data.raw_url + '" target="_blank" rel="noopener">Open in new tab ↗</a>';
         wrap.appendChild(note);
         previewBodyEl.appendChild(wrap);
+        return;
+      }
+      if (data.kind === "csv") {
+        await renderCsv(data);
         return;
       }
       if (data.kind === "text") {
