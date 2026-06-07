@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -544,6 +546,41 @@ func (s *webServer) handleRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, absPath)
+}
+
+// scanCSVRecordOffsets returns the byte offset of the start of each CSV
+// record in r. Newlines inside double-quoted fields are not treated as
+// record terminators. A trailing newline does not produce a final empty
+// record. The first offset (0) corresponds to the header record.
+func scanCSVRecordOffsets(r io.Reader) ([]int64, error) {
+	br := bufio.NewReader(r)
+	var offsets []int64
+	var pos int64
+	inQuote := false
+	atRecordStart := true
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if atRecordStart {
+			offsets = append(offsets, pos)
+			atRecordStart = false
+		}
+		switch b {
+		case '"':
+			inQuote = !inQuote
+		case '\n':
+			if !inQuote {
+				atRecordStart = true
+			}
+		}
+		pos++
+	}
+	return offsets, nil
 }
 
 func (s *webServer) handleSaveFile(w http.ResponseWriter, r *http.Request) {
