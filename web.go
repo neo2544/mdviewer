@@ -1771,6 +1771,21 @@ const webAppHTML = `<!doctype html>
     .aidlc-toggle.active .aidlc-knob { transform: translateX(10px); }
     .aidlc-toggle.active .aidlc-toggle-state { opacity: 1; }
 
+    /* AI-DLC stage-grouped document list */
+    .aidlc-sort[hidden] { display: none; }
+    .aidlc-sort { margin-left: auto; }
+    .aidlc-phase-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .05em; color: var(--muted); }
+    .aidlc-phase-head .aidlc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .aidlc-phase-head.aidlc-p1 .aidlc-dot { background: oklch(0.62 0.19 264); }
+    .aidlc-phase-head.aidlc-p2 .aidlc-dot { background: oklch(0.72 0.17 150); }
+    .aidlc-phase-head.aidlc-p3 .aidlc-dot { background: oklch(0.80 0.15 85); }
+    .aidlc-step-head { display: flex; align-items: baseline; gap: 6px; padding: 4px 12px 2px; font-size: 12px; color: var(--text); }
+    .aidlc-step-num { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); min-width: 26px; }
+    .aidlc-step-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .aidlc-step-count { font-size: 11px; color: var(--muted); }
+    .aidlc-step-empty { opacity: 0.45; }
+    .aidlc-doc { padding-left: 22px; }
+
     /* "업데이트 내역" toggle — same sliding-switch idiom as the AI-DLC toggle. */
     .upd-toggle[hidden] { display: none; }
     .upd-toggle {
@@ -4262,6 +4277,10 @@ const webAppHTML = `<!doctype html>
       <div class="pane">
         <div class="file-header">
           <button class="aidlc-toggle" id="aidlcToggle" type="button" role="switch" aria-checked="false" hidden data-i18n-title="aidlcToggleTitle" title="AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)"><span class="aidlc-switch"><span class="aidlc-knob"></span></span><span class="aidlc-toggle-text">AI-DLC</span><span class="aidlc-toggle-state">OFF</span></button>
+          <div class="search-sort aidlc-sort" id="aidlcSort" role="group" aria-label="AI-DLC sort" hidden>
+            <button type="button" class="search-sort-btn active" id="aidlcSortStage" data-i18n="aidlcSortStage">단계순</button>
+            <button type="button" class="search-sort-btn" id="aidlcSortRecent" data-i18n="aidlcSortRecent">최근수</button>
+          </div>
           <button class="header-button active" id="sortName" data-direction="asc" type="button">Name</button>
           <button class="header-button size-col" id="sortMod" data-direction="asc" type="button">Updated</button>
         </div>
@@ -4768,6 +4787,7 @@ const webAppHTML = `<!doctype html>
         return (navigator.language || navigator.userLanguage || "").toLowerCase().indexOf("ko") === 0 ? "ko" : "en";
       })(),
       aidlcWanted: localStorage.getItem("mdviewer.aidlcMode") === "1",
+      aidlcSort: localStorage.getItem("mdviewer.aidlcSort") === "recent" ? "recent" : "stage",
       aidlcMode: false,
       updMode: localStorage.getItem("mdviewer.updMode") === "1", // show inline changes vs last version
       updBaseRev: null,          // null = auto (last version); else a commit hash to compare the working copy against
@@ -4801,6 +4821,11 @@ const webAppHTML = `<!doctype html>
     const filesEl = document.getElementById("files");
     const favoritesEl = document.getElementById("favorites");
     const aidlcToggleEl = document.getElementById("aidlcToggle");
+    const aidlcSortEl = document.getElementById("aidlcSort");
+    const aidlcSortStageEl = document.getElementById("aidlcSortStage");
+    const aidlcSortRecentEl = document.getElementById("aidlcSortRecent");
+    if (aidlcSortStageEl) aidlcSortStageEl.addEventListener("click", function () { setAidlcSort("stage"); });
+    if (aidlcSortRecentEl) aidlcSortRecentEl.addEventListener("click", function () { setAidlcSort("recent"); });
     const recentFilesEl = document.getElementById("recentFiles");
     const recentDirsEl = document.getElementById("recentDirs");
     const searchInputEl = document.getElementById("searchInput");
@@ -5712,29 +5737,37 @@ const webAppHTML = `<!doctype html>
       }
 
       for (const entry of filteredEntries) {
-        const button = document.createElement("button");
         const directFlag = state.fileFlags[entry.path] || "";
         const aggFlag = entry.is_dir ? (dirAggregateFlag[entry.path] || "") : "";
         const flag = directFlag || aggFlag;
-        button.className = "file"
-          + (entry.path === state.selectedPath ? " active" : "")
-          + (flag ? " has-flag flag-" + flag : "")
-          + (aggFlag && !directFlag ? " flag-aggregate" : "");
-        button.dataset.meta = describeEntryMeta(entry);
-        if (flag) {
-          button.dataset.flag = flag;
-        }
-        button.innerHTML = '<span class="file-name"></span><span class="file-meta"><span class="update-badge"></span><span class="file-size"></span></span>';
-        button.querySelector(".file-name").innerHTML = fileNameHTML(entry.name, state.searchQuery.trim());
-        button.querySelector(".file-size").textContent = entry.is_dir ? "" : (function () {
-          const t = entryModTimestamp(entry);
-          return t ? relativeTime(t) : "";
-        })();
-        button.onclick = () => entry.is_dir
-          ? loadDir(entry.path, { historyMode: "push" })
-          : selectFile(entry.path, { historyMode: "push" });
-        filesEl.appendChild(button);
+        const aggregate = !!(aggFlag && !directFlag);
+        filesEl.appendChild(makeFileButton(entry, entry.name, flag, aggregate));
       }
+    }
+
+    // makeFileButton builds one sidebar file/dir row. displayName overrides the
+    // shown text (default entry.name); flag is the resolved flag class; aggregate
+    // marks a dir whose flag comes from a changed child.
+    function makeFileButton(entry, displayName, flag, aggregate) {
+      const button = document.createElement("button");
+      button.className = "file"
+        + (entry.path === state.selectedPath ? " active" : "")
+        + (flag ? " has-flag flag-" + flag : "")
+        + (aggregate ? " flag-aggregate" : "");
+      button.dataset.meta = describeEntryMeta(entry);
+      if (flag) {
+        button.dataset.flag = flag;
+      }
+      button.innerHTML = '<span class="file-name"></span><span class="file-meta"><span class="update-badge"></span><span class="file-size"></span></span>';
+      button.querySelector(".file-name").innerHTML = fileNameHTML(displayName != null ? displayName : entry.name, state.searchQuery.trim());
+      button.querySelector(".file-size").textContent = entry.is_dir ? "" : (function () {
+        const ts = entryModTimestamp(entry);
+        return ts ? relativeTime(ts) : "";
+      })();
+      button.onclick = () => entry.is_dir
+        ? loadDir(entry.path, { historyMode: "push" })
+        : selectFile(entry.path, { historyMode: "push" });
+      return button;
     }
 
     // ── Drag-to-reorder favorites (sidebar + All-favorites modal) ──
@@ -6061,16 +6094,155 @@ const webAppHTML = `<!doctype html>
       const n = (state.aidlc && state.aidlc.files) ? state.aidlc.files.length : 0;
       const stateEl = aidlcToggleEl.querySelector(".aidlc-toggle-state");
       if (stateEl) stateEl.textContent = on ? ("ON · " + n) : "OFF";
+      updateAidlcSortControl();
+    }
+
+    // ── AI-DLC stage grouping ──
+    // Canonical AI-DLC workflow steps (awslabs/aidlc-workflows).
+    var AIDLC_PHASES = {
+      1: { emoji: "🔵", label: "INCEPTION", cls: "aidlc-p1" },
+      2: { emoji: "🟢", label: "CONSTRUCTION", cls: "aidlc-p2" },
+      3: { emoji: "🟡", label: "OPERATIONS", cls: "aidlc-p3" }
+    };
+    var AIDLC_STEPS = [
+      { phase: 1, step: 1, key: "workspace",    label: "Workspace Detection" },
+      { phase: 1, step: 2, key: "reverse",      label: "Reverse Engineering" },
+      { phase: 1, step: 3, key: "requirements", label: "Requirements Analysis" },
+      { phase: 1, step: 4, key: "stories",      label: "User Stories" },
+      { phase: 1, step: 5, key: "planning",     label: "Workflow Planning" },
+      { phase: 1, step: 6, key: "appdesign",    label: "Application Design" },
+      { phase: 1, step: 7, key: "units",        label: "Units Generation" },
+      { phase: 2, step: 1, key: "functional",   label: "Functional Design" },
+      { phase: 2, step: 2, key: "nfrreq",       label: "NFR Requirements" },
+      { phase: 2, step: 3, key: "nfrdesign",    label: "NFR Design" },
+      { phase: 2, step: 4, key: "infra",        label: "Infrastructure Design" },
+      { phase: 2, step: 5, key: "codegen",      label: "Code Generation" },
+      { phase: 2, step: 6, key: "buildtest",    label: "Build & Test" },
+      { phase: 3, step: 1, key: "operations",   label: "Operations" }
+    ];
+
+    // aidlcClassify maps an aidlc-docs-relative path to a step key (above),
+    // "shared" (construction/shared-infrastructure.md), or "other" (unmatched).
+    function aidlcClassify(rel) {
+      var parts = String(rel || "").split("/");
+      var leaf = parts[parts.length - 1];
+      if (parts.length === 1) return "workspace"; // root-level file
+      var p0 = parts[0];
+      if (p0 === "inception") {
+        var s = parts[1];
+        if (s === "reverse-engineering") return "reverse";
+        if (s === "requirements") return "requirements";
+        if (s === "user-stories") return "stories";
+        if (s === "plans") return "planning";
+        if (s === "application-design") return leaf.indexOf("unit-of-work") === 0 ? "units" : "appdesign";
+        return "other";
+      }
+      if (p0 === "construction") {
+        var s2 = parts[1];
+        if (leaf === "shared-infrastructure.md") return "shared";
+        if (s2 === "build-and-test") return "buildtest";
+        if (s2 === "plans") {
+          if (leaf.indexOf("-functional-design-plan") >= 0) return "functional";
+          if (leaf.indexOf("-nfr-requirements-plan") >= 0) return "nfrreq";
+          if (leaf.indexOf("-nfr-design-plan") >= 0) return "nfrdesign";
+          if (leaf.indexOf("-infrastructure-design-plan") >= 0) return "infra";
+          if (leaf.indexOf("-code-generation-plan") >= 0) return "codegen";
+          return "other";
+        }
+        var sf = parts[2]; // construction/{unit}/{stepFolder}/...
+        if (sf === "functional-design") return "functional";
+        if (sf === "nfr-requirements") return "nfrreq";
+        if (sf === "nfr-design") return "nfrdesign";
+        if (sf === "infrastructure-design") return "infra";
+        if (sf === "code") return "codegen";
+        return "other";
+      }
+      if (p0 === "operations") return "operations";
+      return "other";
+    }
+
+    // renderAidlcGrouped draws AI-DLC docs grouped by canonical phase/step,
+    // numbered phase·step. All canonical steps are shown; empty steps are dimmed.
+    function renderAidlcGrouped(files) {
+      filesEl.innerHTML = "";
+      var buckets = {};
+      (files || []).forEach(function (f) {
+        var key = aidlcClassify(f.name);
+        (buckets[key] = buckets[key] || []).push(f);
+      });
+      function leafName(name) {
+        var i = name.lastIndexOf("/");
+        return i >= 0 ? name.slice(i + 1) : name;
+      }
+      function appendDocs(entries) {
+        entries.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        entries.forEach(function (entry) {
+          var flag = state.fileFlags[entry.path] || "";
+          var btn = makeFileButton(entry, leafName(entry.name), flag, false);
+          btn.classList.add("aidlc-doc");
+          btn.title = entry.name;
+          filesEl.appendChild(btn);
+        });
+      }
+      function stepHead(num, name, count, empty) {
+        var head = document.createElement("div");
+        head.className = "aidlc-step-head" + (empty ? " aidlc-step-empty" : "");
+        head.innerHTML = '<span class="aidlc-step-num"></span><span class="aidlc-step-name"></span><span class="aidlc-step-count"></span>';
+        head.querySelector(".aidlc-step-num").textContent = num;
+        head.querySelector(".aidlc-step-name").textContent = name;
+        head.querySelector(".aidlc-step-count").textContent = empty ? t("aidlcStepEmpty") : ("(" + count + ")");
+        filesEl.appendChild(head);
+      }
+      var lastPhase = 0;
+      AIDLC_STEPS.forEach(function (st) {
+        if (st.phase !== lastPhase) {
+          lastPhase = st.phase;
+          var ph = AIDLC_PHASES[st.phase];
+          var phHead = document.createElement("div");
+          phHead.className = "aidlc-phase-head " + ph.cls;
+          phHead.innerHTML = '<span class="aidlc-dot"></span><span class="aidlc-phase-name"></span>';
+          phHead.querySelector(".aidlc-phase-name").textContent = ph.emoji + " " + ph.label;
+          filesEl.appendChild(phHead);
+          if (st.phase === 2 && (buckets["shared"] || []).length) {
+            stepHead("2·0", "Shared Infrastructure", buckets["shared"].length, false);
+            appendDocs(buckets["shared"]);
+          }
+        }
+        var docs = buckets[st.key] || [];
+        stepHead(st.phase + "·" + st.step, st.label, docs.length, docs.length === 0);
+        appendDocs(docs);
+      });
+      var other = buckets["other"] || [];
+      if (other.length) {
+        stepHead("·", t("aidlcOther"), other.length, false);
+        appendDocs(other);
+      }
+    }
+
+    function updateAidlcSortControl() {
+      if (!aidlcSortEl) return;
+      var on = !!(state.aidlcMode && state.aidlc && state.aidlc.available);
+      aidlcSortEl.hidden = !on;
+      if (aidlcSortStageEl) aidlcSortStageEl.classList.toggle("active", state.aidlcSort === "stage");
+      if (aidlcSortRecentEl) aidlcSortRecentEl.classList.toggle("active", state.aidlcSort === "recent");
+    }
+    function setAidlcSort(mode) {
+      if (state.aidlcSort === mode) return;
+      state.aidlcSort = mode;
+      try { localStorage.setItem("mdviewer.aidlcSort", mode); } catch (e) {}
+      renderFilePane();
     }
 
     // renderFilePane draws the sidebar file list — the AI-DLC document list when
     // that mode is active, otherwise the current directory.
     function renderFilePane() {
       if (state.aidlcMode && state.aidlc && state.aidlc.available) {
-        renderFiles(state.aidlc.files || []);
+        if (state.aidlcSort === "stage") renderAidlcGrouped(state.aidlc.files || []);
+        else renderFiles(state.aidlc.files || []);
       } else {
         renderFiles(state.entries);
       }
+      updateAidlcSortControl();
     }
 
     function toggleShowAll(buttonId, totalCount) {
@@ -6619,6 +6791,8 @@ const webAppHTML = `<!doctype html>
         accentTitle: "Accent color", accentCustom: "Custom", accentReset: "Default (pink)", accentBtnTitle: "Choose accent color",
         browseBtnTitle: "Browse including subfolders",
         aidlcToggleTitle: "View all AI-DLC-generated documents by most-recently-modified (turns on the aidlc-docs folder, sorted by time)",
+        aidlcSortStage: "By stage", aidlcSortRecent: "Recent",
+        aidlcStepEmpty: "(none yet)", aidlcOther: "Other",
         versionRepoLinkTitle: "Open repository page",
         closeEscTitle: "Close (Esc)",
         lbHint: "Wheel: zoom · Drag: pan · ⌥+Drag: copy region text · Double-click: reset · Esc: close",
@@ -6737,6 +6911,8 @@ const webAppHTML = `<!doctype html>
         accentTitle: "강조 색상", accentCustom: "직접 선택", accentReset: "기본값(핑크)으로", accentBtnTitle: "강조 색상 선택",
         browseBtnTitle: "하위 폴더 포함 탐색",
         aidlcToggleTitle: "AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)",
+        aidlcSortStage: "단계순", aidlcSortRecent: "최근수",
+        aidlcStepEmpty: "(아직 없음)", aidlcOther: "기타",
         versionRepoLinkTitle: "저장소 페이지 열기",
         closeEscTitle: "닫기 (Esc)",
         lbHint: "휠: 확대 · 드래그: 이동 · ⌥+드래그: 영역 글자 복사 · 더블클릭: 초기화 · Esc: 닫기",
