@@ -6424,16 +6424,28 @@ const webAppHTML = `<!doctype html>
       return false;
     }
 
-    // rowKeyFor returns the nearest "row" element for a text node: a code/table
-    // <tr>, else the nearest [data-source-line] block, else previewBodyEl.
+    // rowKeyFor returns the nearest "row" element for a text node. A code/table
+    // <tr> or a [data-source-line] marker takes priority; otherwise the nearest
+    // block-level ancestor (paragraph, heading, list item, blockquote, cell…).
+    // The block-level fallback matters because data-source-line markers are only
+    // added in split/editor mode — in plain preview mode they are absent, and
+    // without this fallback every text node would resolve to previewBodyEl,
+    // collapsing the whole document into a single row (so AND would match terms
+    // anywhere in the file instead of within one block).
+    const _ROW_BLOCK_TAGS = {
+      P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+      BLOCKQUOTE: 1, PRE: 1, TD: 1, TH: 1, DT: 1, DD: 1, FIGCAPTION: 1,
+    };
     function rowKeyFor(node) {
       let el = node.parentElement;
+      let block = null;
       while (el && el !== previewBodyEl) {
         if (el.tagName === "TR") return el;
         if (el.getAttribute && el.getAttribute("data-source-line") != null) return el;
+        if (!block && _ROW_BLOCK_TAGS[el.tagName]) block = el;
         el = el.parentElement;
       }
-      return previewBodyEl;
+      return block || previewBodyEl;
     }
 
     // highlightInFile parses needle into a boolean expression (parseSearchExpr),
