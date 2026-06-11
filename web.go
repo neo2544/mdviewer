@@ -6434,12 +6434,15 @@ const webAppHTML = `<!doctype html>
       return previewBodyEl;
     }
 
-    // highlightInFile finds each occurrence of needle in the RENDERED text of
-    // previewBodyEl and wraps it in <mark class="search-mark">. It searches the
-    // concatenated text of all nodes, so a match that spans inline elements
-    // (e.g. **bold**(rest) → <strong>bold</strong>(rest)) is found and may be
-    // wrapped across several nodes. Returns hit objects (one per match):
-    //   { marks:[el…], line, score, before, after, text }
+    // highlightInFile parses needle into a boolean expression (parseSearchExpr),
+    // groups the RENDERED text of previewBodyEl into "rows" (a code/table <tr> or
+    // a [data-source-line] block, else previewBodyEl), and evaluates the
+    // expression per row. In each qualifying row it wraps every keyword occurrence
+    // in <mark class="search-mark kw-N"> (N = the keyword's color index). A match
+    // spanning inline elements within one row is wrapped across several nodes;
+    // matches spanning two rows are not found (row is the AND/OR unit). Returns
+    // one hit object per wrapped occurrence, in document order:
+    //   { marks:[el…], line, score, term, colorIdx, before, after, text }
     function highlightInFile(needle) {
       clearInFileHighlights();
       const parsed = parseSearchExpr(needle);
