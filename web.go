@@ -3989,10 +3989,41 @@ const webAppHTML = `<!doctype html>
       border-radius: 3px;
       padding: 0 2px;
     }
+    /* Per-keyword colors (cycled modulo 8). Translucent so they read on any theme. */
+    mark.search-mark.kw-0 { background: oklch(0.80 0.15 25 / 0.40); }
+    mark.search-mark.kw-1 { background: oklch(0.83 0.15 70 / 0.40); }
+    mark.search-mark.kw-2 { background: oklch(0.86 0.16 110 / 0.42); }
+    mark.search-mark.kw-3 { background: oklch(0.80 0.14 150 / 0.40); }
+    mark.search-mark.kw-4 { background: oklch(0.80 0.13 200 / 0.40); }
+    mark.search-mark.kw-5 { background: oklch(0.78 0.14 260 / 0.44); }
+    mark.search-mark.kw-6 { background: oklch(0.78 0.16 310 / 0.44); }
+    mark.search-mark.kw-7 { background: oklch(0.80 0.16 350 / 0.42); }
+    /* Focused hit keeps its keyword color; outline + weight mark it current. */
     mark.search-mark.current {
-      background: var(--accent);
-      color: var(--bg);
+      outline: 2px solid var(--text);
+      outline-offset: 0;
+      font-weight: 700;
     }
+    /* Keyword color chips + needle tints share the same hues. */
+    .search-file-chip {
+      display: inline-block; padding: 0 5px; margin-right: 3px;
+      border-radius: 4px; font-size: 10px; line-height: 15px; color: var(--text);
+      max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+    }
+    .search-file-chip.kw-0, .search-hit-needle.kw-0 { background: oklch(0.80 0.15 25 / 0.55); }
+    .search-file-chip.kw-1, .search-hit-needle.kw-1 { background: oklch(0.83 0.15 70 / 0.55); }
+    .search-file-chip.kw-2, .search-hit-needle.kw-2 { background: oklch(0.86 0.16 110 / 0.55); }
+    .search-file-chip.kw-3, .search-hit-needle.kw-3 { background: oklch(0.80 0.14 150 / 0.55); }
+    .search-file-chip.kw-4, .search-hit-needle.kw-4 { background: oklch(0.80 0.13 200 / 0.55); }
+    .search-file-chip.kw-5, .search-hit-needle.kw-5 { background: oklch(0.78 0.14 260 / 0.58); }
+    .search-file-chip.kw-6, .search-hit-needle.kw-6 { background: oklch(0.78 0.16 310 / 0.58); }
+    .search-file-chip.kw-7, .search-hit-needle.kw-7 { background: oklch(0.80 0.16 350 / 0.55); }
+    .search-all-files-btn {
+      display: block; width: 100%; margin-top: 6px; padding: 5px 8px;
+      border: 1px solid var(--line); border-radius: 6px;
+      background: var(--panel); color: var(--text); cursor: pointer; font-size: 12px;
+    }
+    .search-all-files-btn:hover { border-color: var(--accent); }
     .usage-guide {
       background: color-mix(in oklab, var(--accent) 6%, var(--panel));
       border: 1px dashed color-mix(in oklab, var(--accent) 45%, var(--line));
@@ -6297,6 +6328,110 @@ const webAppHTML = `<!doctype html>
         }
       }
       walk(root);
+    }
+
+    // parseSearchExpr mirrors the Go parser (search_expr.go): same grammar,
+    // same precedence (AND binds tighter than OR), quotes escape operators,
+    // unbalanced input falls back to a literal whole-string term. Returns
+    // { root, terms, colorOf } where colorOf maps a lowercased term to its
+    // color index (encounter order).
+    function parseSearchExpr(q) {
+      const toks = [];
+      let buf = "";
+      function flush() {
+        const s = buf.trim();
+        buf = "";
+        if (s) toks.push({ kind: "term", text: s.toLowerCase() });
+      }
+      const runes = Array.from(q || "");
+      for (let i = 0; i < runes.length; i++) {
+        const c = runes[i];
+        if (c === '"') {
+          let j = i + 1, inner = "";
+          while (j < runes.length && runes[j] !== '"') { inner += runes[j]; j++; }
+          if (inner.trim()) { flush(); toks.push({ kind: "term", text: inner.toLowerCase() }); }
+          i = j;
+        } else if (c === "&") { flush(); toks.push({ kind: "and" }); }
+        else if (c === "|") { flush(); toks.push({ kind: "or" }); }
+        else if (c === "(") { flush(); toks.push({ kind: "lparen" }); }
+        else if (c === ")") { flush(); toks.push({ kind: "rparen" }); }
+        else { buf += c; }
+      }
+      flush();
+      const st = { pos: 0, err: false };
+      function peek() { return st.pos < toks.length ? toks[st.pos] : null; }
+      function parseAtom() {
+        const t = peek();
+        if (!t) return null;
+        if (t.kind === "lparen") {
+          st.pos++;
+          const inner = parseOr();
+          const close = peek();
+          if (!inner || !close || close.kind !== "rparen") { st.err = true; return null; }
+          st.pos++;
+          return inner;
+        }
+        if (t.kind === "term") { st.pos++; return { op: "term", text: t.text }; }
+        return null;
+      }
+      function parseAnd() {
+        let left = parseAtom();
+        if (!left) return null;
+        const kids = [left];
+        for (let t = peek(); t && t.kind === "and"; t = peek()) {
+          st.pos++;
+          const r = parseAtom();
+          if (!r) { st.err = true; return null; }
+          kids.push(r);
+        }
+        return kids.length === 1 ? kids[0] : { op: "and", kids: kids };
+      }
+      function parseOr() {
+        let left = parseAnd();
+        if (!left) { st.err = true; return null; }
+        const kids = [left];
+        for (let t = peek(); t && t.kind === "or"; t = peek()) {
+          st.pos++;
+          const r = parseAnd();
+          if (!r) { st.err = true; return null; }
+          kids.push(r);
+        }
+        return kids.length === 1 ? kids[0] : { op: "or", kids: kids };
+      }
+      let root = parseOr();
+      if (!root || st.err || st.pos !== toks.length) {
+        const lit = (q || "").trim().toLowerCase();
+        root = { op: "term", text: lit };
+      }
+      const terms = [], colorOf = new Map();
+      (function walk(n) {
+        if (n.op === "term") {
+          if (n.text && !colorOf.has(n.text)) { colorOf.set(n.text, terms.length); terms.push(n.text); }
+          return;
+        }
+        for (const k of n.kids) walk(k);
+      })(root);
+      return { root: root, terms: terms, colorOf: colorOf };
+    }
+
+    // evalExpr mirrors exprNode.eval in Go.
+    function evalExpr(node, lowerText) {
+      if (node.op === "term") return !!node.text && lowerText.indexOf(node.text) >= 0;
+      if (node.op === "and") { for (const k of node.kids) if (!evalExpr(k, lowerText)) return false; return true; }
+      if (node.op === "or") { for (const k of node.kids) if (evalExpr(k, lowerText)) return true; return false; }
+      return false;
+    }
+
+    // rowKeyFor returns the nearest "row" element for a text node: a code/table
+    // <tr>, else the nearest [data-source-line] block, else previewBodyEl.
+    function rowKeyFor(node) {
+      let el = node.parentElement;
+      while (el && el !== previewBodyEl) {
+        if (el.tagName === "TR") return el;
+        if (el.getAttribute && el.getAttribute("data-source-line") != null) return el;
+        el = el.parentElement;
+      }
+      return previewBodyEl;
     }
 
     // highlightInFile finds each occurrence of needle in the RENDERED text of
