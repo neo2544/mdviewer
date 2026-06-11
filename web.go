@@ -6310,8 +6310,9 @@ const webAppHTML = `<!doctype html>
       state.searchInFileFocus = -1;
     }
 
-    // walkTextNodes yields every text node descendant of root that has
+    // walkTextNodes yields every HTML text node descendant of root that has
     // non-empty content and isn't inside a SCRIPT/STYLE/MARK element.
+    const HTML_NS = "http://www.w3.org/1999/xhtml";
     function walkTextNodes(root, visit) {
       // Depth-first IN DOCUMENT ORDER. The previous stack-based version
       // pushed sibling elements onto a LIFO and popped them in reverse,
@@ -6322,10 +6323,23 @@ const webAppHTML = `<!doctype html>
       function walk(node) {
         for (const child of node.childNodes) {
           if (child.nodeType === 1) {
+            // tagName is UPPER-cased for HTML elements but kept as authored
+            // (lowercase) for SVG/namespaced elements, so normalise before
+            // the SKIP lookup — otherwise an SVG <style> ("style") slips
+            // through the HTML-cased {STYLE} guard and its CSS text gets
+            // wrapped in <mark>, corrupting a mermaid diagram (black boxes).
+            const tag = (child.tagName || "").toUpperCase();
             // Skip the code line-number gutter — it's not searchable content.
-            if (!SKIP[child.tagName] && !(child.classList && child.classList.contains("hljs-ln-numbers"))) walk(child);
+            if (!SKIP[tag] && !(child.classList && child.classList.contains("hljs-ln-numbers"))) walk(child);
           } else if (child.nodeType === 3) {
-            if (child.nodeValue && child.nodeValue.length) visit(child);
+            // Only HTML text is highlightable. We still descend into a rendered
+            // SVG (mermaid) so HTML labels inside a <foreignObject> get matched,
+            // but SVG-native text (<text>/<tspan>/<style>) is skipped: an HTML
+            // <mark> can't be inserted there without breaking the diagram.
+            if (child.nodeValue && child.nodeValue.length) {
+              const p = child.parentNode;
+              if (!p || !p.namespaceURI || p.namespaceURI === HTML_NS) visit(child);
+            }
           }
         }
       }
