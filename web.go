@@ -4472,6 +4472,7 @@ const webAppHTML = `<!doctype html>
               <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span><span id="searchFolderTitle">Same folder</span></div>
               <div class="search-sort" role="group" aria-label="Search scope">
                 <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" data-i18n="scopeFolder" data-i18n-title="scopeFolderTitle" title="Search the current folder only">This folder</button>
+                <button type="button" class="search-sort-btn" id="searchScopeTree" data-scope="tree" data-i18n="scopeTree" data-i18n-title="scopeTreeTitle" title="Search this folder and all subfolders">Subfolder</button>
                 <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" data-i18n="scopeGit" data-i18n-title="scopeGitTitle" title="Search the whole enclosing Git repo">Git repo</button>
               </div>
             </div>
@@ -4803,7 +4804,8 @@ const webAppHTML = `<!doctype html>
       editBaseModTime: "",
       editDirty: false,
       restoringHistory: false,
-      folderSearchScope: (localStorage.getItem("mdviewer.folderSearchScope") === "git") ? "git" : "folder",
+      folderSearchScope: (function () { const v = localStorage.getItem("mdviewer.folderSearchScope"); return (v === "git" || v === "tree") ? v : "folder"; })(),
+      folderSearchAllFiles: false,
       fbScope: (localStorage.getItem("mdviewer.fbScope") === "git") ? "git" : "folder",
       gitRepoRoot: null, // null = unknown, "" = not a repo, else repo root path
       gitRepoCwd: null,  // cwd the gitRepoRoot was resolved for
@@ -6681,17 +6683,20 @@ const webAppHTML = `<!doctype html>
       if (searchFolderAbort) { try { searchFolderAbort.abort(); } catch (e) {} }
       const ctrl = new AbortController();
       searchFolderAbort = ctrl;
+      const parsed = parseSearchExpr(needle);
+      const scope = state.folderSearchScope;
+      const recursive = (scope === "tree" || scope === "git");
       // Git-wide search can take a while; show a loading hint until results land.
       const loadingEl = document.createElement("div");
       loadingEl.className = "search-empty";
-      loadingEl.textContent = state.folderSearchScope === "git"
-        ? t("searchLoadingGit") : t("searchLoading");
+      loadingEl.textContent = scope === "git" ? t("searchLoadingGit") : t("searchLoading");
       searchFolderHitsEl.appendChild(loadingEl);
       let results = [];
       try {
         const url = "/api/search?dir=" + encodeURIComponent(state.cwd || "") +
                     "&q=" + encodeURIComponent(needle) +
-                    (state.folderSearchScope === "git" ? "&scope=git" : "");
+                    (scope === "git" ? "&scope=git" : scope === "tree" ? "&scope=tree" : "") +
+                    (recursive && state.folderSearchAllFiles ? "&allFiles=1" : "");
         const r = await fetch(url, { signal: ctrl.signal });
         if (!r.ok) throw new Error(String(r.status));
         results = await r.json();
@@ -6715,23 +6720,45 @@ const webAppHTML = `<!doctype html>
         e.className = "search-empty";
         e.textContent = "No matches in other files.";
         searchFolderHitsEl.appendChild(e);
-        return;
+      } else {
+        for (const r of filtered) {
+          const row = document.createElement("div");
+          row.className = "search-file-row";
+          row.title = r.path;
+          const name = document.createElement("span");
+          name.textContent = r.path.split("/").pop();
+          row.appendChild(name);
+          // Color chips: one per matched keyword, tinted to match in-file colors.
+          const terms = r.matchedTerms || [];
+          for (const term of terms) {
+            const idx = parsed.colorOf.has(term) ? (parsed.colorOf.get(term) % 8) : 0;
+            const chip = document.createElement("span");
+            chip.className = "search-file-chip kw-" + idx;
+            chip.textContent = term;
+            chip.title = term;
+            row.appendChild(chip);
+          }
+          const count = document.createElement("span");
+          count.className = "search-file-count";
+          count.textContent = r.count + (r.count === 1 ? " match" : " matches");
+          row.appendChild(count);
+          row.addEventListener("click", function () {
+            selectFile(r.path, { historyMode: "push" });
+          });
+          searchFolderHitsEl.appendChild(row);
+        }
       }
-      for (const r of filtered) {
-        const row = document.createElement("div");
-        row.className = "search-file-row";
-        row.title = r.path;
-        const name = document.createElement("span");
-        name.textContent = r.path.split("/").pop();
-        const count = document.createElement("span");
-        count.className = "search-file-count";
-        count.textContent = r.count + (r.count === 1 ? " match" : " matches");
-        row.appendChild(name);
-        row.appendChild(count);
-        row.addEventListener("click", function () {
-          selectFile(r.path, { historyMode: "push" });
+      // "Search all files" button: only for recursive scopes still in docs-only mode.
+      if (recursive && !state.folderSearchAllFiles) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "search-all-files-btn";
+        btn.textContent = t("searchAllFiles");
+        btn.addEventListener("click", function () {
+          state.folderSearchAllFiles = true;
+          runFolderSearch(state.searchQueryRight);
         });
-        searchFolderHitsEl.appendChild(row);
+        searchFolderHitsEl.appendChild(btn);
       }
     }
 
@@ -9077,6 +9104,7 @@ const webAppHTML = `<!doctype html>
     let searchDebounce = null;
     searchPanelInputEl.addEventListener("input", function () {
       state.searchQueryRight = searchPanelInputEl.value || "";
+      state.folderSearchAllFiles = false; // a new query resets the docs-only filter
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(function () {
         runInFileSearch(state.searchQueryRight);
@@ -9086,22 +9114,28 @@ const webAppHTML = `<!doctype html>
 
     // Folder-search scope: current folder vs the whole enclosing git repo.
     function applyFolderScope(scope) {
-      let next = (scope === "git") ? "git" : "folder";
+      let next = (scope === "git") ? "git" : (scope === "tree") ? "tree" : "folder";
       if (next === "git" && state.gitRepoRoot === "") next = "folder"; // not a repo → ignore git
       state.folderSearchScope = next;
+      state.folderSearchAllFiles = false; // scope change resets the docs-only filter
       try { localStorage.setItem("mdviewer.folderSearchScope", state.folderSearchScope); } catch (e) {}
       const btnFolder = document.getElementById("searchScopeFolder");
+      const btnTree = document.getElementById("searchScopeTree");
       const btnGit = document.getElementById("searchScopeGit");
       const titleEl = document.getElementById("searchFolderTitle");
       if (btnFolder) btnFolder.classList.toggle("active", state.folderSearchScope === "folder");
+      if (btnTree) btnTree.classList.toggle("active", state.folderSearchScope === "tree");
       if (btnGit) btnGit.classList.toggle("active", state.folderSearchScope === "git");
-      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? t("folderGit") : t("folderSame");
+      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? t("folderGit")
+                                       : state.folderSearchScope === "tree" ? t("folderTree") : t("folderSame");
       if (state.searchQueryRight) runFolderSearch(state.searchQueryRight);
     }
     {
       const btnFolder = document.getElementById("searchScopeFolder");
+      const btnTree = document.getElementById("searchScopeTree");
       const btnGit = document.getElementById("searchScopeGit");
       if (btnFolder) btnFolder.addEventListener("click", function () { applyFolderScope("folder"); });
+      if (btnTree) btnTree.addEventListener("click", function () { applyFolderScope("tree"); });
       if (btnGit) btnGit.addEventListener("click", function () { applyFolderScope("git"); });
       applyFolderScope(state.folderSearchScope); // set initial active button + title
     }
