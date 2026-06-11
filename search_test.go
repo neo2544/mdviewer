@@ -121,12 +121,13 @@ func TestSearchDirShallowVsRecursive(t *testing.T) {
 	_ = os.MkdirAll(nm, 0o755)
 	writeTestFile(t, nm, "pkg.md", "needle vendored\n")
 
-	shallow := searchDirShallow(root, "needle")
+	exprNeedle, termsNeedle := parseSearchExpr("needle")
+	shallow := searchDirShallow(root, exprNeedle, termsNeedle)
 	if len(shallow) != 1 || filepath.Base(shallow[0].Path) != "top.md" {
 		t.Fatalf("shallow = %+v, want only top.md", shallow)
 	}
 
-	rec := searchTreeRecursive(root, "needle", 4000)
+	rec := searchTreeRecursive(root, exprNeedle, termsNeedle, 4000, false)
 	got := map[string]bool{}
 	for _, r := range rec {
 		got[filepath.Base(r.Path)] = true
@@ -208,5 +209,51 @@ func TestReorderFavoritesRejectsGET(t *testing.T) {
 	s.routes().ServeHTTP(rec, httptest.NewRequest("GET", "/api/favorites/reorder", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestSearchTreeDocsOnly(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "doc.md", "needle in markdown\n")
+	writeTestFile(t, root, "code.go", "needle in code\n")
+	expr, terms := parseSearchExpr("needle")
+
+	docs := searchTreeRecursive(root, expr, terms, 4000, true)
+	got := map[string]bool{}
+	for _, r := range docs {
+		got[filepath.Base(r.Path)] = true
+	}
+	if !got["doc.md"] || got["code.go"] {
+		t.Errorf("docsOnly should find doc.md and skip code.go: %+v", got)
+	}
+
+	all := searchTreeRecursive(root, expr, terms, 4000, false)
+	got = map[string]bool{}
+	for _, r := range all {
+		got[filepath.Base(r.Path)] = true
+	}
+	if !got["doc.md"] || !got["code.go"] {
+		t.Errorf("allFiles should find both: %+v", got)
+	}
+}
+
+func TestSearchExprAndAcrossLines(t *testing.T) {
+	root := t.TempDir()
+	// a and b on different lines -> AND must NOT match this file.
+	writeTestFile(t, root, "split.md", "alpha here\nbeta there\n")
+	// a and b on the SAME line -> AND matches.
+	writeTestFile(t, root, "together.md", "alpha and beta same line\n")
+	expr, terms := parseSearchExpr("alpha&beta")
+
+	res := searchDirShallow(root, expr, terms)
+	got := map[string]bool{}
+	for _, r := range res {
+		got[filepath.Base(r.Path)] = true
+	}
+	if got["split.md"] {
+		t.Error("AND must not match keywords on different lines")
+	}
+	if !got["together.md"] {
+		t.Error("AND must match keywords on the same line")
 	}
 }

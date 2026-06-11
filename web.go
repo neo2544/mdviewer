@@ -13330,9 +13330,10 @@ const searchSnippetLen = 60
 const searchMaxFileBytes = 2 * 1024 * 1024 // skip files larger than 2 MB
 
 type searchResult struct {
-	Path     string   `json:"path"`
-	Count    int      `json:"count"`
-	Snippets []string `json:"snippets"`
+	Path         string   `json:"path"`
+	Count        int      `json:"count"`
+	Snippets     []string `json:"snippets"`
+	MatchedTerms []string `json:"matchedTerms"`
 }
 
 // isProbablyText returns true if the byte slice looks like text content.
@@ -13863,8 +13864,10 @@ func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// searchFileForNeedle returns a searchResult for full when it contains needle.
-func searchFileForNeedle(full, needle string) (searchResult, bool) {
+// searchFileForExpr returns a searchResult for full when at least one line
+// satisfies expr. Count is the number of satisfying lines; MatchedTerms lists
+// which distinct terms appear anywhere in the file (for the UI color chips).
+func searchFileForExpr(full string, expr *exprNode, terms []string) (searchResult, bool) {
 	info, err := os.Stat(full)
 	if err != nil || info.Size() > searchMaxFileBytes {
 		return searchResult{}, false
@@ -13873,18 +13876,43 @@ func searchFileForNeedle(full, needle string) (searchResult, bool) {
 	if err != nil || !isProbablyText(data) {
 		return searchResult{}, false
 	}
-	lower := strings.ToLower(string(data))
-	count := strings.Count(lower, needle)
+	text := string(data)
+	count := 0
+	matched := map[string]bool{}
+	for _, line := range strings.Split(text, "\n") {
+		ll := strings.ToLower(line)
+		if expr.eval(ll) {
+			count++
+		}
+		for _, term := range terms {
+			if !matched[term] && strings.Contains(ll, term) {
+				matched[term] = true
+			}
+		}
+	}
 	if count == 0 {
 		return searchResult{}, false
 	}
-	return searchResult{Path: full, Count: count, Snippets: collectSnippets(string(data), lower, needle, searchMaxSnippets)}, true
+	mt := []string{}
+	for _, term := range terms {
+		if matched[term] {
+			mt = append(mt, term)
+		}
+	}
+	snippetNeedle := ""
+	if len(mt) > 0 {
+		snippetNeedle = mt[0]
+	}
+	lower := strings.ToLower(text)
+	return searchResult{
+		Path:         full,
+		Count:        count,
+		Snippets:     collectSnippets(text, lower, snippetNeedle, searchMaxSnippets),
+		MatchedTerms: mt,
+	}, true
 }
 
-// searchDirShallow searches only the immediate files of dir (the "Same folder"
-// scope). searchTreeRecursive walks the whole tree under root (the "Git repo"
-// scope), skipping hidden / heavy directories and capping the files scanned.
-func searchDirShallow(dir, needle string) []searchResult {
+func searchDirShallow(dir string, expr *exprNode, terms []string) []searchResult {
 	out := []searchResult{}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -13894,23 +13922,23 @@ func searchDirShallow(dir, needle string) []searchResult {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if res, ok := searchFileForNeedle(filepath.Join(dir, e.Name()), needle); ok {
+		if res, ok := searchFileForExpr(filepath.Join(dir, e.Name()), expr, terms); ok {
 			out = append(out, res)
 		}
 	}
 	return out
 }
 
-func searchTreeRecursive(root, needle string, maxFiles int) []searchResult {
+func searchTreeRecursive(dirRoot string, expr *exprNode, terms []string, maxFiles int, docsOnly bool) []searchResult {
 	out := []searchResult{}
 	scanned := 0
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(dirRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
+			if path != dirRoot && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -13918,11 +13946,14 @@ func searchTreeRecursive(root, needle string, maxFiles int) []searchResult {
 		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
+		if docsOnly && !isDocExt(d.Name()) {
+			return nil
+		}
 		if scanned >= maxFiles {
 			return filepath.SkipAll
 		}
 		scanned++
-		if res, ok := searchFileForNeedle(path, needle); ok {
+		if res, ok := searchFileForExpr(path, expr, terms); ok {
 			out = append(out, res)
 		}
 		return nil
@@ -13945,18 +13976,21 @@ func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid dir", http.StatusBadRequest)
 		return
 	}
-	needle := strings.ToLower(q)
+	expr, terms := parseSearchExpr(q)
+	allFiles := r.URL.Query().Get("allFiles") == "1"
 
 	var out []searchResult
-	if r.URL.Query().Get("scope") == "git" {
-		// Recurse from the enclosing git repo root (fall back to dir).
+	switch r.URL.Query().Get("scope") {
+	case "git":
 		root := s.gitRoot(r.Context(), abs)
 		if root == "" {
 			root = abs
 		}
-		out = searchTreeRecursive(root, needle, searchMaxGitFiles)
-	} else {
-		out = searchDirShallow(abs, needle)
+		out = searchTreeRecursive(root, expr, terms, searchMaxGitFiles, !allFiles)
+	case "tree":
+		out = searchTreeRecursive(abs, expr, terms, searchMaxGitFiles, !allFiles)
+	default:
+		out = searchDirShallow(abs, expr, terms)
 	}
 
 	// Most matches first.
