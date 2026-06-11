@@ -257,3 +257,48 @@ func TestSearchExprAndAcrossLines(t *testing.T) {
 		t.Error("AND must match keywords on the same line")
 	}
 }
+
+// MatchedTerms feeds the folder-result color chips; it must list exactly the
+// distinct terms present in the file (encounter order), regardless of operator.
+func TestSearchMatchedTerms(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "both.md", "alpha and beta on one line\n")
+	writeTestFile(t, root, "onlyalpha.md", "alpha alone here\n")
+
+	// AND: only both.md qualifies, and it reports both terms.
+	exprAnd, termsAnd := parseSearchExpr("alpha&beta")
+	got := map[string][]string{}
+	for _, r := range searchDirShallow(root, exprAnd, termsAnd) {
+		got[filepath.Base(r.Path)] = r.MatchedTerms
+	}
+	if mt := got["both.md"]; len(mt) != 2 || mt[0] != "alpha" || mt[1] != "beta" {
+		t.Errorf("both.md MatchedTerms = %v, want [alpha beta]", mt)
+	}
+	if _, ok := got["onlyalpha.md"]; ok {
+		t.Error("onlyalpha.md should not qualify for alpha&beta")
+	}
+
+	// OR: a file matching only one branch reports only the present term.
+	exprOr, termsOr := parseSearchExpr("alpha|beta")
+	got2 := map[string][]string{}
+	for _, r := range searchDirShallow(root, exprOr, termsOr) {
+		got2[filepath.Base(r.Path)] = r.MatchedTerms
+	}
+	if mt := got2["onlyalpha.md"]; len(mt) != 1 || mt[0] != "alpha" {
+		t.Errorf("onlyalpha.md MatchedTerms = %v, want [alpha]", mt)
+	}
+	if mt := got2["both.md"]; len(mt) != 2 {
+		t.Errorf("both.md MatchedTerms = %v, want both terms", mt)
+	}
+}
+
+// Count is the number of satisfying lines, not occurrences.
+func TestSearchCountMatchingLines(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "multi.md", "needle one\nno match\nneedle two\nneedle three\n")
+	expr, terms := parseSearchExpr("needle")
+	res := searchDirShallow(root, expr, terms)
+	if len(res) != 1 || res[0].Count != 3 {
+		t.Fatalf("Count = %+v, want a single file with 3 matching lines", res)
+	}
+}
