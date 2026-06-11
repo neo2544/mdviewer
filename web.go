@@ -3989,10 +3989,41 @@ const webAppHTML = `<!doctype html>
       border-radius: 3px;
       padding: 0 2px;
     }
+    /* Per-keyword colors (cycled modulo 8). Translucent so they read on any theme. */
+    mark.search-mark.kw-0 { background: oklch(0.80 0.15 25 / 0.40); }
+    mark.search-mark.kw-1 { background: oklch(0.83 0.15 70 / 0.40); }
+    mark.search-mark.kw-2 { background: oklch(0.86 0.16 110 / 0.42); }
+    mark.search-mark.kw-3 { background: oklch(0.80 0.14 150 / 0.40); }
+    mark.search-mark.kw-4 { background: oklch(0.80 0.13 200 / 0.40); }
+    mark.search-mark.kw-5 { background: oklch(0.78 0.14 260 / 0.44); }
+    mark.search-mark.kw-6 { background: oklch(0.78 0.16 310 / 0.44); }
+    mark.search-mark.kw-7 { background: oklch(0.80 0.16 350 / 0.42); }
+    /* Focused hit keeps its keyword color; outline + weight mark it current. */
     mark.search-mark.current {
-      background: var(--accent);
-      color: var(--bg);
+      outline: 2px solid var(--text);
+      outline-offset: 0;
+      font-weight: 700;
     }
+    /* Keyword color chips + needle tints share the same hues. */
+    .search-file-chip {
+      display: inline-block; padding: 0 5px; margin-right: 3px;
+      border-radius: 4px; font-size: 10px; line-height: 15px; color: var(--text);
+      max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+    }
+    .search-file-chip.kw-0, .search-hit-needle.kw-0 { background: oklch(0.80 0.15 25 / 0.55); }
+    .search-file-chip.kw-1, .search-hit-needle.kw-1 { background: oklch(0.83 0.15 70 / 0.55); }
+    .search-file-chip.kw-2, .search-hit-needle.kw-2 { background: oklch(0.86 0.16 110 / 0.55); }
+    .search-file-chip.kw-3, .search-hit-needle.kw-3 { background: oklch(0.80 0.14 150 / 0.55); }
+    .search-file-chip.kw-4, .search-hit-needle.kw-4 { background: oklch(0.80 0.13 200 / 0.55); }
+    .search-file-chip.kw-5, .search-hit-needle.kw-5 { background: oklch(0.78 0.14 260 / 0.58); }
+    .search-file-chip.kw-6, .search-hit-needle.kw-6 { background: oklch(0.78 0.16 310 / 0.58); }
+    .search-file-chip.kw-7, .search-hit-needle.kw-7 { background: oklch(0.80 0.16 350 / 0.55); }
+    .search-all-files-btn {
+      display: block; width: 100%; margin-top: 6px; padding: 5px 8px;
+      border: 1px solid var(--line); border-radius: 6px;
+      background: var(--panel); color: var(--text); cursor: pointer; font-size: 12px;
+    }
+    .search-all-files-btn:hover { border-color: var(--accent); }
     .usage-guide {
       background: color-mix(in oklab, var(--accent) 6%, var(--panel));
       border: 1px dashed color-mix(in oklab, var(--accent) 45%, var(--line));
@@ -4441,6 +4472,7 @@ const webAppHTML = `<!doctype html>
               <div class="search-section-title"><span class="sec-ico">&#x1F4C1;</span><span id="searchFolderTitle">Same folder</span></div>
               <div class="search-sort" role="group" aria-label="Search scope">
                 <button type="button" class="search-sort-btn active" id="searchScopeFolder" data-scope="folder" data-i18n="scopeFolder" data-i18n-title="scopeFolderTitle" title="Search the current folder only">This folder</button>
+                <button type="button" class="search-sort-btn" id="searchScopeTree" data-scope="tree" data-i18n="scopeTree" data-i18n-title="scopeTreeTitle" title="Search this folder and all subfolders">Subfolder</button>
                 <button type="button" class="search-sort-btn" id="searchScopeGit" data-scope="git" data-i18n="scopeGit" data-i18n-title="scopeGitTitle" title="Search the whole enclosing Git repo">Git repo</button>
               </div>
             </div>
@@ -4772,7 +4804,8 @@ const webAppHTML = `<!doctype html>
       editBaseModTime: "",
       editDirty: false,
       restoringHistory: false,
-      folderSearchScope: (localStorage.getItem("mdviewer.folderSearchScope") === "git") ? "git" : "folder",
+      folderSearchScope: (function () { const v = localStorage.getItem("mdviewer.folderSearchScope"); return (v === "git" || v === "tree") ? v : "folder"; })(),
+      folderSearchAllFiles: false,
       fbScope: (localStorage.getItem("mdviewer.fbScope") === "git") ? "git" : "folder",
       gitRepoRoot: null, // null = unknown, "" = not a repo, else repo root path
       gitRepoCwd: null,  // cwd the gitRepoRoot was resolved for
@@ -6299,71 +6332,204 @@ const webAppHTML = `<!doctype html>
       walk(root);
     }
 
-    // highlightInFile finds each occurrence of needle in the RENDERED text of
-    // previewBodyEl and wraps it in <mark class="search-mark">. It searches the
-    // concatenated text of all nodes, so a match that spans inline elements
-    // (e.g. **bold**(rest) → <strong>bold</strong>(rest)) is found and may be
-    // wrapped across several nodes. Returns hit objects (one per match):
-    //   { marks:[el…], line, score, before, after, text }
+    // parseSearchExpr mirrors the Go parser (search_expr.go): same grammar,
+    // same precedence (AND binds tighter than OR), quotes escape operators,
+    // unbalanced input falls back to a literal whole-string term. Returns
+    // { root, terms, colorOf } where colorOf maps a lowercased term to its
+    // color index (encounter order).
+    function parseSearchExpr(q) {
+      const toks = [];
+      let buf = "";
+      function flush() {
+        const s = buf.trim();
+        buf = "";
+        if (s) toks.push({ kind: "term", text: s.toLowerCase() });
+      }
+      const runes = Array.from(q || "");
+      for (let i = 0; i < runes.length; i++) {
+        const c = runes[i];
+        if (c === '"') {
+          let j = i + 1, inner = "";
+          while (j < runes.length && runes[j] !== '"') { inner += runes[j]; j++; }
+          if (inner.trim()) { flush(); toks.push({ kind: "term", text: inner.toLowerCase() }); }
+          i = j;
+        } else if (c === "&") { flush(); toks.push({ kind: "and" }); }
+        else if (c === "|") { flush(); toks.push({ kind: "or" }); }
+        else if (c === "(") { flush(); toks.push({ kind: "lparen" }); }
+        else if (c === ")") { flush(); toks.push({ kind: "rparen" }); }
+        else { buf += c; }
+      }
+      flush();
+      const st = { pos: 0, err: false };
+      function peek() { return st.pos < toks.length ? toks[st.pos] : null; }
+      function parseAtom() {
+        const t = peek();
+        if (!t) return null;
+        if (t.kind === "lparen") {
+          st.pos++;
+          const inner = parseOr();
+          const close = peek();
+          if (!inner || !close || close.kind !== "rparen") { st.err = true; return null; }
+          st.pos++;
+          return inner;
+        }
+        if (t.kind === "term") { st.pos++; return { op: "term", text: t.text }; }
+        return null;
+      }
+      function parseAnd() {
+        let left = parseAtom();
+        if (!left) return null;
+        const kids = [left];
+        for (let t = peek(); t && t.kind === "and"; t = peek()) {
+          st.pos++;
+          const r = parseAtom();
+          if (!r) { st.err = true; return null; }
+          kids.push(r);
+        }
+        return kids.length === 1 ? kids[0] : { op: "and", kids: kids };
+      }
+      function parseOr() {
+        let left = parseAnd();
+        if (!left) { st.err = true; return null; }
+        const kids = [left];
+        for (let t = peek(); t && t.kind === "or"; t = peek()) {
+          st.pos++;
+          const r = parseAnd();
+          if (!r) { st.err = true; return null; }
+          kids.push(r);
+        }
+        return kids.length === 1 ? kids[0] : { op: "or", kids: kids };
+      }
+      let root = parseOr();
+      if (!root || st.err || st.pos !== toks.length) {
+        const lit = (q || "").trim().toLowerCase();
+        root = { op: "term", text: lit };
+      }
+      const terms = [], colorOf = new Map();
+      (function walk(n) {
+        if (n.op === "term") {
+          if (n.text && !colorOf.has(n.text)) { colorOf.set(n.text, terms.length); terms.push(n.text); }
+          return;
+        }
+        for (const k of n.kids) walk(k);
+      })(root);
+      return { root: root, terms: terms, colorOf: colorOf };
+    }
+
+    // evalExpr mirrors exprNode.eval in Go.
+    function evalExpr(node, lowerText) {
+      if (node.op === "term") return !!node.text && lowerText.indexOf(node.text) >= 0;
+      if (node.op === "and") { for (const k of node.kids) if (!evalExpr(k, lowerText)) return false; return true; }
+      if (node.op === "or") { for (const k of node.kids) if (evalExpr(k, lowerText)) return true; return false; }
+      return false;
+    }
+
+    // rowKeyFor returns the nearest "row" element for a text node. A code/table
+    // <tr> or a [data-source-line] marker takes priority; otherwise the nearest
+    // block-level ancestor (paragraph, heading, list item, blockquote, cell…).
+    // The block-level fallback matters because data-source-line markers are only
+    // added in split/editor mode — in plain preview mode they are absent, and
+    // without this fallback every text node would resolve to previewBodyEl,
+    // collapsing the whole document into a single row (so AND would match terms
+    // anywhere in the file instead of within one block).
+    const _ROW_BLOCK_TAGS = {
+      P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+      BLOCKQUOTE: 1, PRE: 1, TD: 1, TH: 1, DT: 1, DD: 1, FIGCAPTION: 1,
+    };
+    function rowKeyFor(node) {
+      let el = node.parentElement;
+      let block = null;
+      while (el && el !== previewBodyEl) {
+        if (el.tagName === "TR") return el;
+        if (el.getAttribute && el.getAttribute("data-source-line") != null) return el;
+        if (!block && _ROW_BLOCK_TAGS[el.tagName]) block = el;
+        el = el.parentElement;
+      }
+      return block || previewBodyEl;
+    }
+
+    // highlightInFile parses needle into a boolean expression (parseSearchExpr),
+    // groups the RENDERED text of previewBodyEl into "rows" (a code/table <tr> or
+    // a [data-source-line] block, else previewBodyEl), and evaluates the
+    // expression per row. In each qualifying row it wraps every keyword occurrence
+    // in <mark class="search-mark kw-N"> (N = the keyword's color index). A match
+    // spanning inline elements within one row is wrapped across several nodes;
+    // matches spanning two rows are not found (row is the AND/OR unit). Returns
+    // one hit object per wrapped occurrence, in document order:
+    //   { marks:[el…], line, score, term, colorIdx, before, after, text }
     function highlightInFile(needle) {
       clearInFileHighlights();
-      if (!needle) return [];
-      // 1. Concatenate every text node, keeping an offset → node map.
-      const map = [];
-      let full = "";
+      const parsed = parseSearchExpr(needle);
+      if (!parsed || !parsed.terms.length) { state.searchInFileHits = []; state.searchInFileFocus = -1; return []; }
+      // 1. Group every text node by its "row" element, preserving doc order.
+      const rows = new Map();
       walkTextNodes(previewBodyEl, function (n) {
+        const key = rowKeyFor(n);
+        let row = rows.get(key);
+        if (!row) { row = { text: "", map: [] }; rows.set(key, row); }
         const v = n.nodeValue || "";
-        map.push({ node: n, start: full.length, end: full.length + v.length });
-        full += v;
+        row.map.push({ node: n, start: row.text.length, end: row.text.length + v.length });
+        row.text += v;
       });
-      // 2. Find all matches in the lowercased concatenation.
-      const lowerFull = full.toLowerCase();
-      const lowerNeedle = needle.toLowerCase();
-      const len = needle.length;
-      const matches = [];
-      let idx = lowerFull.indexOf(lowerNeedle);
-      while (idx >= 0) { matches.push([idx, idx + len]); idx = lowerFull.indexOf(lowerNeedle, idx + len); }
-      if (!matches.length) { state.searchInFileHits = []; state.searchInFileFocus = -1; return []; }
-      const hits = matches.map(function (m) {
-        return { marks: [], line: null, score: 0, text: full.slice(m[0], m[1]),
-                 before: full.slice(Math.max(0, m[0] - 40), m[0]), after: full.slice(m[1], m[1] + 40) };
-      });
-      // 3. Wrap each match's spanning segments per original node. We collected
-      //    the map before mutating, and replace each node independently, so the
-      //    offsets stay valid throughout.
-      for (const entry of map) {
-        const node = entry.node, text = node.nodeValue || "";
+      const allHits = [];
+      // 2. Evaluate each row; highlight every term occurrence in qualifying rows.
+      for (const row of rows.values()) {
+        const lower = row.text.toLowerCase();
+        if (!evalExpr(parsed.root, lower)) continue;
         const segs = [];
-        for (let mi = 0; mi < matches.length; mi++) {
-          const a = Math.max(matches[mi][0], entry.start), b = Math.min(matches[mi][1], entry.end);
-          if (a < b) segs.push([a - entry.start, b - entry.start, mi]);
+        for (const term of parsed.terms) {
+          if (!term) continue;
+          let i = lower.indexOf(term);
+          while (i >= 0) { segs.push([i, i + term.length, term]); i = lower.indexOf(term, i + term.length); }
         }
         if (!segs.length) continue;
-        const parent = node.parentNode;
-        if (!parent) continue;
-        const frag = document.createDocumentFragment();
-        let cur = 0;
-        for (const seg of segs) {
-          if (seg[0] > cur) frag.appendChild(document.createTextNode(text.slice(cur, seg[0])));
-          const mark = document.createElement("mark");
-          mark.className = "search-mark";
-          mark.textContent = text.slice(seg[0], seg[1]);
-          frag.appendChild(mark);
-          hits[seg[2]].marks.push(mark);
-          cur = seg[1];
+        // Earliest start first; on a tie, the longer match wins. Drop overlaps.
+        segs.sort(function (a, b) { return a[0] - b[0] || b[1] - a[1]; });
+        const chosen = [];
+        let lastEnd = -1;
+        for (const s of segs) { if (s[0] >= lastEnd) { chosen.push(s); lastEnd = s[1]; } }
+        const rowHits = chosen.map(function (s) {
+          return { marks: [], line: null, score: 0, term: s[2], colorIdx: parsed.colorOf.get(s[2]) % 8,
+                   text: row.text.slice(s[0], s[1]),
+                   before: row.text.slice(Math.max(0, s[0] - 40), s[0]),
+                   after: row.text.slice(s[1], s[1] + 40) };
+        });
+        // 3. Wrap each match's spanning segments per original node within the row.
+        for (const entry of row.map) {
+          const node = entry.node, text = node.nodeValue || "";
+          const local = [];
+          for (let ci = 0; ci < chosen.length; ci++) {
+            const a = Math.max(chosen[ci][0], entry.start), b = Math.min(chosen[ci][1], entry.end);
+            if (a < b) local.push([a - entry.start, b - entry.start, ci]);
+          }
+          if (!local.length) continue;
+          const parent = node.parentNode;
+          if (!parent) continue;
+          const frag = document.createDocumentFragment();
+          let cur = 0;
+          for (const seg of local) {
+            if (seg[0] > cur) frag.appendChild(document.createTextNode(text.slice(cur, seg[0])));
+            const mark = document.createElement("mark");
+            mark.className = "search-mark kw-" + rowHits[seg[2]].colorIdx;
+            mark.textContent = text.slice(seg[0], seg[1]);
+            frag.appendChild(mark);
+            rowHits[seg[2]].marks.push(mark);
+            cur = seg[1];
+          }
+          if (cur < text.length) frag.appendChild(document.createTextNode(text.slice(cur)));
+          parent.replaceChild(frag, node);
         }
-        if (cur < text.length) frag.appendChild(document.createTextNode(text.slice(cur)));
-        parent.replaceChild(frag, node);
+        for (const h of rowHits) allHits.push(h);
       }
       // 4. Resolve line + priority per hit (from its first mark).
-      for (const h of hits) {
+      for (const h of allHits) {
         const m0 = h.marks[0];
         h.line = m0 ? lineNumberForHit(m0) : null;
         h.score = m0 ? priorityForHit(h) : 0;
       }
-      state.searchInFileHits = hits;
+      state.searchInFileHits = allHits;
       state.searchInFileFocus = -1;
-      return hits;
+      return allHits;
     }
 
     // focusHit scrolls to the i-th in-file hit and emphasises it.
@@ -6495,7 +6661,7 @@ const webAppHTML = `<!doctype html>
         const pre = document.createElement("span");
         pre.textContent = (ctxBefore.length > 30 ? "…" : "") + ctxBefore.slice(-30);
         const hit = document.createElement("span");
-        hit.className = "search-hit-needle";
+        hit.className = "search-hit-needle" + (h.colorIdx != null ? " kw-" + h.colorIdx : "");
         hit.textContent = h.text;
         const post = document.createElement("span");
         post.textContent = ctxAfter.slice(0, 30) + (ctxAfter.length > 30 ? "…" : "");
@@ -6529,17 +6695,20 @@ const webAppHTML = `<!doctype html>
       if (searchFolderAbort) { try { searchFolderAbort.abort(); } catch (e) {} }
       const ctrl = new AbortController();
       searchFolderAbort = ctrl;
+      const parsed = parseSearchExpr(needle);
+      const scope = state.folderSearchScope;
+      const recursive = (scope === "tree" || scope === "git");
       // Git-wide search can take a while; show a loading hint until results land.
       const loadingEl = document.createElement("div");
       loadingEl.className = "search-empty";
-      loadingEl.textContent = state.folderSearchScope === "git"
-        ? t("searchLoadingGit") : t("searchLoading");
+      loadingEl.textContent = scope === "git" ? t("searchLoadingGit") : t("searchLoading");
       searchFolderHitsEl.appendChild(loadingEl);
       let results = [];
       try {
         const url = "/api/search?dir=" + encodeURIComponent(state.cwd || "") +
                     "&q=" + encodeURIComponent(needle) +
-                    (state.folderSearchScope === "git" ? "&scope=git" : "");
+                    (scope === "git" ? "&scope=git" : scope === "tree" ? "&scope=tree" : "") +
+                    (recursive && state.folderSearchAllFiles ? "&allFiles=1" : "");
         const r = await fetch(url, { signal: ctrl.signal });
         if (!r.ok) throw new Error(String(r.status));
         results = await r.json();
@@ -6561,25 +6730,49 @@ const webAppHTML = `<!doctype html>
       if (!filtered.length) {
         const e = document.createElement("div");
         e.className = "search-empty";
-        e.textContent = "No matches in other files.";
+        // In docs-only recursive mode the "search all files" button follows, so
+        // make clear the empty result is scoped to documents, not absolute.
+        e.textContent = (recursive && !state.folderSearchAllFiles) ? t("searchNoMatchDocs") : t("searchNoMatchOther");
         searchFolderHitsEl.appendChild(e);
-        return;
+      } else {
+        for (const r of filtered) {
+          const row = document.createElement("div");
+          row.className = "search-file-row";
+          row.title = r.path;
+          const name = document.createElement("span");
+          name.textContent = r.path.split("/").pop();
+          row.appendChild(name);
+          // Color chips: one per matched keyword, tinted to match in-file colors.
+          const terms = r.matchedTerms || [];
+          for (const term of terms) {
+            const idx = parsed.colorOf.has(term) ? (parsed.colorOf.get(term) % 8) : 0;
+            const chip = document.createElement("span");
+            chip.className = "search-file-chip kw-" + idx;
+            chip.textContent = term;
+            chip.title = term;
+            row.appendChild(chip);
+          }
+          const count = document.createElement("span");
+          count.className = "search-file-count";
+          count.textContent = r.count + (r.count === 1 ? " match" : " matches");
+          row.appendChild(count);
+          row.addEventListener("click", function () {
+            selectFile(r.path, { historyMode: "push" });
+          });
+          searchFolderHitsEl.appendChild(row);
+        }
       }
-      for (const r of filtered) {
-        const row = document.createElement("div");
-        row.className = "search-file-row";
-        row.title = r.path;
-        const name = document.createElement("span");
-        name.textContent = r.path.split("/").pop();
-        const count = document.createElement("span");
-        count.className = "search-file-count";
-        count.textContent = r.count + (r.count === 1 ? " match" : " matches");
-        row.appendChild(name);
-        row.appendChild(count);
-        row.addEventListener("click", function () {
-          selectFile(r.path, { historyMode: "push" });
+      // "Search all files" button: only for recursive scopes still in docs-only mode.
+      if (recursive && !state.folderSearchAllFiles) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "search-all-files-btn";
+        btn.textContent = t("searchAllFiles");
+        btn.addEventListener("click", function () {
+          state.folderSearchAllFiles = true;
+          runFolderSearch(state.searchQueryRight);
         });
-        searchFolderHitsEl.appendChild(row);
+        searchFolderHitsEl.appendChild(btn);
       }
     }
 
@@ -6710,7 +6903,9 @@ const webAppHTML = `<!doctype html>
         sortLine: "Line", sortLineTitle: "Sort by line position", sortPriority: "Priority", sortPriorityTitle: "Sort by importance (heading first)",
         searchTypeToSearch: "Type to search.", searchNoMatches: "No matches in this file.",
         scopeFolder: "This folder", scopeFolderTitle: "Search the current folder only", scopeGit: "Git repo", scopeGitTitle: "Search the whole enclosing Git repo",
-        folderSame: "Same folder", folderGit: "Git repo",
+        scopeTree: "Subfolder", scopeTreeTitle: "Search this folder and all subfolders",
+        folderSame: "Same folder", folderGit: "Git repo", folderTree: "Subfolders",
+        searchAllFiles: "Search all files (incl. code)", searchNoMatchDocs: "No matches in documents.", searchNoMatchOther: "No matches in other files.",
         secMemo: "Memo", memoNew: "＋ New", memoNewTitle: "New memo", memoCopy: "📋 Copy", memoCopyTitle: "Copy with filename header",
         phMemoFilter: "🔍 Search memos…",
         memoSortUpdated: "Updated", memoSortUpdatedTitle: "Sort by last modified", memoSortCreated: "Created", memoSortCreatedTitle: "Sort by created", memoSortTitle: "Title", memoSortTitleTitle: "Sort by title A–Z",
@@ -6830,7 +7025,9 @@ const webAppHTML = `<!doctype html>
         sortLine: "줄", sortLineTitle: "줄 위치순 정렬", sortPriority: "중요도", sortPriorityTitle: "중요도순 정렬 (헤딩 우선)",
         searchTypeToSearch: "검색어를 입력하세요.", searchNoMatches: "이 파일에 일치 항목이 없습니다.",
         scopeFolder: "이 폴더", scopeFolderTitle: "현재 폴더만 검색", scopeGit: "Git 전체", scopeGitTitle: "상위 Git 저장소 전체 검색",
-        folderSame: "같은 폴더", folderGit: "Git 저장소",
+        scopeTree: "하위폴더", scopeTreeTitle: "이 폴더와 모든 하위폴더 검색",
+        folderSame: "같은 폴더", folderGit: "Git 저장소", folderTree: "하위폴더",
+        searchAllFiles: "전체 파일 검색 (코드 포함)", searchNoMatchDocs: "문서에서 일치하는 항목이 없습니다.", searchNoMatchOther: "다른 파일에서 일치하는 항목이 없습니다.",
         secMemo: "메모", memoNew: "＋ 새로", memoNewTitle: "새 메모", memoCopy: "📋 복사", memoCopyTitle: "파일명 헤더와 함께 복사",
         phMemoFilter: "🔍 메모 검색…",
         memoSortUpdated: "수정순", memoSortUpdatedTitle: "최근 수정순 정렬", memoSortCreated: "생성순", memoSortCreatedTitle: "생성순 정렬", memoSortTitle: "제목", memoSortTitleTitle: "제목순 정렬 (A–Z)",
@@ -8925,6 +9122,7 @@ const webAppHTML = `<!doctype html>
     let searchDebounce = null;
     searchPanelInputEl.addEventListener("input", function () {
       state.searchQueryRight = searchPanelInputEl.value || "";
+      state.folderSearchAllFiles = false; // a new query resets the docs-only filter
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(function () {
         runInFileSearch(state.searchQueryRight);
@@ -8934,22 +9132,28 @@ const webAppHTML = `<!doctype html>
 
     // Folder-search scope: current folder vs the whole enclosing git repo.
     function applyFolderScope(scope) {
-      let next = (scope === "git") ? "git" : "folder";
+      let next = (scope === "git") ? "git" : (scope === "tree") ? "tree" : "folder";
       if (next === "git" && state.gitRepoRoot === "") next = "folder"; // not a repo → ignore git
       state.folderSearchScope = next;
+      state.folderSearchAllFiles = false; // scope change resets the docs-only filter
       try { localStorage.setItem("mdviewer.folderSearchScope", state.folderSearchScope); } catch (e) {}
       const btnFolder = document.getElementById("searchScopeFolder");
+      const btnTree = document.getElementById("searchScopeTree");
       const btnGit = document.getElementById("searchScopeGit");
       const titleEl = document.getElementById("searchFolderTitle");
       if (btnFolder) btnFolder.classList.toggle("active", state.folderSearchScope === "folder");
+      if (btnTree) btnTree.classList.toggle("active", state.folderSearchScope === "tree");
       if (btnGit) btnGit.classList.toggle("active", state.folderSearchScope === "git");
-      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? t("folderGit") : t("folderSame");
+      if (titleEl) titleEl.textContent = state.folderSearchScope === "git" ? t("folderGit")
+                                       : state.folderSearchScope === "tree" ? t("folderTree") : t("folderSame");
       if (state.searchQueryRight) runFolderSearch(state.searchQueryRight);
     }
     {
       const btnFolder = document.getElementById("searchScopeFolder");
+      const btnTree = document.getElementById("searchScopeTree");
       const btnGit = document.getElementById("searchScopeGit");
       if (btnFolder) btnFolder.addEventListener("click", function () { applyFolderScope("folder"); });
+      if (btnTree) btnTree.addEventListener("click", function () { applyFolderScope("tree"); });
       if (btnGit) btnGit.addEventListener("click", function () { applyFolderScope("git"); });
       applyFolderScope(state.folderSearchScope); // set initial active button + title
     }
@@ -13330,9 +13534,10 @@ const searchSnippetLen = 60
 const searchMaxFileBytes = 2 * 1024 * 1024 // skip files larger than 2 MB
 
 type searchResult struct {
-	Path     string   `json:"path"`
-	Count    int      `json:"count"`
-	Snippets []string `json:"snippets"`
+	Path         string   `json:"path"`
+	Count        int      `json:"count"`
+	Snippets     []string `json:"snippets"`
+	MatchedTerms []string `json:"matchedTerms"`
 }
 
 // isProbablyText returns true if the byte slice looks like text content.
@@ -13863,8 +14068,10 @@ func (s *webServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// searchFileForNeedle returns a searchResult for full when it contains needle.
-func searchFileForNeedle(full, needle string) (searchResult, bool) {
+// searchFileForExpr returns a searchResult for full when at least one line
+// satisfies expr. Count is the number of satisfying lines; MatchedTerms lists
+// which distinct terms appear anywhere in the file (for the UI color chips).
+func searchFileForExpr(full string, expr *exprNode, terms []string) (searchResult, bool) {
 	info, err := os.Stat(full)
 	if err != nil || info.Size() > searchMaxFileBytes {
 		return searchResult{}, false
@@ -13873,18 +14080,43 @@ func searchFileForNeedle(full, needle string) (searchResult, bool) {
 	if err != nil || !isProbablyText(data) {
 		return searchResult{}, false
 	}
-	lower := strings.ToLower(string(data))
-	count := strings.Count(lower, needle)
+	text := string(data)
+	count := 0
+	matched := map[string]bool{}
+	for _, line := range strings.Split(text, "\n") {
+		ll := strings.ToLower(line)
+		if expr.eval(ll) {
+			count++
+		}
+		for _, term := range terms {
+			if !matched[term] && strings.Contains(ll, term) {
+				matched[term] = true
+			}
+		}
+	}
 	if count == 0 {
 		return searchResult{}, false
 	}
-	return searchResult{Path: full, Count: count, Snippets: collectSnippets(string(data), lower, needle, searchMaxSnippets)}, true
+	mt := []string{}
+	for _, term := range terms {
+		if matched[term] {
+			mt = append(mt, term)
+		}
+	}
+	snippetNeedle := ""
+	if len(mt) > 0 {
+		snippetNeedle = mt[0]
+	}
+	lower := strings.ToLower(text)
+	return searchResult{
+		Path:         full,
+		Count:        count,
+		Snippets:     collectSnippets(text, lower, snippetNeedle, searchMaxSnippets),
+		MatchedTerms: mt,
+	}, true
 }
 
-// searchDirShallow searches only the immediate files of dir (the "Same folder"
-// scope). searchTreeRecursive walks the whole tree under root (the "Git repo"
-// scope), skipping hidden / heavy directories and capping the files scanned.
-func searchDirShallow(dir, needle string) []searchResult {
+func searchDirShallow(dir string, expr *exprNode, terms []string) []searchResult {
 	out := []searchResult{}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -13894,23 +14126,23 @@ func searchDirShallow(dir, needle string) []searchResult {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if res, ok := searchFileForNeedle(filepath.Join(dir, e.Name()), needle); ok {
+		if res, ok := searchFileForExpr(filepath.Join(dir, e.Name()), expr, terms); ok {
 			out = append(out, res)
 		}
 	}
 	return out
 }
 
-func searchTreeRecursive(root, needle string, maxFiles int) []searchResult {
+func searchTreeRecursive(dirRoot string, expr *exprNode, terms []string, maxFiles int, docsOnly bool) []searchResult {
 	out := []searchResult{}
 	scanned := 0
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(dirRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
+			if path != dirRoot && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -13918,11 +14150,14 @@ func searchTreeRecursive(root, needle string, maxFiles int) []searchResult {
 		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
+		if docsOnly && !isDocExt(d.Name()) {
+			return nil
+		}
 		if scanned >= maxFiles {
 			return filepath.SkipAll
 		}
 		scanned++
-		if res, ok := searchFileForNeedle(path, needle); ok {
+		if res, ok := searchFileForExpr(path, expr, terms); ok {
 			out = append(out, res)
 		}
 		return nil
@@ -13945,18 +14180,21 @@ func (s *webServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid dir", http.StatusBadRequest)
 		return
 	}
-	needle := strings.ToLower(q)
+	expr, terms := parseSearchExpr(q)
+	allFiles := r.URL.Query().Get("allFiles") == "1"
 
 	var out []searchResult
-	if r.URL.Query().Get("scope") == "git" {
-		// Recurse from the enclosing git repo root (fall back to dir).
+	switch r.URL.Query().Get("scope") {
+	case "git":
 		root := s.gitRoot(r.Context(), abs)
 		if root == "" {
 			root = abs
 		}
-		out = searchTreeRecursive(root, needle, searchMaxGitFiles)
-	} else {
-		out = searchDirShallow(abs, needle)
+		out = searchTreeRecursive(root, expr, terms, searchMaxGitFiles, !allFiles)
+	case "tree":
+		out = searchTreeRecursive(abs, expr, terms, searchMaxGitFiles, !allFiles)
+	default:
+		out = searchDirShallow(abs, expr, terms)
 	}
 
 	// Most matches first.

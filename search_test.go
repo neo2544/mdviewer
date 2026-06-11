@@ -121,12 +121,13 @@ func TestSearchDirShallowVsRecursive(t *testing.T) {
 	_ = os.MkdirAll(nm, 0o755)
 	writeTestFile(t, nm, "pkg.md", "needle vendored\n")
 
-	shallow := searchDirShallow(root, "needle")
+	exprNeedle, termsNeedle := parseSearchExpr("needle")
+	shallow := searchDirShallow(root, exprNeedle, termsNeedle)
 	if len(shallow) != 1 || filepath.Base(shallow[0].Path) != "top.md" {
 		t.Fatalf("shallow = %+v, want only top.md", shallow)
 	}
 
-	rec := searchTreeRecursive(root, "needle", 4000)
+	rec := searchTreeRecursive(root, exprNeedle, termsNeedle, 4000, false)
 	got := map[string]bool{}
 	for _, r := range rec {
 		got[filepath.Base(r.Path)] = true
@@ -208,5 +209,96 @@ func TestReorderFavoritesRejectsGET(t *testing.T) {
 	s.routes().ServeHTTP(rec, httptest.NewRequest("GET", "/api/favorites/reorder", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestSearchTreeDocsOnly(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "doc.md", "needle in markdown\n")
+	writeTestFile(t, root, "code.go", "needle in code\n")
+	expr, terms := parseSearchExpr("needle")
+
+	docs := searchTreeRecursive(root, expr, terms, 4000, true)
+	got := map[string]bool{}
+	for _, r := range docs {
+		got[filepath.Base(r.Path)] = true
+	}
+	if !got["doc.md"] || got["code.go"] {
+		t.Errorf("docsOnly should find doc.md and skip code.go: %+v", got)
+	}
+
+	all := searchTreeRecursive(root, expr, terms, 4000, false)
+	got = map[string]bool{}
+	for _, r := range all {
+		got[filepath.Base(r.Path)] = true
+	}
+	if !got["doc.md"] || !got["code.go"] {
+		t.Errorf("allFiles should find both: %+v", got)
+	}
+}
+
+func TestSearchExprAndAcrossLines(t *testing.T) {
+	root := t.TempDir()
+	// a and b on different lines -> AND must NOT match this file.
+	writeTestFile(t, root, "split.md", "alpha here\nbeta there\n")
+	// a and b on the SAME line -> AND matches.
+	writeTestFile(t, root, "together.md", "alpha and beta same line\n")
+	expr, terms := parseSearchExpr("alpha&beta")
+
+	res := searchDirShallow(root, expr, terms)
+	got := map[string]bool{}
+	for _, r := range res {
+		got[filepath.Base(r.Path)] = true
+	}
+	if got["split.md"] {
+		t.Error("AND must not match keywords on different lines")
+	}
+	if !got["together.md"] {
+		t.Error("AND must match keywords on the same line")
+	}
+}
+
+// MatchedTerms feeds the folder-result color chips; it must list exactly the
+// distinct terms present in the file (encounter order), regardless of operator.
+func TestSearchMatchedTerms(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "both.md", "alpha and beta on one line\n")
+	writeTestFile(t, root, "onlyalpha.md", "alpha alone here\n")
+
+	// AND: only both.md qualifies, and it reports both terms.
+	exprAnd, termsAnd := parseSearchExpr("alpha&beta")
+	got := map[string][]string{}
+	for _, r := range searchDirShallow(root, exprAnd, termsAnd) {
+		got[filepath.Base(r.Path)] = r.MatchedTerms
+	}
+	if mt := got["both.md"]; len(mt) != 2 || mt[0] != "alpha" || mt[1] != "beta" {
+		t.Errorf("both.md MatchedTerms = %v, want [alpha beta]", mt)
+	}
+	if _, ok := got["onlyalpha.md"]; ok {
+		t.Error("onlyalpha.md should not qualify for alpha&beta")
+	}
+
+	// OR: a file matching only one branch reports only the present term.
+	exprOr, termsOr := parseSearchExpr("alpha|beta")
+	got2 := map[string][]string{}
+	for _, r := range searchDirShallow(root, exprOr, termsOr) {
+		got2[filepath.Base(r.Path)] = r.MatchedTerms
+	}
+	if mt := got2["onlyalpha.md"]; len(mt) != 1 || mt[0] != "alpha" {
+		t.Errorf("onlyalpha.md MatchedTerms = %v, want [alpha]", mt)
+	}
+	if mt := got2["both.md"]; len(mt) != 2 {
+		t.Errorf("both.md MatchedTerms = %v, want both terms", mt)
+	}
+}
+
+// Count is the number of satisfying lines, not occurrences.
+func TestSearchCountMatchingLines(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "multi.md", "needle one\nno match\nneedle two\nneedle three\n")
+	expr, terms := parseSearchExpr("needle")
+	res := searchDirShallow(root, expr, terms)
+	if len(res) != 1 || res[0].Count != 3 {
+		t.Fatalf("Count = %+v, want a single file with 3 matching lines", res)
 	}
 }
