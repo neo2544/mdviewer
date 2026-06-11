@@ -6718,7 +6718,9 @@ const webAppHTML = `<!doctype html>
       if (!filtered.length) {
         const e = document.createElement("div");
         e.className = "search-empty";
-        e.textContent = "No matches in other files.";
+        // In docs-only recursive mode the "search all files" button follows, so
+        // make clear the empty result is scoped to documents, not absolute.
+        e.textContent = (recursive && !state.folderSearchAllFiles) ? t("searchNoMatchDocs") : t("searchNoMatchOther");
         searchFolderHitsEl.appendChild(e);
       } else {
         for (const r of filtered) {
@@ -6889,7 +6891,9 @@ const webAppHTML = `<!doctype html>
         sortLine: "Line", sortLineTitle: "Sort by line position", sortPriority: "Priority", sortPriorityTitle: "Sort by importance (heading first)",
         searchTypeToSearch: "Type to search.", searchNoMatches: "No matches in this file.",
         scopeFolder: "This folder", scopeFolderTitle: "Search the current folder only", scopeGit: "Git repo", scopeGitTitle: "Search the whole enclosing Git repo",
-        folderSame: "Same folder", folderGit: "Git repo",
+        scopeTree: "Subfolder", scopeTreeTitle: "Search this folder and all subfolders",
+        folderSame: "Same folder", folderGit: "Git repo", folderTree: "Subfolders",
+        searchAllFiles: "Search all files (incl. code)", searchNoMatchDocs: "No matches in documents.", searchNoMatchOther: "No matches in other files.",
         secMemo: "Memo", memoNew: "＋ New", memoNewTitle: "New memo", memoCopy: "📋 Copy", memoCopyTitle: "Copy with filename header",
         phMemoFilter: "🔍 Search memos…",
         memoSortUpdated: "Updated", memoSortUpdatedTitle: "Sort by last modified", memoSortCreated: "Created", memoSortCreatedTitle: "Sort by created", memoSortTitle: "Title", memoSortTitleTitle: "Sort by title A–Z",
@@ -7009,7 +7013,9 @@ const webAppHTML = `<!doctype html>
         sortLine: "줄", sortLineTitle: "줄 위치순 정렬", sortPriority: "중요도", sortPriorityTitle: "중요도순 정렬 (헤딩 우선)",
         searchTypeToSearch: "검색어를 입력하세요.", searchNoMatches: "이 파일에 일치 항목이 없습니다.",
         scopeFolder: "이 폴더", scopeFolderTitle: "현재 폴더만 검색", scopeGit: "Git 전체", scopeGitTitle: "상위 Git 저장소 전체 검색",
-        folderSame: "같은 폴더", folderGit: "Git 저장소",
+        scopeTree: "하위폴더", scopeTreeTitle: "이 폴더와 모든 하위폴더 검색",
+        folderSame: "같은 폴더", folderGit: "Git 저장소", folderTree: "하위폴더",
+        searchAllFiles: "전체 파일 검색 (코드 포함)", searchNoMatchDocs: "문서에서 일치하는 항목이 없습니다.", searchNoMatchOther: "다른 파일에서 일치하는 항목이 없습니다.",
         secMemo: "메모", memoNew: "＋ 새로", memoNewTitle: "새 메모", memoCopy: "📋 복사", memoCopyTitle: "파일명 헤더와 함께 복사",
         phMemoFilter: "🔍 메모 검색…",
         memoSortUpdated: "수정순", memoSortUpdatedTitle: "최근 수정순 정렬", memoSortCreated: "생성순", memoSortCreatedTitle: "생성순 정렬", memoSortTitle: "제목", memoSortTitleTitle: "제목순 정렬 (A–Z)",
