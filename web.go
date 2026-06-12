@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -76,6 +77,7 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/file/save", s.handleSaveFile)
 	mux.HandleFunc("/api/raw", s.handleRaw)
 	mux.HandleFunc("/api/csv", s.handleCSV)
+	mux.HandleFunc("/api/drawio", s.handleDrawio)
 	mux.HandleFunc("/api/favorites/toggle", s.handleToggleFavorite)
 	mux.HandleFunc("/api/favorites/reorder", s.handleReorderFavorites)
 	mux.HandleFunc("/api/resolve", s.handleResolve)
@@ -513,6 +515,10 @@ func (s *webServer) handleFile(w http.ResponseWriter, r *http.Request) {
 	case ".csv", ".tsv":
 		resp.Kind = "csv"
 		// Table data is fetched separately via /api/csv (paginated).
+	case ".drawio", ".dio":
+		resp.Kind = "drawio"
+		// Rendered read-only by /api/drawio inside a sandboxed iframe.
+		resp.RawURL = "/api/drawio?path=" + url.QueryEscape(absPath)
 	case ".txt", ".log",
 		".go", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".gs", ".ts", ".tsx",
 		".sh", ".bash", ".zsh", ".ksh", ".fish",
@@ -554,6 +560,61 @@ func (s *webServer) handleRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, absPath)
+}
+
+// handleDrawio serves a minimal HTML page that renders a .drawio file
+// read-only via the official draw.io GraphViewer. The heavy viewer script
+// and its global mxGraph CSS stay isolated inside the preview iframe.
+func (s *webServer) handleDrawio(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(absPath))
+	if ext != ".drawio" && ext != ".dio" {
+		http.Error(w, "not a drawio file", http.StatusBadRequest)
+		return
+	}
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// GraphViewer reads its config (diagram XML included) from the
+	// data-mxgraph attribute as JSON. Keep "<" literal in the JSON
+	// (SetEscapeHTML(false)) and rely on HTML attribute escaping only,
+	// so the test/debug view stays readable as &lt;mxfile...
+	cfg := map[string]any{
+		"xml":       string(data),
+		"toolbar":   "pages zoom layers lightbox",
+		"nav":       true,
+		"resize":    true,
+		"auto-fit":  true,
+		"highlight": "#4f8ff7",
+	}
+	var cfgJSON strings.Builder
+	enc := json.NewEncoder(&cfgJSON)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(cfg); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	attr := html.EscapeString(strings.TrimSpace(cfgJSON.String()))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">"+
+		"<style>html,body{margin:0;min-height:100%;background:#fff}"+
+		"body{padding:12px}.mxgraph{max-width:100%}</style></head><body>"+
+		"<div class=\"mxgraph\" data-mxgraph=\""+attr+"\"></div>"+
+		"<script src=\"https://viewer.diagrams.net/js/viewer-static.min.js\"></script>"+
+		"</body></html>")
 }
 
 // scanCSVRecordOffsets returns the byte offset of the start of each CSV
@@ -2140,6 +2201,7 @@ const webAppHTML = `<!doctype html>
     .chip[data-kind="mermaid"]::before { background: oklch(0.78 0.16 145); box-shadow: 0 0 0 2px oklch(0.78 0.16 145 / 0.25); }
     .chip[data-kind="html"]::before { background: oklch(0.76 0.17 50); box-shadow: 0 0 0 2px oklch(0.76 0.17 50 / 0.25); }
     .chip[data-kind="csv"]::before { background: oklch(0.74 0.15 195); box-shadow: 0 0 0 2px oklch(0.74 0.15 195 / 0.25); }
+    .chip[data-kind="drawio"]::before { background: oklch(0.72 0.16 60); box-shadow: 0 0 0 2px oklch(0.72 0.16 60 / 0.25); }
 
     /* Sandboxed HTML preview — fills the preview body bleed-to-edge */
     .html-frame-wrap {
@@ -8563,6 +8625,27 @@ const webAppHTML = `<!doctype html>
       }
       if (data.kind === "csv") {
         await renderCsv(data);
+        return;
+      }
+      if (data.kind === "drawio") {
+        // Same sandboxed-iframe pattern as the html kind; /api/drawio
+        // returns a wrapper page that renders the diagram read-only.
+        previewBodyEl.innerHTML = "";
+        const wrap = document.createElement("div");
+        wrap.className = "html-frame-wrap";
+        const frame = document.createElement("iframe");
+        frame.className = "html-frame";
+        frame.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
+        frame.setAttribute("loading", "lazy");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.title = data.name || "drawio preview";
+        frame.src = data.raw_url + "&t=" + Date.now();
+        wrap.appendChild(frame);
+        const note = document.createElement("div");
+        note.className = "html-frame-note";
+        note.innerHTML = '<span>draw.io read-only preview</span> · <a href="' + data.raw_url + '" target="_blank" rel="noopener">Open in new tab ↗</a>';
+        wrap.appendChild(note);
+        previewBodyEl.appendChild(wrap);
         return;
       }
       if (data.kind === "text") {
