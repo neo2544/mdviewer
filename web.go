@@ -1443,6 +1443,12 @@ const webAppHTML = `<!doctype html>
       font-size: 12px;
       font-family: ui-monospace, SFMono-Regular, monospace;
       margin: 0;
+      cursor: pointer;
+      transition: border-color 120ms ease, color 120ms ease;
+    }
+    #cwd.path-chip:hover {
+      border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+      color: var(--text);
     }
     .git-remote-link {
       display: inline-flex;
@@ -1686,6 +1692,22 @@ const webAppHTML = `<!doctype html>
     /* AI-DLC "folder/file" labels: muted path, bold filename. */
     .file-name .fn-dir { color: var(--muted); font-weight: 400; }
     .file-name .fn-base { color: var(--text); font-weight: 700; }
+    /* Leading icon column so folders/files line up: folder icon for dirs,
+       a back arrow for "..", an empty (but same-width) slot for files. The
+       parent .file uses gap:12px which is too wide here, so pull the name in. */
+    .file-icon {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      margin-right: -6px;
+      color: var(--muted);
+      line-height: 0;
+    }
+    .file-icon svg { width: 14px; height: 14px; }
+    .file.active .file-icon { color: var(--accent); }
     .file-meta {
       display: grid;
       grid-template-columns: 7px auto;
@@ -4198,6 +4220,26 @@ const webAppHTML = `<!doctype html>
     .searchbox.has-icon .search-input { padding-left: 32px; }
     .searchbox.has-icon:focus-within .searchbox-icon { color: var(--accent); }
     .searchbox.has-browse-btn .search-input { padding-right: 28px; }
+    .searchbox.has-recursive-btn .search-input { padding-right: 52px; }
+    /* "Include subfolders" toggle — sits just left of the browse button. */
+    .searchbox-recursive-btn {
+      position: absolute;
+      right: 29px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 3px 4px;
+      border-radius: 6px;
+      line-height: 0;
+      display: flex;
+      align-items: center;
+    }
+    .searchbox-recursive-btn:hover { color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); }
+    .searchbox-recursive-btn.active { color: var(--accent); background: color-mix(in oklab, var(--accent) 16%, transparent); }
+    .searchbox-recursive-btn svg { width: 13px; height: 13px; }
     .searchbox-browse-btn {
       position: absolute;
       right: 5px;
@@ -4344,12 +4386,20 @@ const webAppHTML = `<!doctype html>
           </div>
           <div class="subtle path-chip" id="cwd"></div>
           <a class="git-remote-link" id="gitRemoteLink" href="#" target="_blank" rel="noopener" hidden>↗ open remote</a>
-          <div class="searchbox has-icon has-browse-btn">
+          <div class="searchbox has-icon has-browse-btn has-recursive-btn">
             <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="7" cy="7" r="4.5" />
               <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
             </svg>
             <input class="search-input" id="searchInput" type="search" data-i18n-ph="phSearchFiles" placeholder="Search files" spellcheck="false" />
+            <button class="searchbox-recursive-btn" id="searchRecursiveBtn" type="button" role="switch" aria-checked="false" data-i18n-title="searchRecursiveTitle" title="하위 폴더 포함 검색 (켜면 현재 폴더 아래 전체에서 파일명 검색)">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2.5 4 H6 L7 5 H13.5" />
+                <path d="M2.5 4 V11.5 c0 .6.5 1 1 1 H13.5 V6.5 H7" />
+                <path d="M5 9 H10" />
+                <path d="M5 9 L6.5 7.5 M5 9 L6.5 10.5" />
+              </svg>
+            </button>
             <button class="searchbox-browse-btn" id="browseSubfoldersBtn" data-i18n-title="browseBtnTitle" title="하위 폴더 포함 탐색" type="button" data-i18n-aria="fbTitle" aria-label="하위 폴더 탐색">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M1.5 3.5 C1.5 2.7 2.2 2 3 2 H5.5 L6.5 3 H13 c.8 0 1.5.7 1.5 1.5 V12.5 c0 .8-.7 1.5-1.5 1.5 H3 c-.8 0-1.5-.7-1.5-1.5 Z" />
@@ -4853,6 +4903,12 @@ const webAppHTML = `<!doctype html>
       popupKind: "",
       popupQuery: "",
       searchQuery: "",
+      // "Include subfolders" toggle for the sidebar file-name search. When ON
+      // with a query, the list shows server-walked recursive matches instead of
+      // just the current folder. searchResults holds those flattened matches
+      // (null = not in recursive-search mode → fall back to the shallow list).
+      searchRecursive: localStorage.getItem("mdviewer.searchRecursive") === "1",
+      searchResults: null,
       sortKey: "name",
       sortDirection: "asc",
       selectedPath: "",
@@ -5302,6 +5358,18 @@ const webAppHTML = `<!doctype html>
         '<span class="fn-base">' + highlightName(base, query) + '</span>';
     }
 
+    // Leading-icon HTML for a sidebar row: folder icon for directories, a
+    // back/return arrow for the ".." parent, and an empty (same-width) slot for
+    // files so names stay aligned in one column.
+    var FILE_ICON_FOLDER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 4.2 C1.8 3.5 2.4 3 3 3 H6 L7.2 4.2 H13 c.7 0 1.2.5 1.2 1.2 V11.5 c0 .7-.5 1.2-1.2 1.2 H3 c-.7 0-1.2-.5-1.2-1.2 Z"/></svg>';
+    var FILE_ICON_BACK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4 L2.5 7.5 L6 11"/><path d="M2.5 7.5 H10 c2 0 3.5 1.5 3.5 3.5"/></svg>';
+    function entryIconHTML(entry) {
+      if (!entry) return "";
+      if (entry.name === "..") return FILE_ICON_BACK;
+      if (entry.is_dir) return FILE_ICON_FOLDER;
+      return "";
+    }
+
     function shortenFavoritePath(path) {
       if (!path) return "";
       const parts = path.split("/").filter(Boolean);
@@ -5746,6 +5814,8 @@ const webAppHTML = `<!doctype html>
       if (state.cwd !== state.aidlcCwd) refreshAidlc();
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
+      // Drop any prior folder's recursive matches; refreshed below if still active.
+      state.searchResults = null;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
       // Server is the source of truth for aliases — merge into state so
       // they are visible across browsers / devices. (We keep the localStorage
@@ -5755,14 +5825,24 @@ const webAppHTML = `<!doctype html>
         state.aliases = data.aliases;
         try { saveTracking(); } catch (e) {}
       }
+      let autoOpenReadme = null;
       if (options.clearSelection !== false && !options.keepSelection) {
         state.selectedPath = "";
         state.selectedHash = "";
         state.selectedKind = "";
         state.selectedContent = "";
         updateCopyPathButton("");
-        // Show the welcome / usage guide whenever no file is selected.
-        showUsageGuide();
+        // If the folder holds a README, open it instead of the welcome guide —
+        // it's almost always the document the user wants for that folder.
+        const readme = (data.entries || []).find(
+          (e) => e && !e.is_dir && (e.name || "").toLowerCase() === "readme.md"
+        );
+        if (readme) {
+          autoOpenReadme = readme.path;
+        } else {
+          // Show the welcome / usage guide whenever no file is selected.
+          showUsageGuide();
+        }
       }
       cwdEl.textContent = shortenDisplayPath(state.cwd);
       cwdEl.dataset.path = state.cwd;
@@ -5781,6 +5861,17 @@ const webAppHTML = `<!doctype html>
       }
       if (options.historyMode) {
         syncHistory(options.historyMode);
+      }
+      // Re-run the recursive file search against the new folder (no extra
+      // history entry — this just refreshes the inline result list).
+      if (state.searchRecursive && state.searchQuery.trim()) {
+        updateFileSearch();
+      }
+      // Auto-open the folder's README last, so the list/breadcrumb are already
+      // painted. Same-folder selectFile won't re-enter loadDir. No historyMode
+      // passed → it stays an automatic, non-navigational open.
+      if (autoOpenReadme) {
+        selectFile(autoOpenReadme);
       }
     }
 
@@ -5803,13 +5894,37 @@ const webAppHTML = `<!doctype html>
     function renderFiles(entries) {
       filesEl.innerHTML = "";
       const query = state.searchQuery.trim().toLowerCase();
-      const filteredEntries = query
-        ? entries.filter((entry) => entry.name.toLowerCase().includes(query))
-        : [...entries];
-      filteredEntries.sort(compareEntries);
+      // Recursive ("include subfolders") mode: with a query active, the source
+      // is the flattened server-walked matches; otherwise the current folder.
+      const recursiveActive = state.searchRecursive && query && Array.isArray(state.searchResults);
+      const parentEntry = entries.find((entry) => entry.name === "..") || null;
 
-      if (!filteredEntries.length) {
-        filesEl.innerHTML = '<div class="subtle" style="padding: 4px 12px;">No matching files</div>';
+      let body;
+      if (recursiveActive) {
+        body = state.searchResults.filter((entry) => entry.name.toLowerCase().includes(query));
+      } else if (query) {
+        body = entries.filter((entry) => entry.name !== ".." && entry.name.toLowerCase().includes(query));
+      } else {
+        body = entries.filter((entry) => entry.name !== "..");
+      }
+      body.sort(compareEntries);
+
+      // Pin ".." at the very top so the user can always step up a folder — even
+      // mid-search when nothing else matches.
+      if (parentEntry) {
+        filesEl.appendChild(makeFileButton(parentEntry, parentEntry.name, "", false));
+      }
+
+      if (!body.length) {
+        // Show the empty note when a filter hid everything (or at the root,
+        // where there is no ".." row to anchor the list).
+        if (query || !parentEntry) {
+          const note = document.createElement("div");
+          note.className = "subtle";
+          note.style.cssText = "padding: 4px 12px;";
+          note.textContent = t("noMatchingFiles");
+          filesEl.appendChild(note);
+        }
         return;
       }
       // Precompute which directories contain any flagged child path.
@@ -5820,7 +5935,7 @@ const webAppHTML = `<!doctype html>
       const dirAggregateFlag = {};
       for (const [p, f] of Object.entries(state.fileFlags)) {
         if (!f) continue;
-        for (const entry of filteredEntries) {
+        for (const entry of body) {
           if (!entry.is_dir) continue;
           if (p.startsWith(entry.path + "/")) {
             const existing = dirAggregateFlag[entry.path];
@@ -5831,13 +5946,57 @@ const webAppHTML = `<!doctype html>
         }
       }
 
-      for (const entry of filteredEntries) {
+      for (const entry of body) {
         const directFlag = state.fileFlags[entry.path] || "";
         const aggFlag = entry.is_dir ? (dirAggregateFlag[entry.path] || "") : "";
         const flag = directFlag || aggFlag;
         const aggregate = !!(aggFlag && !directFlag);
         filesEl.appendChild(makeFileButton(entry, entry.name, flag, aggregate));
       }
+    }
+
+    // Debounced recursive search: when the toggle is ON and there is a query,
+    // walk the current folder server-side and flatten the hits (with paths
+    // relative to cwd) into state.searchResults. OFF/empty → shallow list.
+    var _searchDebounceTimer = null;
+    var _searchReqSeq = 0;
+    function updateFileSearch() {
+      const query = state.searchQuery.trim();
+      if (!(state.searchRecursive && query)) {
+        state.searchResults = null;
+        if (_searchDebounceTimer) { clearTimeout(_searchDebounceTimer); _searchDebounceTimer = null; }
+        _searchReqSeq++;   // invalidate any in-flight recursive request
+        renderFilePane();
+        return;
+      }
+      renderFilePane();   // immediate shallow render while the walk runs
+      if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer);
+      _searchDebounceTimer = setTimeout(async () => {
+        const seq = ++_searchReqSeq;
+        const cwd = state.cwd || "";
+        const url = "/api/list-recursive?dir=" + encodeURIComponent(cwd) +
+                    "&q=" + encodeURIComponent(query);
+        try {
+          const groups = await fetchJSON(url);
+          if (seq !== _searchReqSeq) return; // a newer keystroke/toggle superseded us
+          const flat = [];
+          const prefix = cwd ? cwd + "/" : "";
+          for (const g of (groups || [])) {
+            for (const f of (g.files || [])) {
+              const rel = (prefix && f.path && f.path.indexOf(prefix) === 0)
+                ? f.path.slice(prefix.length)
+                : f.name;
+              flat.push(Object.assign({}, f, { name: rel }));
+            }
+          }
+          state.searchResults = flat;
+          renderFilePane();
+        } catch (e) {
+          if (seq !== _searchReqSeq) return;
+          state.searchResults = [];
+          renderFilePane();
+        }
+      }, 180);
     }
 
     // makeFileButton builds one sidebar file/dir row. displayName overrides the
@@ -5853,7 +6012,7 @@ const webAppHTML = `<!doctype html>
       if (flag) {
         button.dataset.flag = flag;
       }
-      button.innerHTML = '<span class="file-name"></span><span class="file-meta"><span class="update-badge"></span><span class="file-size"></span></span>';
+      button.innerHTML = '<span class="file-icon">' + entryIconHTML(entry) + '</span><span class="file-name"></span><span class="file-meta"><span class="update-badge"></span><span class="file-size"></span></span>';
       button.querySelector(".file-name").innerHTML = fileNameHTML(displayName != null ? displayName : entry.name, state.searchQuery.trim());
       button.querySelector(".file-size").textContent = entry.is_dir ? "" : (function () {
         const ts = entryModTimestamp(entry);
@@ -7061,6 +7220,10 @@ const webAppHTML = `<!doctype html>
         mlBtnTitle: "Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)",
         accentTitle: "Accent color", accentCustom: "Custom", accentReset: "Default (pink)", accentBtnTitle: "Choose accent color",
         browseBtnTitle: "Browse including subfolders",
+        noMatchingFiles: "No matching files",
+        searchRecursiveTitle: "Include subfolders in the file search (search all files under this folder by name)",
+        searchRecursiveOn: "Subfolder search: on", searchRecursiveOff: "Subfolder search: off",
+        toastPathCopied: "Copied path: ",
         aidlcToggleTitle: "View all AI-DLC-generated documents by most-recently-modified (turns on the aidlc-docs folder, sorted by time)",
         aidlcSortStage: "By stage", aidlcSortRecent: "Recent",
         aidlcStepEmpty: "(none yet)", aidlcOther: "Other",
@@ -7183,6 +7346,10 @@ const webAppHTML = `<!doctype html>
         mlBtnTitle: "Mermaid Playground — 머메이드 소스를 붙여넣으면 실시간 렌더 (다이어그램 클릭 시 확대)",
         accentTitle: "강조 색상", accentCustom: "직접 선택", accentReset: "기본값(핑크)으로", accentBtnTitle: "강조 색상 선택",
         browseBtnTitle: "하위 폴더 포함 탐색",
+        noMatchingFiles: "일치하는 파일 없음",
+        searchRecursiveTitle: "파일 검색에 하위 폴더 포함 (현재 폴더 아래 전체에서 파일명으로 검색)",
+        searchRecursiveOn: "하위 폴더 검색: 켬", searchRecursiveOff: "하위 폴더 검색: 끔",
+        toastPathCopied: "경로 복사됨: ",
         aidlcToggleTitle: "AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)",
         aidlcSortStage: "단계순", aidlcSortRecent: "최근수",
         aidlcStepEmpty: "(아직 없음)", aidlcOther: "기타",
@@ -8972,6 +9139,15 @@ const webAppHTML = `<!doctype html>
 
     cwdEl.addEventListener("pointerout", () => {
       hideTooltip();
+    });
+
+    // Click the current-path chip to copy the absolute folder path.
+    cwdEl.addEventListener("click", async () => {
+      const path = cwdEl.dataset.path || state.cwd || "";
+      if (!path) return;
+      const ok = await copyTextToClipboard(path);
+      if (ok) showToast(t("toastPathCopied") + path, { kind: "ok", icon: "📋" });
+      else showToast(t("toastCopyFail"), { kind: "err", icon: "⚠️" });
     });
 
     favoritesEl.addEventListener("pointerover", (event) => {
@@ -10932,8 +11108,24 @@ const webAppHTML = `<!doctype html>
     }
     searchInputEl.addEventListener("input", (event) => {
       state.searchQuery = event.target.value || "";
-      renderFilePane();
+      updateFileSearch();
     });
+    const searchRecursiveBtnEl = document.getElementById("searchRecursiveBtn");
+    function updateSearchRecursiveBtn() {
+      if (!searchRecursiveBtnEl) return;
+      searchRecursiveBtnEl.classList.toggle("active", !!state.searchRecursive);
+      searchRecursiveBtnEl.setAttribute("aria-checked", state.searchRecursive ? "true" : "false");
+    }
+    if (searchRecursiveBtnEl) {
+      searchRecursiveBtnEl.addEventListener("click", () => {
+        state.searchRecursive = !state.searchRecursive;
+        try { localStorage.setItem("mdviewer.searchRecursive", state.searchRecursive ? "1" : "0"); } catch (e) {}
+        updateSearchRecursiveBtn();
+        statusTextEl.textContent = state.searchRecursive ? t("searchRecursiveOn") : t("searchRecursiveOff");
+        updateFileSearch();
+      });
+      updateSearchRecursiveBtn();
+    }
     if (aidlcToggleEl) {
       aidlcToggleEl.addEventListener("click", toggleAidlcMode);
     }
