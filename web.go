@@ -5806,6 +5806,7 @@ const webAppHTML = `<!doctype html>
         console.error("loadDir failed:", err);
         return;
       }
+      const cwdChanged = state.cwd !== data.cwd;
       state.cwd = data.cwd;
       refreshGitRemote();
       refreshGitScope();
@@ -5814,8 +5815,10 @@ const webAppHTML = `<!doctype html>
       if (state.cwd !== state.aidlcCwd) refreshAidlc();
       updateChangedPaths(data.cwd, data.entries, { silent: !!options.silent });
       state.entries = data.entries;
-      // Drop any prior folder's recursive matches; refreshed below if still active.
-      state.searchResults = null;
+      // Drop the prior folder's recursive matches only when the folder actually
+      // changed (refreshed below). Doing this on every silent 2.5s poll made the
+      // list flicker "no matches" → results on each tick.
+      if (cwdChanged) state.searchResults = null;
       state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
       // Server is the source of truth for aliases — merge into state so
       // they are visible across browsers / devices. (We keep the localStorage
@@ -5862,9 +5865,10 @@ const webAppHTML = `<!doctype html>
       if (options.historyMode) {
         syncHistory(options.historyMode);
       }
-      // Re-run the recursive file search against the new folder (no extra
-      // history entry — this just refreshes the inline result list).
-      if (state.searchRecursive && state.searchQuery.trim()) {
+      // Re-run the recursive file search only when the folder actually changed
+      // (a real navigation) — never on silent auto-refresh polls, which would
+      // otherwise re-fetch and flicker the list every 2.5s.
+      if (cwdChanged && !options.silent && state.searchRecursive && state.searchQuery.trim()) {
         updateFileSearch();
       }
       // Auto-open the folder's README last, so the list/breadcrumb are already
