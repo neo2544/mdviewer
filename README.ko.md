@@ -2,6 +2,8 @@
 
 브라우저 기반 웹 뷰어 + macOS 메뉴바 자동 실행 + 터미널 TUI까지, **한 바이너리에서 세 가지 모드**로 마크다운을 탐색·편집할 수 있는 뷰어입니다.
 
+![mdviewer 웹 UI — 파일 탐색기, 실시간 Markdown 프리뷰, 파일·하위폴더·저장소 전체 검색](assets/screenshot.png)
+
 - **Web (권장)** — `http://127.0.0.1:8421/` · 파일 탐색, Preview/Edit/Split, 검색, 메모, 아웃라인, Mermaid, 수식, 테마, 자가 업데이트
 - **Menubar** — 로그인 시 자동 시작, 메뉴바 클릭으로 브라우저 열기 + `.md` 더블클릭 연동
 - **TUI** — `bubbletea + glamour` 기반 터미널 모드

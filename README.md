@@ -2,6 +2,8 @@
 
 A markdown viewer you can browse and edit in **three modes from a single binary**: a browser-based web viewer, a macOS menu-bar app that auto-starts, and a terminal TUI.
 
+![mdviewer web UI — file browser, live Markdown preview, and per-file / subfolder / whole-repo search](assets/screenshot.png)
+
 > 한국어 README: [README.ko.md](README.ko.md)
 
 - **Web (recommended)** — `http://127.0.0.1:8421/` · file browser, Preview/Edit/Split, search, memos, outline, Mermaid, math, themes, git version compare, self-update
