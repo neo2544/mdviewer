@@ -4221,6 +4221,30 @@ const webAppHTML = `<!doctype html>
     .searchbox.has-icon:focus-within .searchbox-icon { color: var(--accent); }
     .searchbox.has-browse-btn .search-input { padding-right: 28px; }
     .searchbox.has-recursive-btn .search-input { padding-right: 52px; }
+    /* When the "whole Git repo" toggle is visible (git-managed folder), make
+       room for a third button. Hidden button → no extra padding. */
+    .searchbox.has-recursive-btn:has(.searchbox-git-btn:not([hidden])) .search-input { padding-right: 76px; }
+    /* "Whole Git repo" toggle — sits just left of the subfolder toggle, only
+       shown inside a git repository. */
+    .searchbox-git-btn {
+      position: absolute;
+      right: 53px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 3px 4px;
+      border-radius: 6px;
+      line-height: 0;
+      display: flex;
+      align-items: center;
+    }
+    .searchbox-git-btn[hidden] { display: none; }
+    .searchbox-git-btn:hover { color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); }
+    .searchbox-git-btn.active { color: var(--accent); background: color-mix(in oklab, var(--accent) 16%, transparent); }
+    .searchbox-git-btn svg { width: 13px; height: 13px; }
     /* "Include subfolders" toggle — sits just left of the browse button. */
     .searchbox-recursive-btn {
       position: absolute;
@@ -4392,6 +4416,15 @@ const webAppHTML = `<!doctype html>
               <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
             </svg>
             <input class="search-input" id="searchInput" type="search" data-i18n-ph="phSearchFiles" placeholder="Search files" spellcheck="false" />
+            <button class="searchbox-git-btn" id="searchGitBtn" type="button" role="switch" aria-checked="false" data-i18n-title="searchGitTitle" title="Git 저장소 전체에서 파일명 검색" hidden>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="4" cy="3.5" r="1.6" />
+                <circle cx="4" cy="12.5" r="1.6" />
+                <circle cx="12" cy="5.5" r="1.6" />
+                <path d="M4 5.1 V10.9" />
+                <path d="M12 7.1 c0 2.6 -2.4 3.4 -4 3.4" />
+              </svg>
+            </button>
             <button class="searchbox-recursive-btn" id="searchRecursiveBtn" type="button" role="switch" aria-checked="false" data-i18n-title="searchRecursiveTitle" title="하위 폴더 포함 검색 (켜면 현재 폴더 아래 전체에서 파일명 검색)">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M2.5 4 H6 L7 5 H13.5" />
@@ -4908,6 +4941,10 @@ const webAppHTML = `<!doctype html>
       // just the current folder. searchResults holds those flattened matches
       // (null = not in recursive-search mode → fall back to the shallow list).
       searchRecursive: localStorage.getItem("mdviewer.searchRecursive") === "1",
+      // "Whole Git repo" file-name search. Default ON; only takes effect inside a
+      // git repo (gated by state.gitRepoRoot). When active it widens the walk
+      // root from the current folder to the repo root.
+      searchGit: localStorage.getItem("mdviewer.searchGit") !== "0",
       searchResults: null,
       sortKey: "name",
       sortDirection: "asc",
@@ -5868,7 +5905,7 @@ const webAppHTML = `<!doctype html>
       // Re-run the recursive file search only when the folder actually changed
       // (a real navigation) — never on silent auto-refresh polls, which would
       // otherwise re-fetch and flicker the list every 2.5s.
-      if (cwdChanged && !options.silent && state.searchRecursive && state.searchQuery.trim()) {
+      if (cwdChanged && !options.silent && searchWalkRoot() !== null && state.searchQuery.trim()) {
         updateFileSearch();
       }
       // Auto-open the folder's README last, so the list/breadcrumb are already
@@ -5900,7 +5937,7 @@ const webAppHTML = `<!doctype html>
       const query = state.searchQuery.trim().toLowerCase();
       // Recursive ("include subfolders") mode: with a query active, the source
       // is the flattened server-walked matches; otherwise the current folder.
-      const recursiveActive = state.searchRecursive && query && Array.isArray(state.searchResults);
+      const recursiveActive = searchWalkRoot() !== null && query && Array.isArray(state.searchResults);
       const parentEntry = entries.find((entry) => entry.name === "..") || null;
 
       let body;
@@ -5959,14 +5996,25 @@ const webAppHTML = `<!doctype html>
       }
     }
 
-    // Debounced recursive search: when the toggle is ON and there is a query,
-    // walk the current folder server-side and flatten the hits (with paths
-    // relative to cwd) into state.searchResults. OFF/empty → shallow list.
+    // Which folder the recursive file-name search should walk, or null when no
+    // recursive search is active. "Whole Git repo" (when ON and inside a repo)
+    // widens the root to the repo root and takes precedence over "subfolders",
+    // which walks the current folder.
+    function searchWalkRoot() {
+      if (state.searchGit && state.gitRepoRoot) return state.gitRepoRoot;
+      if (state.searchRecursive) return state.cwd || "";
+      return null;
+    }
+
+    // Debounced recursive search: when a walk root is active and there is a
+    // query, walk that folder server-side and flatten the hits (with paths
+    // relative to the walk root) into state.searchResults. Else → shallow list.
     var _searchDebounceTimer = null;
     var _searchReqSeq = 0;
     function updateFileSearch() {
       const query = state.searchQuery.trim();
-      if (!(state.searchRecursive && query)) {
+      const root = searchWalkRoot();
+      if (!(root !== null && query)) {
         state.searchResults = null;
         if (_searchDebounceTimer) { clearTimeout(_searchDebounceTimer); _searchDebounceTimer = null; }
         _searchReqSeq++;   // invalidate any in-flight recursive request
@@ -5977,7 +6025,7 @@ const webAppHTML = `<!doctype html>
       if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer);
       _searchDebounceTimer = setTimeout(async () => {
         const seq = ++_searchReqSeq;
-        const cwd = state.cwd || "";
+        const cwd = root;
         const url = "/api/list-recursive?dir=" + encodeURIComponent(cwd) +
                     "&q=" + encodeURIComponent(query);
         try {
@@ -7227,6 +7275,8 @@ const webAppHTML = `<!doctype html>
         noMatchingFiles: "No matching files",
         searchRecursiveTitle: "Include subfolders in the file search (search all files under this folder by name)",
         searchRecursiveOn: "Subfolder search: on", searchRecursiveOff: "Subfolder search: off",
+        searchGitTitle: "Search the whole Git repository by filename (overrides subfolder scope)",
+        searchGitOn: "Whole-repo search: on", searchGitOff: "Whole-repo search: off",
         toastPathCopied: "Copied path: ",
         aidlcToggleTitle: "View all AI-DLC-generated documents by most-recently-modified (turns on the aidlc-docs folder, sorted by time)",
         aidlcSortStage: "By stage", aidlcSortRecent: "Recent",
@@ -7353,6 +7403,8 @@ const webAppHTML = `<!doctype html>
         noMatchingFiles: "일치하는 파일 없음",
         searchRecursiveTitle: "파일 검색에 하위 폴더 포함 (현재 폴더 아래 전체에서 파일명으로 검색)",
         searchRecursiveOn: "하위 폴더 검색: 켬", searchRecursiveOff: "하위 폴더 검색: 끔",
+        searchGitTitle: "Git 저장소 전체에서 파일명 검색 (하위 폴더 범위보다 우선)",
+        searchGitOn: "Git 전체 검색: 켬", searchGitOff: "Git 전체 검색: 끔",
         toastPathCopied: "경로 복사됨: ",
         aidlcToggleTitle: "AI-DLC가 생성한 문서 전체를 최근 수정순으로 모아서 봅니다 (켜면 aidlc-docs 폴더의 모든 문서를 시간순으로 정렬)",
         aidlcSortStage: "단계순", aidlcSortRecent: "최근수",
@@ -9620,6 +9672,19 @@ const webAppHTML = `<!doctype html>
         fbGitBtn.title = isRepo ? t("fbScopeGitTitle") : t("scopeNotRepo");
       }
       if (!isRepo && state.fbScope === "git") { state.fbScope = "folder"; }
+      // File-name search "whole Git repo" toggle — only visible inside a repo.
+      const searchGitBtn = document.getElementById("searchGitBtn");
+      if (searchGitBtn) {
+        const wasHidden = searchGitBtn.hidden;
+        searchGitBtn.hidden = !isRepo;
+        searchGitBtn.classList.toggle("active", isRepo && !!state.searchGit);
+        searchGitBtn.setAttribute("aria-checked", (isRepo && state.searchGit) ? "true" : "false");
+        // If git-scoped search was active and we just left the repo (or entered
+        // one), the effective walk root changed — refresh the live results.
+        if (wasHidden !== searchGitBtn.hidden && state.searchGit && state.searchQuery.trim()) {
+          updateFileSearch();
+        }
+      }
       updateVersionButton();
     }
     // The Version button needs both a git repo and an open file.
@@ -11129,6 +11194,24 @@ const webAppHTML = `<!doctype html>
         updateFileSearch();
       });
       updateSearchRecursiveBtn();
+    }
+    const searchGitBtnEl = document.getElementById("searchGitBtn");
+    // Visibility is gated by git availability (updateGitScopeUI); this only
+    // reflects the on/off state onto the button.
+    function updateSearchGitBtn() {
+      if (!searchGitBtnEl) return;
+      searchGitBtnEl.classList.toggle("active", !!state.searchGit);
+      searchGitBtnEl.setAttribute("aria-checked", state.searchGit ? "true" : "false");
+    }
+    if (searchGitBtnEl) {
+      searchGitBtnEl.addEventListener("click", () => {
+        state.searchGit = !state.searchGit;
+        try { localStorage.setItem("mdviewer.searchGit", state.searchGit ? "1" : "0"); } catch (e) {}
+        updateSearchGitBtn();
+        statusTextEl.textContent = state.searchGit ? t("searchGitOn") : t("searchGitOff");
+        updateFileSearch();
+      });
+      updateSearchGitBtn();
     }
     if (aidlcToggleEl) {
       aidlcToggleEl.addEventListener("click", toggleAidlcMode);
