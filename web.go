@@ -9769,7 +9769,7 @@ const webAppHTML = `<!doctype html>
           await new Promise(function (r) { setTimeout(r, 1000); });
           try {
             const r = await fetch("/api/version", { cache: "no-store" });
-            if (r.ok) { location.reload(); return; }
+            if (r.ok) { location.replace(location.pathname + "?_v=" + Date.now()); return; }
           } catch (e) { /* still restarting */ }
         }
         showOverlay(t("verRestartCheckFail"), false);
