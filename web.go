@@ -96,6 +96,10 @@ func (s *webServer) routes() *http.ServeMux {
 	mux.HandleFunc("/api/memos", s.handleMemos)
 	mux.HandleFunc("/api/memos/save", s.handleSaveMemos)
 	mux.HandleFunc("/api/memos/delete", s.handleDeleteMemo)
+	mux.HandleFunc("/api/ai/providers", s.handleAIProviders)
+	mux.HandleFunc("/api/ai/models", s.handleAIModels)
+	mux.HandleFunc("/api/ai/config", s.handleAIConfig)
+	mux.HandleFunc("/api/ai/run", s.handleAIRun)
 	return mux
 }
 
@@ -4552,6 +4556,39 @@ const webAppHTML = `<!doctype html>
           <button class="action icon-only" id="mermaidLabBtn" type="button" data-i18n-title="mlBtnTitle" title="Mermaid Playground — paste mermaid source, see it rendered live (click diagram to zoom)" aria-label="Mermaid Playground">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="7" x2="11" y2="16"/><line x1="16" y1="7" x2="13" y2="16"/><line x1="9" y1="6" x2="15" y2="6"/></svg>
           </button>
+          <div class="ai-wrap" id="aiWrap">
+            <button class="action ai-run-btn" id="aiRunBtn" type="button" data-i18n-title="aiRunTitle" title="Summarize this document with AI" disabled>
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/><path d="M18.5 13.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
+              <span id="aiRunLabel" data-i18n="aiSummarize">AI Summary</span>
+            </button>
+            <button class="action icon-only ai-caret-btn" id="aiCaretBtn" type="button" data-i18n-title="aiOptionsTitle" title="AI options" aria-label="AI options" aria-haspopup="true">▾</button>
+            <div class="ai-menu" id="aiMenu" role="menu" hidden>
+              <div class="ai-menu-seg" id="aiModeSeg">
+                <button type="button" class="ai-seg-btn active" data-mode="summarize" data-i18n="aiModeSummarize">Summarize</button>
+                <button type="button" class="ai-seg-btn" data-mode="verify" data-i18n="aiModeVerify">Verify</button>
+              </div>
+              <div class="ai-menu-row" id="aiLengthRow">
+                <span class="ai-menu-label" data-i18n="aiLength">Length</span>
+                <select class="ai-select" id="aiLengthSel">
+                  <option value="short" data-i18n="aiLenShort">Short</option>
+                  <option value="medium" data-i18n="aiLenMedium">Medium</option>
+                  <option value="long" data-i18n="aiLenLong">Long</option>
+                  <option value="auto" data-i18n="aiLenAuto">Auto</option>
+                </select>
+              </div>
+              <div class="ai-menu-row">
+                <span class="ai-menu-label" data-i18n="aiProvider">Provider</span>
+                <select class="ai-select" id="aiProviderSel"></select>
+              </div>
+              <div class="ai-menu-row">
+                <span class="ai-menu-label" data-i18n="aiModel">Model</span>
+                <select class="ai-select" id="aiModelSel"></select>
+              </div>
+              <div class="ai-menu-foot">
+                <button type="button" class="ai-link-btn" id="aiSettingsBtn" data-i18n="aiSettings">⚙ AI Settings…</button>
+              </div>
+            </div>
+          </div>
           <span class="divider" aria-hidden="true"></span>
           <button class="action icon-only" id="themeToggle" type="button" title="Cycle theme: Auto → Light → Dark (current state shown by icon)" aria-label="Theme">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
@@ -4724,6 +4761,105 @@ const webAppHTML = `<!doctype html>
         <div class="popup-title">⚠️ <span data-i18n="memoConflict">Memo conflict</span> <span id="memoConflictCount" class="memo-conflict-count"></span></div>
       </div>
       <div id="memoConflictBody" class="memo-conflict-body"></div>
+    </div>
+  </div>
+  <style>
+    .ai-wrap { position: relative; display: inline-flex; align-items: center; }
+    .ai-run-btn[disabled] { opacity: .45; cursor: default; }
+    .ai-run-btn.busy { opacity: .7; }
+    .ai-caret-btn { padding-left: 4px; padding-right: 4px; min-width: 20px; }
+    .ai-menu {
+      position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+      min-width: 240px; padding: 8px; border-radius: 12px;
+      background: var(--panel, #1b1b22); color: var(--fg, inherit);
+      border: 1px solid var(--border, rgba(128,128,128,.28));
+      box-shadow: 0 12px 30px rgba(0,0,0,.35);
+    }
+    .ai-menu-seg { display: flex; gap: 4px; background: var(--panel-2, rgba(128,128,128,.12)); padding: 3px; border-radius: 9px; margin-bottom: 8px; }
+    .ai-seg-btn { flex: 1; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; font-size: 13px; }
+    .ai-seg-btn.active { background: var(--accent, #7c5cff); color: #fff; font-weight: 600; }
+    .ai-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 4px; }
+    .ai-menu-label { font-size: 12px; opacity: .8; }
+    .ai-select {
+      flex: 1; max-width: 160px; padding: 5px 6px; border-radius: 7px; font-size: 12px;
+      background: var(--panel-2, rgba(128,128,128,.12)); color: inherit;
+      border: 1px solid var(--border, rgba(128,128,128,.28));
+    }
+    .ai-menu-foot { border-top: 1px solid var(--border, rgba(128,128,128,.2)); margin-top: 6px; padding-top: 6px; }
+    .ai-link-btn { width: 100%; text-align: left; padding: 6px 4px; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; border-radius: 7px; }
+    .ai-link-btn:hover { background: var(--panel-2, rgba(128,128,128,.12)); }
+
+    /* Summary/verify result card at the top of the preview */
+    .ai-card {
+      margin: 0 0 16px 0; border-radius: 12px; overflow: hidden;
+      border: 1px solid var(--border, rgba(128,128,128,.28));
+      background: var(--panel, rgba(128,128,128,.06));
+    }
+    .ai-card-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel-2, rgba(128,128,128,.1)); font-size: 12px; }
+    .ai-card-badge { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+    .ai-card-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #7c5cff); }
+    .ai-card-meta { opacity: .7; }
+    .ai-card-spacer { flex: 1; }
+    .ai-card-btn { border: 0; background: transparent; color: inherit; cursor: pointer; opacity: .7; padding: 3px 6px; border-radius: 6px; font-size: 12px; }
+    .ai-card-btn:hover { opacity: 1; background: var(--panel-2, rgba(128,128,128,.15)); }
+    .ai-card-body { padding: 12px 16px; font-size: 14px; line-height: 1.6; }
+    .ai-card-body > *:first-child { margin-top: 0; }
+    .ai-card-body > *:last-child { margin-bottom: 0; }
+    .ai-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ai-spin .7s linear infinite; vertical-align: -1px; }
+    @keyframes ai-spin { to { transform: rotate(360deg); } }
+    .ai-card.err .ai-card-body { color: #e5484d; white-space: pre-wrap; }
+
+    /* Settings modal */
+    .ai-settings-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
+    .ai-settings-card { width: min(720px, 92vw); max-height: 88vh; display: flex; flex-direction: column; border-radius: 16px; background: var(--panel, #1b1b22); color: var(--fg, inherit); border: 1px solid var(--border, rgba(128,128,128,.28)); box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .ai-settings-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(128,128,128,.2)); }
+    .ai-settings-title { font-size: 18px; font-weight: 700; }
+    .ai-settings-sub { font-size: 12px; opacity: .7; margin-top: 2px; }
+    .ai-settings-head .popup-close { margin-left: auto; }
+    .ai-settings-body { padding: 12px 20px; overflow-y: auto; }
+    .ai-prov { border: 1px solid var(--border, rgba(128,128,128,.22)); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+    .ai-prov-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .ai-prov-name { font-weight: 600; }
+    .ai-badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--panel-2, rgba(128,128,128,.18)); opacity: .85; }
+    .ai-badge.ok { background: rgba(95,191,127,.18); color: #5fbf7f; }
+    .ai-badge.no { background: rgba(229,72,77,.16); color: #e5484d; }
+    .ai-prov-field { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .ai-prov-field label { width: 84px; font-size: 12px; opacity: .75; }
+    .ai-prov-field input { flex: 1; padding: 7px 9px; border-radius: 8px; background: var(--panel-2, rgba(128,128,128,.1)); color: inherit; border: 1px solid var(--border, rgba(128,128,128,.28)); font-size: 13px; }
+    .ai-settings-foot { border-top: 1px solid var(--border, rgba(128,128,128,.2)); padding: 12px 20px; display: flex; flex-direction: column; gap: 10px; }
+    .ai-set-defaults { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ai-set-actions { display: flex; align-items: center; gap: 8px; }
+    .ai-enc-note { font-size: 12px; color: #5fbf7f; margin-right: auto; }
+    .action.primary { background: var(--accent, #7c5cff); color: #fff; border-color: transparent; }
+  </style>
+  <div class="ai-settings-modal" id="aiSettingsModal" hidden>
+    <div class="ai-settings-card" role="dialog" aria-modal="true" aria-labelledby="aiSetTitleEl">
+      <div class="ai-settings-head">
+        <div>
+          <div class="ai-settings-title" id="aiSetTitleEl" data-i18n="aiSetTitle">✨ AI Settings</div>
+          <div class="ai-settings-sub" data-i18n="aiSetSub">Configure the provider and options used for summary / verify.</div>
+        </div>
+        <button type="button" class="popup-close" id="aiSettingsClose" data-i18n-title="closeEscTitle" title="Close (Esc)">&#x2715;</button>
+      </div>
+      <div class="ai-settings-body" id="aiSettingsBody"></div>
+      <div class="ai-settings-foot">
+        <div class="ai-set-defaults">
+          <label class="ai-menu-label" data-i18n="aiDefaultProvider">Default provider</label>
+          <select class="ai-select" id="aiSetDefaultProvider"></select>
+          <label class="ai-menu-label" data-i18n="aiDefaultLength">Default length</label>
+          <select class="ai-select" id="aiSetDefaultLength">
+            <option value="short" data-i18n="aiLenShort">Short</option>
+            <option value="medium" data-i18n="aiLenMedium">Medium</option>
+            <option value="long" data-i18n="aiLenLong">Long</option>
+            <option value="auto" data-i18n="aiLenAuto">Auto</option>
+          </select>
+        </div>
+        <div class="ai-set-actions">
+          <span class="ai-enc-note" data-i18n="aiEncNote">🔒 API keys are stored AES-256-GCM encrypted.</span>
+          <button type="button" class="action" id="aiSettingsCancel" data-i18n="aiCancel">Cancel</button>
+          <button type="button" class="action primary" id="aiSettingsSave" data-i18n="aiSave">Save</button>
+        </div>
+      </div>
     </div>
   </div>
   <div class="mermaid-lab-modal" id="mermaidLabModal" hidden>
@@ -7139,6 +7275,7 @@ const webAppHTML = `<!doctype html>
       statusTextEl.textContent = (prevScrollTop !== null ? "Updated " : "Showing ") + data.name;
       updateCopyPathButton(data.path || path);
       updateEditorButtons();
+      try { if (window.__aiOnFileChange) window.__aiOnFileChange(); } catch (e) {}
       if (options.historyMode) {
         syncHistory(options.historyMode);
       }
@@ -7165,6 +7302,22 @@ const webAppHTML = `<!doctype html>
         guideSubtitle: "Select a file from the left to open your content.",
         guideMeta: "Usage guide",
         langTitle: "Language: English — click for 한국어",
+        aiSummarize: "AI Summary", aiRunTitle: "Summarize this document with AI (streaming)",
+        aiOptionsTitle: "AI options", aiModeSummarize: "Summarize", aiModeVerify: "Verify",
+        aiLength: "Length", aiLenShort: "Short", aiLenMedium: "Medium", aiLenLong: "Long", aiLenAuto: "Auto",
+        aiProvider: "Provider", aiModel: "Model", aiSettings: "⚙ AI Settings…",
+        aiVerify: "AI Verify", aiCardSummary: "AI Summary", aiCardVerify: "AI Verify",
+        aiRegenerate: "Regenerate", aiClose: "Close", aiStreaming: "Generating…",
+        aiNoProvider: "No AI provider available. Open ⚙ AI Settings to configure one.",
+        aiPickFile: "Open a Markdown or text file first.",
+        aiTruncated: "(document was truncated to fit)",
+        aiSetTitle: "✨ AI Settings", aiSetSub: "Configure the provider and options used for summary / verify.",
+        aiDefaultProvider: "Default provider", aiDefaultLength: "Default length",
+        aiEncNote: "🔒 API keys are stored AES-256-GCM encrypted.",
+        aiCancel: "Cancel", aiSave: "Save", aiSaved: "AI settings saved.",
+        aiInstalled: "installed", aiNotInstalled: "not found", aiKeySet: "key set", aiNoKey: "no key",
+        aiEndpoint: "Endpoint", aiApiKey: "API Key", aiKeyPlaceholder: "leave blank to keep current",
+        aiClearKey: "Clear stored key", aiModelPlaceholder: "default",
         updNoChange: "No changes since the last version.",
         updNoneShown: "no changes",
         version: "Version", versionTitle: "Compare this file's git revisions side by side",
@@ -7293,6 +7446,22 @@ const webAppHTML = `<!doctype html>
         guideSubtitle: "왼쪽에서 파일을 선택해 내용을 열어보세요.",
         guideMeta: "사용 가이드",
         langTitle: "언어: 한국어 — 클릭 시 English",
+        aiSummarize: "AI 요약", aiRunTitle: "이 문서를 AI로 요약 (스트리밍)",
+        aiOptionsTitle: "AI 옵션", aiModeSummarize: "요약", aiModeVerify: "검증",
+        aiLength: "길이", aiLenShort: "짧게", aiLenMedium: "중간", aiLenLong: "길게", aiLenAuto: "자동",
+        aiProvider: "제공자", aiModel: "모델", aiSettings: "⚙ AI 설정…",
+        aiVerify: "AI 검증", aiCardSummary: "AI 요약", aiCardVerify: "AI 검증",
+        aiRegenerate: "다시 생성", aiClose: "닫기", aiStreaming: "생성 중…",
+        aiNoProvider: "사용 가능한 AI 제공자가 없습니다. ⚙ AI 설정에서 설정하세요.",
+        aiPickFile: "먼저 마크다운 또는 텍스트 파일을 여세요.",
+        aiTruncated: "(문서가 길어 일부만 사용됨)",
+        aiSetTitle: "✨ AI 설정", aiSetSub: "요약·검증에 사용할 제공자와 옵션을 설정합니다.",
+        aiDefaultProvider: "기본 제공자", aiDefaultLength: "기본 길이",
+        aiEncNote: "🔒 API 키는 AES-256-GCM으로 암호화되어 저장됩니다.",
+        aiCancel: "취소", aiSave: "저장", aiSaved: "AI 설정이 저장되었습니다.",
+        aiInstalled: "설치됨", aiNotInstalled: "미설치", aiKeySet: "키 설정됨", aiNoKey: "키 없음",
+        aiEndpoint: "엔드포인트", aiApiKey: "API 키", aiKeyPlaceholder: "비워두면 기존 키 유지",
+        aiClearKey: "저장된 키 삭제", aiModelPlaceholder: "기본값",
         updNoChange: "마지막 버전과 동일 — 변경 없음.",
         updNoneShown: "변경 없음",
         version: "버전", versionTitle: "이 파일의 git 변경 이력을 버전별로 골라 좌/우로 비교",
@@ -11238,6 +11407,241 @@ const webAppHTML = `<!doctype html>
     });
 
     // ---------- Mermaid Playground modal ----------
+    // ================= AI summarize / verify =================
+    var aiState = {
+      mode: (localStorage.getItem("mdviewer.ai.mode") === "verify") ? "verify" : "summarize",
+      length: localStorage.getItem("mdviewer.ai.length") || "medium",
+      provider: localStorage.getItem("mdviewer.ai.provider") || "",
+      model: localStorage.getItem("mdviewer.ai.model") || "",
+      providers: [],
+      es: null,
+      raw: "",
+      rafPending: false,
+      finished: false
+    };
+    function aiEl(id) { return document.getElementById(id); }
+    function aiPersist(k, v) { try { localStorage.setItem("mdviewer.ai." + k, v); } catch (e) {} }
+    function aiEsc(s) { var d = document.createElement("div"); d.textContent = (s == null) ? "" : String(s); return d.innerHTML; }
+    function aiFindProvider(id) { return aiState.providers.filter(function (p) { return p.id === id; })[0]; }
+
+    function aiCanRun() {
+      return aiState.providers.length > 0 && !!state.selectedPath &&
+        (state.selectedKind === "markdown" || state.selectedKind === "text");
+    }
+    function aiUpdateEnabled() {
+      var btn = aiEl("aiRunBtn"); if (!btn) return;
+      btn.disabled = !aiCanRun();
+      btn.title = aiState.providers.length === 0 ? t("aiNoProvider") : t("aiRunTitle");
+    }
+    window.__aiOnFileChange = aiUpdateEnabled;
+
+    async function aiLoadProviders() {
+      try {
+        var res = await fetch("/api/ai/providers");
+        var data = await res.json();
+        aiState.providers = data.providers || [];
+        if (data.default_length && !localStorage.getItem("mdviewer.ai.length")) aiState.length = data.default_length;
+        if (!aiFindProvider(aiState.provider)) {
+          aiState.provider = data.default_provider || (aiState.providers[0] ? aiState.providers[0].id : "");
+        }
+        aiPopulateProviderSel();
+        var ls = aiEl("aiLengthSel"); if (ls) ls.value = aiState.length;
+        await aiLoadModels();
+      } catch (e) { aiState.providers = []; }
+      aiUpdateEnabled();
+    }
+    function aiPopulateProviderSel() {
+      var sel = aiEl("aiProviderSel"); if (!sel) return;
+      sel.innerHTML = "";
+      aiState.providers.forEach(function (p) {
+        var o = document.createElement("option"); o.value = p.id; o.textContent = p.label; sel.appendChild(o);
+      });
+      if (aiFindProvider(aiState.provider)) sel.value = aiState.provider;
+      else if (aiState.providers[0]) aiState.provider = aiState.providers[0].id;
+    }
+    async function aiLoadModels() {
+      var sel = aiEl("aiModelSel"); if (!sel) return;
+      var prov = aiFindProvider(aiState.provider);
+      var models = (prov && prov.models) ? prov.models.slice() : [];
+      if (aiState.provider === "kiro") {
+        try { var r = await fetch("/api/ai/models?provider=kiro"); var d = await r.json(); if (d.models && d.models.length) models = d.models; } catch (e) {}
+      }
+      if (models.length === 0) models = [""];
+      sel.innerHTML = "";
+      models.forEach(function (m) {
+        var o = document.createElement("option"); o.value = m; o.textContent = (m === "") ? t("aiModelPlaceholder") : m; sel.appendChild(o);
+      });
+      if (aiState.model && models.indexOf(aiState.model) >= 0) sel.value = aiState.model;
+      else aiState.model = sel.value;
+    }
+
+    function aiCardHTML() {
+      var title = (aiState.mode === "verify") ? t("aiCardVerify") : t("aiCardSummary");
+      var meta = aiEsc(aiState.provider + (aiState.model ? " · " + aiState.model : ""));
+      return '<div class="ai-card" id="aiCard">' +
+        '<div class="ai-card-head">' +
+        '<span class="ai-card-badge"><span class="dot"></span>' + aiEsc(title) + '</span>' +
+        '<span class="ai-card-meta">' + meta + '</span>' +
+        '<span class="ai-card-spacer"></span>' +
+        '<span class="ai-card-meta" id="aiCardStatus"><span class="ai-spinner"></span> ' + aiEsc(t("aiStreaming")) + '</span>' +
+        '<button class="ai-card-btn" id="aiCardRegen" type="button" title="' + aiEsc(t("aiRegenerate")) + '">&#x21bb;</button>' +
+        '<button class="ai-card-btn" id="aiCardClose" type="button" title="' + aiEsc(t("aiClose")) + '">&#x2715;</button>' +
+        '</div><div class="ai-card-body" id="aiCardBody"></div></div>';
+    }
+    function aiRemoveCard() { var c = aiEl("aiCard"); if (c) c.remove(); }
+    function aiRenderBody() {
+      var b = aiEl("aiCardBody"); if (!b) return;
+      try { b.innerHTML = marked.parse(aiState.raw || ""); } catch (e) { b.textContent = aiState.raw || ""; }
+    }
+    function aiScheduleRender() {
+      if (aiState.rafPending) return;
+      aiState.rafPending = true;
+      requestAnimationFrame(function () { aiState.rafPending = false; aiRenderBody(); });
+    }
+    function aiStop() { if (aiState.es) { try { aiState.es.close(); } catch (e) {} aiState.es = null; } }
+
+    function aiRun() {
+      if (!aiCanRun()) return;
+      aiStop();
+      aiState.raw = "";
+      aiState.finished = false;
+      aiRemoveCard();
+      previewBodyEl.insertAdjacentHTML("afterbegin", aiCardHTML());
+      previewBodyEl.scrollTop = 0;
+      aiEl("aiCardClose").addEventListener("click", function () { aiStop(); aiRemoveCard(); });
+      aiEl("aiCardRegen").addEventListener("click", function () { aiRun(); });
+      var btn = aiEl("aiRunBtn"); btn.classList.add("busy");
+      var q = "/api/ai/run?path=" + encodeURIComponent(state.selectedPath) +
+        "&provider=" + encodeURIComponent(aiState.provider) +
+        "&model=" + encodeURIComponent(aiState.model) +
+        "&length=" + encodeURIComponent(aiState.length) +
+        "&mode=" + encodeURIComponent(aiState.mode);
+      var es = new EventSource(q);
+      aiState.es = es;
+      es.addEventListener("delta", function (ev) {
+        try { var d = JSON.parse(ev.data); aiState.raw += (d.text || ""); aiScheduleRender(); } catch (e) {}
+      });
+      es.addEventListener("done", function (ev) {
+        aiState.finished = true; aiStop(); btn.classList.remove("busy"); aiRenderBody();
+        var st = aiEl("aiCardStatus"); var ms = 0; try { ms = JSON.parse(ev.data).elapsedMs; } catch (e) {}
+        if (st) st.textContent = ms ? (ms / 1000).toFixed(1) + "s" : "";
+      });
+      es.addEventListener("fail", function (ev) {
+        aiState.finished = true; aiStop(); btn.classList.remove("busy");
+        var msg = ""; try { msg = JSON.parse(ev.data).message; } catch (e) {}
+        var card = aiEl("aiCard"); if (card) card.classList.add("err");
+        var st = aiEl("aiCardStatus"); if (st) st.textContent = "";
+        var b = aiEl("aiCardBody"); if (b) b.textContent = msg || "Error";
+      });
+      es.addEventListener("error", function () {
+        // Native connection-level error (also fires when the server closes the
+        // stream after done). Ignore if we already finished; otherwise, if we
+        // streamed something, treat it as completed.
+        if (aiState.finished) { aiStop(); return; }
+        aiStop(); btn.classList.remove("busy");
+        if (aiState.raw) { aiState.finished = true; aiRenderBody(); var st = aiEl("aiCardStatus"); if (st) st.textContent = ""; }
+      });
+    }
+
+    // ---- settings modal ----
+    async function aiOpenSettings() {
+      try {
+        var res = await fetch("/api/ai/config");
+        var cfg = await res.json();
+        aiRenderSettings(cfg);
+        aiEl("aiSettingsModal").hidden = false;
+        applyI18n();
+      } catch (e) {}
+    }
+    function aiRenderSettings(cfg) {
+      var body = aiEl("aiSettingsBody"); body.innerHTML = "";
+      (cfg.providers || []).forEach(function (p) {
+        var div = document.createElement("div"); div.className = "ai-prov"; div.setAttribute("data-id", p.id);
+        var status;
+        if (p.kind === "cli") status = p.installed ? '<span class="ai-badge ok">' + aiEsc(t("aiInstalled")) + '</span>' : '<span class="ai-badge no">' + aiEsc(t("aiNotInstalled")) + '</span>';
+        else status = p.has_key ? '<span class="ai-badge ok">' + aiEsc(t("aiKeySet")) + '</span>' : '<span class="ai-badge no">' + aiEsc(t("aiNoKey")) + '</span>';
+        var html = '<div class="ai-prov-head"><span class="ai-prov-name">' + aiEsc(p.label) + '</span><span class="ai-badge">' + aiEsc(p.kind) + '</span>' + status + '</div>';
+        html += '<div class="ai-prov-field"><label>' + aiEsc(t("aiModel")) + '</label><input type="text" class="ai-f-model" value="' + aiEsc(p.model || "") + '" placeholder="' + aiEsc(t("aiModelPlaceholder")) + '"></div>';
+        if (p.kind === "api") {
+          html += '<div class="ai-prov-field"><label>' + aiEsc(t("aiEndpoint")) + '</label><input type="text" class="ai-f-endpoint" value="' + aiEsc(p.endpoint || "") + '"></div>';
+          var kph = p.has_key ? p.key_hint : t("aiKeyPlaceholder");
+          html += '<div class="ai-prov-field"><label>' + aiEsc(t("aiApiKey")) + '</label><input type="password" class="ai-f-key" autocomplete="off" placeholder="' + aiEsc(kph) + '"></div>';
+          html += '<div class="ai-prov-field"><label></label><label style="width:auto;display:flex;align-items:center;gap:6px;opacity:.8"><input type="checkbox" class="ai-f-clear"> ' + aiEsc(t("aiClearKey")) + '</label></div>';
+        }
+        div.innerHTML = html; body.appendChild(div);
+      });
+      var dp = aiEl("aiSetDefaultProvider"); dp.innerHTML = "";
+      (cfg.providers || []).forEach(function (p) { var o = document.createElement("option"); o.value = p.id; o.textContent = p.label; dp.appendChild(o); });
+      if (cfg.default_provider) dp.value = cfg.default_provider;
+      aiEl("aiSetDefaultLength").value = cfg.default_length || "medium";
+    }
+    async function aiSaveSettings() {
+      var provs = [];
+      var nodes = aiEl("aiSettingsBody").querySelectorAll(".ai-prov");
+      Array.prototype.forEach.call(nodes, function (div) {
+        var id = div.getAttribute("data-id");
+        var mv = div.querySelector(".ai-f-model");
+        var ev = div.querySelector(".ai-f-endpoint");
+        var kv = div.querySelector(".ai-f-key");
+        var cv = div.querySelector(".ai-f-clear");
+        provs.push({
+          id: id,
+          model: mv ? mv.value : "",
+          endpoint: ev ? ev.value : "",
+          api_key: kv ? kv.value : "",
+          clear_key: cv ? cv.checked : false
+        });
+      });
+      var payload = {
+        default_provider: aiEl("aiSetDefaultProvider").value,
+        default_length: aiEl("aiSetDefaultLength").value,
+        providers: provs
+      };
+      try {
+        await fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      } catch (e) {}
+      aiEl("aiSettingsModal").hidden = true;
+      await aiLoadProviders();
+    }
+
+    function aiInit() {
+      var runBtn = aiEl("aiRunBtn"); if (!runBtn) return;
+      var caret = aiEl("aiCaretBtn"), menu = aiEl("aiMenu");
+      runBtn.addEventListener("click", function () { aiRun(); });
+      caret.addEventListener("click", function (e) { e.stopPropagation(); menu.hidden = !menu.hidden; });
+      document.addEventListener("click", function (e) {
+        if (menu && !menu.hidden && !aiEl("aiWrap").contains(e.target)) menu.hidden = true;
+      });
+      var segBtns = aiEl("aiModeSeg").querySelectorAll(".ai-seg-btn");
+      Array.prototype.forEach.call(segBtns, function (b) {
+        b.addEventListener("click", function () {
+          aiState.mode = b.getAttribute("data-mode"); aiPersist("mode", aiState.mode);
+          Array.prototype.forEach.call(segBtns, function (x) { x.classList.toggle("active", x === b); });
+          aiEl("aiLengthRow").style.display = (aiState.mode === "verify") ? "none" : "";
+          aiEl("aiRunLabel").textContent = t(aiState.mode === "verify" ? "aiVerify" : "aiSummarize");
+        });
+      });
+      aiEl("aiLengthSel").addEventListener("change", function (e) { aiState.length = e.target.value; aiPersist("length", aiState.length); });
+      aiEl("aiProviderSel").addEventListener("change", async function (e) {
+        aiState.provider = e.target.value; aiPersist("provider", aiState.provider);
+        aiState.model = ""; await aiLoadModels(); aiPersist("model", aiState.model);
+      });
+      aiEl("aiModelSel").addEventListener("change", function (e) { aiState.model = e.target.value; aiPersist("model", aiState.model); });
+      aiEl("aiSettingsBtn").addEventListener("click", function () { menu.hidden = true; aiOpenSettings(); });
+      aiEl("aiSettingsClose").addEventListener("click", function () { aiEl("aiSettingsModal").hidden = true; });
+      aiEl("aiSettingsCancel").addEventListener("click", function () { aiEl("aiSettingsModal").hidden = true; });
+      aiEl("aiSettingsSave").addEventListener("click", aiSaveSettings);
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !aiEl("aiSettingsModal").hidden) aiEl("aiSettingsModal").hidden = true;
+      });
+      Array.prototype.forEach.call(segBtns, function (x) { x.classList.toggle("active", x.getAttribute("data-mode") === aiState.mode); });
+      aiEl("aiLengthRow").style.display = (aiState.mode === "verify") ? "none" : "";
+      aiEl("aiLengthSel").value = aiState.length;
+      aiEl("aiRunLabel").textContent = t(aiState.mode === "verify" ? "aiVerify" : "aiSummarize");
+      aiLoadProviders();
+    }
+    aiInit();
+
     let mermaidLabRenderTimer = null;
     let mermaidLabIdCounter = 0;
 

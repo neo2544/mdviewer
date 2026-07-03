@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="720" viewBox="0 0 760 720" font-family="-apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#4c8dff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="20" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="760" height="720" fill="#0c0c10"/>
+
+  <!-- modal card -->
+  <rect x="40" y="30" width="680" height="660" rx="16" fill="#1b1b22" stroke="#2c2c36" stroke-width="1" filter="url(#shadow)"/>
+
+  <!-- header -->
+  <text x="68" y="78" fill="#f4f4f8" font-size="22" font-weight="700">✨ AI 설정</text>
+  <text x="68" y="102" fill="#8b8b98" font-size="13">요약·검증에 사용할 AI 제공자와 옵션을 설정합니다</text>
+  <text x="678" y="82" fill="#8b8b98" font-size="20" text-anchor="end">✕</text>
+  <line x1="68" y1="120" x2="692" y2="120" stroke="#2c2c36" stroke-width="1"/>
+
+  <!-- section: provider -->
+  <text x="68" y="152" fill="#c9c9d4" font-size="13" font-weight="600">제공자 (Provider)</text>
+  <!-- segmented -->
+  <rect x="68" y="164" width="624" height="44" rx="10" fill="#14141a" stroke="#2c2c36"/>
+  <rect x="72" y="168" width="150" height="36" rx="8" fill="url(#accent)"/>
+  <text x="147" y="191" fill="#fff" font-size="14" font-weight="600" text-anchor="middle">Claude (CLI)</text>
+  <text x="300" y="191" fill="#b6b6c2" font-size="14" text-anchor="middle">Codex (CLI)</text>
+  <text x="446" y="191" fill="#b6b6c2" font-size="14" text-anchor="middle">Kiro (CLI)</text>
+  <text x="612" y="191" fill="#b6b6c2" font-size="14" text-anchor="middle">API 직접</text>
+
+  <!-- section: model -->
+  <text x="68" y="248" fill="#c9c9d4" font-size="13" font-weight="600">모델 (Model)</text>
+  <rect x="68" y="260" width="624" height="44" rx="10" fill="#14141a" stroke="#2c2c36"/>
+  <text x="86" y="287" fill="#eaeaf2" font-size="14">claude-opus-4.8</text>
+  <text x="674" y="287" fill="#8b8b98" font-size="14" text-anchor="end">▾</text>
+
+  <!-- section: API config -->
+  <text x="68" y="344" fill="#c9c9d4" font-size="13" font-weight="600">API 설정 <tspan fill="#6a6a78" font-weight="400">(API 직접 선택 시)</tspan></text>
+
+  <text x="68" y="374" fill="#8b8b98" font-size="12">Endpoint</text>
+  <rect x="68" y="382" width="624" height="42" rx="10" fill="#14141a" stroke="#2c2c36"/>
+  <text x="86" y="408" fill="#eaeaf2" font-size="13">https://api.anthropic.com/v1/messages</text>
+
+  <text x="68" y="450" fill="#8b8b98" font-size="12">API Key</text>
+  <rect x="68" y="458" width="480" height="42" rx="10" fill="#14141a" stroke="#2c2c36"/>
+  <text x="86" y="484" fill="#eaeaf2" font-size="13" letter-spacing="2">••••••••••••••••••••••••••••1a2b</text>
+  <rect x="560" y="458" width="132" height="42" rx="10" fill="#20202a" stroke="#3a3a48"/>
+  <text x="626" y="484" fill="#c9c9d4" font-size="13" text-anchor="middle">연결 테스트</text>
+
+  <!-- encryption note -->
+  <text x="68" y="524" fill="#5fbf7f" font-size="12">🔒 키는 AES-256-GCM으로 암호화되어 저장됩니다 (macOS Keychain 마스터키)</text>
+
+  <line x1="68" y1="542" x2="692" y2="542" stroke="#2c2c36" stroke-width="1"/>
+
+  <!-- section: summary length -->
+  <text x="68" y="572" fill="#c9c9d4" font-size="13" font-weight="600">요약 길이</text>
+  <rect x="68" y="584" width="624" height="40" rx="10" fill="#14141a" stroke="#2c2c36"/>
+  <text x="146" y="609" fill="#b6b6c2" font-size="13" text-anchor="middle">짧게</text>
+  <rect x="240" y="588" width="150" height="32" rx="7" fill="url(#accent)"/>
+  <text x="315" y="609" fill="#fff" font-size="13" font-weight="600" text-anchor="middle">중간</text>
+  <text x="458" y="609" fill="#b6b6c2" font-size="13" text-anchor="middle">길게</text>
+  <text x="612" y="609" fill="#b6b6c2" font-size="13" text-anchor="middle">자동</text>
+
+  <!-- verify toggle -->
+  <text x="68" y="662" fill="#c9c9d4" font-size="14" font-weight="600">문서 검증 옵션</text>
+  <text x="68" y="681" fill="#8b8b98" font-size="12">사실오류·논리모순·끊긴 참조·오탈자를 함께 점검</text>
+  <rect x="638" y="650" width="54" height="30" rx="15" fill="url(#accent)"/>
+  <circle cx="677" cy="665" r="12" fill="#fff"/>
+
+  <!-- footer buttons -->
+  <rect x="500" y="640" width="0" height="0"/>
+</svg>
