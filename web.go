@@ -1457,6 +1457,28 @@ const webAppHTML = `<!doctype html>
       border-color: color-mix(in oklab, var(--accent) 55%, transparent);
       color: var(--text);
     }
+    .branch-chip {
+      display: inline-block;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+      margin-top: 6px;
+      margin-left: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--accent) 14%, transparent);
+      border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+      color: color-mix(in oklab, var(--accent) 70%, var(--text));
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      cursor: default;
+    }
+    /* Author display above would defeat the [hidden] attribute (author display
+       wins over the UA [hidden]{display:none}); restore hide-on-hidden so the
+       chip disappears outside a git repo. */
+    .branch-chip[hidden] { display: none; }
     .git-remote-link {
       display: inline-flex;
       align-items: center;
@@ -4416,6 +4438,7 @@ const webAppHTML = `<!doctype html>
             <span class="brand-name">MD Viewer</span>
           </div>
           <div class="subtle path-chip" id="cwd"></div>
+          <span class="branch-chip" id="cwdBranch" title="Current git branch of this folder" hidden></span>
           <a class="git-remote-link" id="gitRemoteLink" href="#" target="_blank" rel="noopener" hidden>↗ open remote</a>
           <div class="searchbox has-icon has-browse-btn has-recursive-btn">
             <svg class="searchbox-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -5103,6 +5126,7 @@ const webAppHTML = `<!doctype html>
       fbScope: (localStorage.getItem("mdviewer.fbScope") === "git") ? "git" : "folder",
       gitRepoRoot: null, // null = unknown, "" = not a repo, else repo root path
       gitRepoCwd: null,  // cwd the gitRepoRoot was resolved for
+      gitBranch: "",     // current branch of gitRepoRoot ("" when unknown/not a repo)
       // AI-DLC mode: available only when the repo root holds an aidlc-docs folder.
       // When ON, the file pane shows every aidlc-docs file (recursive), sorted
       // most-recently-updated first. aidlcWanted is the user's persisted intent;
@@ -9815,18 +9839,36 @@ const webAppHTML = `<!doctype html>
     // Resolve whether the current folder is inside a git repo, then enable or
     // disable the "Git" scope toggles accordingly. Cached per cwd.
     async function refreshGitScope() {
-      if (!state.cwd) { state.gitRepoRoot = ""; updateGitScopeUI(); return; }
+      if (!state.cwd) { state.gitRepoRoot = ""; state.gitBranch = ""; updateGitScopeUI(); return; }
       if (state.gitRepoCwd === state.cwd && state.gitRepoRoot !== null) { updateGitScopeUI(); return; }
       try {
         const r = await fetch("/api/git/root?dir=" + encodeURIComponent(state.cwd));
         if (!r.ok) return;
         const data = await r.json();
         state.gitRepoRoot = (data && data.root) || "";
+        state.gitBranch = (data && data.branch) || "";
         state.gitRepoCwd = state.cwd;
       } catch (e) { return; }
       updateGitScopeUI();
     }
+    // Show the current git branch of the folder next to the path, so different
+    // checkouts / worktrees of the same repo are easy to tell apart.
+    function renderBranchChip() {
+      const el = document.getElementById("cwdBranch");
+      if (!el) return;
+      if (state.gitBranch) {
+        el.textContent = "\u2387 " + state.gitBranch;
+        el.dataset.branch = state.gitBranch;
+        el.title = "Git branch: " + state.gitBranch;
+        el.hidden = false;
+      } else {
+        el.hidden = true;
+        el.textContent = "";
+      }
+    }
+
     function updateGitScopeUI() {
+      renderBranchChip();
       const isRepo = !!state.gitRepoRoot;
       // Content-search "Git 전체" toggle.
       const gitBtn = document.getElementById("searchScopeGit");
@@ -14363,7 +14405,8 @@ func (s *webServer) gitRoot(ctx context.Context, dir string) string {
 }
 
 // handleGitRoot reports whether dir is inside a git repo and, if so, its root.
-// The UI uses this to enable/disable the "Git" search scope.
+// The UI uses this to enable/disable the "Git" search scope and to display the
+// current branch next to the folder path (helps tell worktrees apart).
 func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	if dir == "" {
@@ -14371,11 +14414,34 @@ func (s *webServer) handleGitRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		s.writeJSON(w, http.StatusOK, map[string]any{"root": "", "isRepo": false})
+		s.writeJSON(w, http.StatusOK, map[string]any{"root": "", "isRepo": false, "branch": ""})
 		return
 	}
 	root := s.gitRoot(r.Context(), abs)
-	s.writeJSON(w, http.StatusOK, map[string]any{"root": root, "isRepo": root != ""})
+	branch := ""
+	if root != "" {
+		branch = s.gitBranch(r.Context(), abs)
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"root": root, "isRepo": root != "", "branch": branch})
+}
+
+// gitBranch returns the current branch name for dir. In detached-HEAD state
+// (e.g. a checked-out tag or specific commit) it returns "@<shorthash>". Empty
+// when the branch cannot be resolved.
+func (s *webServer) gitBranch(ctx context.Context, dir string) string {
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(c, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	b := strings.TrimSpace(string(raw))
+	if b == "HEAD" { // detached HEAD → show the short commit id instead
+		if h, herr := exec.CommandContext(c, "git", "-C", dir, "rev-parse", "--short", "HEAD").Output(); herr == nil {
+			return "@" + strings.TrimSpace(string(h))
+		}
+	}
+	return b
 }
 
 // isHexRev reports whether s looks like a git object id (short or full). We feed
