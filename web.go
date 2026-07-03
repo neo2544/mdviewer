@@ -11555,6 +11555,9 @@ const webAppHTML = `<!doctype html>
     }
     function aiRenderSettings(cfg) {
       var body = aiEl("aiSettingsBody"); body.innerHTML = "";
+      if (!(cfg.providers && cfg.providers.length)) {
+        body.innerHTML = '<div style="opacity:.7;padding:10px 4px">' + aiEsc(t("aiNoProvider")) + '</div>';
+      }
       (cfg.providers || []).forEach(function (p) {
         var div = document.createElement("div"); div.className = "ai-prov"; div.setAttribute("data-id", p.id);
         var status;
@@ -11631,6 +11634,8 @@ const webAppHTML = `<!doctype html>
       aiEl("aiSettingsClose").addEventListener("click", function () { aiEl("aiSettingsModal").hidden = true; });
       aiEl("aiSettingsCancel").addEventListener("click", function () { aiEl("aiSettingsModal").hidden = true; });
       aiEl("aiSettingsSave").addEventListener("click", aiSaveSettings);
+      var aiSetModal = aiEl("aiSettingsModal");
+      if (aiSetModal) aiSetModal.addEventListener("click", function (e) { if (e.target === aiSetModal) aiSetModal.hidden = true; });
       document.addEventListener("keydown", function (e) {
         if (e.key === "Escape" && !aiEl("aiSettingsModal").hidden) aiEl("aiSettingsModal").hidden = true;
       });
