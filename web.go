@@ -4587,9 +4587,6 @@ const webAppHTML = `<!doctype html>
                 <span class="ai-menu-label" data-i18n="aiModel">Model</span>
                 <select class="ai-select" id="aiModelSel"></select>
               </div>
-              <div class="ai-menu-foot">
-                <button type="button" class="ai-link-btn" id="aiSettingsBtn" data-i18n="aiSettings">⚙ AI Settings…</button>
-              </div>
             </div>
           </div>
           <span class="divider" aria-hidden="true"></span>
@@ -4788,7 +4785,6 @@ const webAppHTML = `<!doctype html>
       background: var(--panel-2, rgba(128,128,128,.12)); color: inherit;
       border: 1px solid var(--border, rgba(128,128,128,.28));
     }
-    .ai-menu-foot { border-top: 1px solid var(--border, rgba(128,128,128,.2)); margin-top: 6px; padding-top: 6px; }
     .ai-link-btn { width: 100%; text-align: left; padding: 6px 4px; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; border-radius: 7px; }
     .ai-link-btn:hover { background: var(--panel-2, rgba(128,128,128,.12)); }
 
@@ -4814,6 +4810,10 @@ const webAppHTML = `<!doctype html>
 
     /* Settings modal */
     .ai-settings-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
+    /* Author display:flex above would otherwise defeat the [hidden] attribute
+       (author display wins over the UA [hidden]{display:none}), leaving the
+       modal permanently covering the page. Restore hide-on-hidden. */
+    .ai-settings-modal[hidden] { display: none; }
     .ai-settings-card { width: min(720px, 92vw); max-height: 88vh; display: flex; flex-direction: column; border-radius: 16px; background: var(--panel, #1b1b22); color: var(--fg, inherit); border: 1px solid var(--border, rgba(128,128,128,.28)); box-shadow: 0 20px 60px rgba(0,0,0,.5); }
     .ai-settings-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(128,128,128,.2)); }
     .ai-settings-title { font-size: 18px; font-weight: 700; }
@@ -7311,7 +7311,7 @@ const webAppHTML = `<!doctype html>
         aiProvider: "Provider", aiModel: "Model", aiSettings: "⚙ AI Settings…",
         aiVerify: "AI Verify", aiCardSummary: "AI Summary", aiCardVerify: "AI Verify",
         aiRegenerate: "Regenerate", aiClose: "Close", aiStreaming: "Generating…",
-        aiNoProvider: "No AI provider available. Open ⚙ AI Settings to configure one.",
+        aiNoProvider: "No AI provider configured yet. Click AI Summary to set one up.",
         aiPickFile: "Open a Markdown or text file first.",
         aiTruncated: "(document was truncated to fit)",
         aiSetTitle: "✨ AI Settings", aiSetSub: "Configure the provider and options used for summary / verify.",
@@ -7455,7 +7455,7 @@ const webAppHTML = `<!doctype html>
         aiProvider: "제공자", aiModel: "모델", aiSettings: "⚙ AI 설정…",
         aiVerify: "AI 검증", aiCardSummary: "AI 요약", aiCardVerify: "AI 검증",
         aiRegenerate: "다시 생성", aiClose: "닫기", aiStreaming: "생성 중…",
-        aiNoProvider: "사용 가능한 AI 제공자가 없습니다. ⚙ AI 설정에서 설정하세요.",
+        aiNoProvider: "설정된 AI 제공자가 없습니다. AI Summary를 눌러 설정하세요.",
         aiPickFile: "먼저 마크다운 또는 텍스트 파일을 여세요.",
         aiTruncated: "(문서가 길어 일부만 사용됨)",
         aiSetTitle: "✨ AI 설정", aiSetSub: "요약·검증에 사용할 제공자와 옵션을 설정합니다.",
@@ -11433,7 +11433,9 @@ const webAppHTML = `<!doctype html>
     }
     function aiUpdateEnabled() {
       var btn = aiEl("aiRunBtn"); if (!btn) return;
-      btn.disabled = !aiCanRun();
+      // When no provider is configured, keep the button enabled so a click can
+      // open the AI settings modal to configure one.
+      btn.disabled = (aiState.providers.length > 0) && !aiCanRun();
       btn.title = aiState.providers.length === 0 ? t("aiNoProvider") : t("aiRunTitle");
     }
     window.__aiOnFileChange = aiUpdateEnabled;
@@ -11504,6 +11506,7 @@ const webAppHTML = `<!doctype html>
     function aiStop() { if (aiState.es) { try { aiState.es.close(); } catch (e) {} aiState.es = null; } }
 
     function aiRun() {
+      if (aiState.providers.length === 0) { aiOpenSettings(); return; }
       if (!aiCanRun()) return;
       aiStop();
       aiState.raw = "";
@@ -11633,7 +11636,6 @@ const webAppHTML = `<!doctype html>
         aiState.model = ""; await aiLoadModels(); aiPersist("model", aiState.model);
       });
       aiEl("aiModelSel").addEventListener("change", function (e) { aiState.model = e.target.value; aiPersist("model", aiState.model); });
-      aiEl("aiSettingsBtn").addEventListener("click", function () { menu.hidden = true; aiOpenSettings(); });
       aiEl("aiSettingsClose").addEventListener("click", function () { aiEl("aiSettingsModal").hidden = true; });
       aiEl("aiSettingsCancel").addEventListener("click", function () { aiEl("aiSettingsModal").hidden = true; });
       aiEl("aiSettingsSave").addEventListener("click", aiSaveSettings);
