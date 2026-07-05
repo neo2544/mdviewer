@@ -2744,7 +2744,11 @@ const webAppHTML = `<!doctype html>
       color: var(--text);
       font-size: 12px;
       line-height: 1.45;
-      z-index: 1000;
+      /* Above every overlay (lightbox 2000, version-compare 1800, modals) so the
+         mermaid hover tooltip shows there too. Zooming the lightbox scales the
+         box and its text together, so clipped labels stay clipped — the tooltip
+         is the only way to read them. pointer-events:none keeps it click-through. */
+      z-index: 9000;
       pointer-events: none;
       opacity: 0;
       transform: translate3d(0, 0, 0);
