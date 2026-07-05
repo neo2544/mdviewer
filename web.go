@@ -5698,6 +5698,62 @@ const webAppHTML = `<!doctype html>
       floatingTooltipEl.classList.remove("single-line");
     }
 
+    // ---- Mermaid: reveal a node's full text on hover ----
+    // Mermaid boxes are sometimes narrower than their label, so long text gets
+    // visually clipped by the box. The full label still lives in the DOM, so on
+    // hover we surface it in the shared floating tooltip (multi-line aware).
+    function mermaidNodeFullText(nodeEl) {
+      if (!nodeEl) return "";
+      // htmlLabels (default flowchart): text lives in a foreignObject <div>.
+      const fo = nodeEl.querySelector("foreignObject");
+      if (fo) {
+        const host = fo.querySelector(".nodeLabel") || fo.firstElementChild || fo;
+        const raw = (host.innerText != null ? host.innerText : host.textContent) || "";
+        return raw.replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+      }
+      // SVG text label: each <tspan> is a wrapped line.
+      const tspans = nodeEl.querySelectorAll("text tspan");
+      if (tspans.length) {
+        return Array.prototype.map.call(tspans, (ts) => ts.textContent)
+          .join("\n").replace(/\u00a0/g, " ").trim();
+      }
+      const textEl = nodeEl.querySelector("text");
+      if (textEl) return (textEl.textContent || "").trim();
+      return (nodeEl.textContent || "").replace(/\s+/g, " ").trim();
+    }
+    // Resolve the mermaid node group under the pointer, if any. Restricted to
+    // groups that actually carry a label so unrelated SVGs are ignored.
+    function mermaidNodeAt(target) {
+      if (!(target instanceof Element)) return null;
+      const g = target.closest("g.node");
+      if (!g || !g.querySelector("foreignObject, text")) return null;
+      return g;
+    }
+    (function initMermaidHoverTooltips() {
+      let current = null;
+      document.addEventListener("pointerover", (e) => {
+        const node = mermaidNodeAt(e.target);
+        if (!node || node === current) return;
+        const txt = mermaidNodeFullText(node);
+        if (!txt) return;
+        current = node;
+        showTooltip(txt, e.clientX, e.clientY);
+      });
+      document.addEventListener("pointermove", (e) => {
+        if (!current) return;
+        const node = mermaidNodeAt(e.target);
+        if (node === current) {
+          showTooltip(mermaidNodeFullText(current), e.clientX, e.clientY);
+        } else {
+          current = null;
+          hideTooltip();
+        }
+      });
+      document.addEventListener("pointerout", (e) => {
+        if (current && !mermaidNodeAt(e.target)) { current = null; hideTooltip(); }
+      });
+    })();
+
     function setSidebarCollapsed(collapsed) {
       state.sidebarCollapsed = collapsed;
       applySidebarLayout();
