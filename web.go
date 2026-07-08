@@ -13625,7 +13625,7 @@ const webAppHTML = `<!doctype html>
 
     lightboxEl.addEventListener("wheel", (event) => {
       event.preventDefault();
-      const factor = event.deltaY < 0 ? 1.18 : 1 / 1.18;
+      const factor = event.deltaY < 0 ? 1.03 : 1 / 1.03;
       lightboxZoomAt(event.clientX, event.clientY, factor);
     }, { passive: false });
 
