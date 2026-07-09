@@ -103,6 +103,13 @@ test.describe('mdviewer web app', () => {
       const overlayBg = await page.locator('#lightboxStage svg.lb-anno-overlay')
         .evaluate((el) => getComputedStyle(el).backgroundColor);
       expect(['rgba(0, 0, 0, 0)', 'transparent']).toContain(overlayBg);
+      // Rectangle tool: switch to ▭ and drag → an SVG <rect> annotation.
+      await page.locator('#lbAnnoRectBtn').click();
+      await page.mouse.move(cx - 80, cy - 60);
+      await page.mouse.down();
+      await page.mouse.move(cx + 80, cy + 60, { steps: 10 });
+      await page.mouse.up();
+      await expect(page.locator('#lightboxStage svg.lb-anno-overlay rect.lb-annotation')).toHaveCount(1);
       // Saving the annotated image composites the strokes into a PNG download.
       const [download] = await Promise.all([
         page.waitForEvent('download'),

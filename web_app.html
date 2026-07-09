@@ -2122,6 +2122,7 @@
     .lightbox.eraser-mode .lb-annotation { cursor: pointer; }
     .lightbox.eraser-mode .lb-annotation:hover { stroke-width: 6 !important; filter: drop-shadow(0 0 4px rgba(255,255,255,0.6)); }
     .lightbox.postit-mode .lightbox-stage { cursor: crosshair; }
+    .lightbox.rect-mode .lightbox-stage { cursor: crosshair; }
     .lightbox.postit-mode .lb-postit { cursor: move; }
     .lb-postit-resize, .lb-postit-delete { visibility: hidden; }
     .lightbox.postit-mode .lb-postit-resize { visibility: visible; cursor: nwse-resize; }
@@ -3758,6 +3759,7 @@
         <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
       <button type="button" class="draw-only" data-action="annopostit" id="lbAnnoPostitBtn" title="Add a post-it note (each click drops one; drag to move, grip to resize, × to delete)" hidden>📝</button>
+      <button type="button" class="draw-only" data-action="annorect" id="lbAnnoRectBtn" title="Rectangle — left-drag to draw a box" hidden>▭</button>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke / post-it to delete" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
@@ -11586,6 +11588,8 @@
     var _lbRedoStack = [];
     var _lbEraserMode = false;
     var _lbPostitMode = false;
+    var _lbRectMode = false;
+    var _lbRectStart = null;
     var _lbPostitDrag = null; // { g, kind: "move"|"resize", startX, startY, before, didMove }
     var _lbActivePostitEditor = null;
     var _lbEraseDrag = null; // { erased: [el, ...] } while pointer is held in eraser mode
@@ -11850,6 +11854,65 @@
       try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
     }
 
+    // ----- Rectangle annotation (a draw sub-tool) -----
+    // Same lifecycle as a freehand stroke, but the active element is an SVG
+    // <rect> whose geometry is recomputed from the drag start + current point
+    // (so dragging in any direction produces a positive-size box).
+    function startAnnotationRect(event) {
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const ns = "http://www.w3.org/2000/svg";
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("class", "lb-annotation");
+      rect.setAttribute("fill", "none");
+      rect.setAttribute("stroke", _lbDrawColor);
+      rect.setAttribute("stroke-opacity", String(_lbDrawOpacity));
+      rect.setAttribute("stroke-width", "3");
+      rect.setAttribute("stroke-linejoin", "round");
+      rect.setAttribute("vector-effect", "non-scaling-stroke");
+      rect.style.pointerEvents = "none";
+      const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
+      _lbRectStart = { x: p.x, y: p.y };
+      rect.setAttribute("x", p.x);
+      rect.setAttribute("y", p.y);
+      rect.setAttribute("width", 0);
+      rect.setAttribute("height", 0);
+      svg.appendChild(rect);
+      _lbAnnoActive = rect;
+      _lbAnnoStartedAt = Date.now();
+      try { lightboxEl.setPointerCapture(event.pointerId); } catch (e) {}
+    }
+
+    function continueAnnotationRect(event) {
+      if (!_lbAnnoActive || !_lbRectStart) return;
+      const svg = getAnnotationSVG();
+      if (!svg) return;
+      const p = screenToSVGUserSpace(svg, event.clientX, event.clientY);
+      const x = Math.min(_lbRectStart.x, p.x);
+      const y = Math.min(_lbRectStart.y, p.y);
+      const w = Math.abs(p.x - _lbRectStart.x);
+      const h = Math.abs(p.y - _lbRectStart.y);
+      _lbAnnoActive.setAttribute("x", x);
+      _lbAnnoActive.setAttribute("y", y);
+      _lbAnnoActive.setAttribute("width", w);
+      _lbAnnoActive.setAttribute("height", h);
+    }
+
+    function endAnnotationRect(event) {
+      if (!_lbAnnoActive) return;
+      const rect = _lbAnnoActive;
+      const w = parseFloat(rect.getAttribute("width")) || 0;
+      const h = parseFloat(rect.getAttribute("height")) || 0;
+      if (w < 2 && h < 2) {
+        rect.remove(); // treat a click-without-drag as a cancel
+      } else {
+        recordAnnoAction({ type: "add", strokes: [rect] });
+      }
+      _lbAnnoActive = null;
+      _lbRectStart = null;
+      try { lightboxEl.releasePointerCapture(event.pointerId); } catch (e) {}
+    }
+
     function setDrawControlsVisible(visible) {
       const els = document.querySelectorAll(".lightbox-toolbar .draw-only");
       for (const el of els) {
@@ -11888,6 +11951,12 @@
           if (pb) pb.classList.remove("active");
           lightboxEl.classList.remove("postit-mode");
         }
+        if (_lbRectMode) {
+          _lbRectMode = false;
+          const rb = document.getElementById("lbAnnoRectBtn");
+          if (rb) rb.classList.remove("active");
+          lightboxEl.classList.remove("rect-mode");
+        }
         setAnnotationStrokesInteractive(false);
       }
     }
@@ -11900,16 +11969,31 @@
       if (!_lbDrawMode) return; // eraser button is hidden outside draw mode
       _lbEraserMode = !_lbEraserMode;
       if (_lbEraserMode && _lbPostitMode) togglePostitMode();
+      if (_lbEraserMode && _lbRectMode) toggleRectMode();
       const btn = document.getElementById("lbAnnoEraseBtn");
       if (btn) btn.classList.toggle("active", _lbEraserMode);
       lightboxEl.classList.toggle("eraser-mode", _lbEraserMode);
       syncAnnotationInteractive();
     }
 
+    // Rectangle tool — a draw sub-tool, mutually exclusive with eraser and
+    // post-it. While active, a left-drag draws an axis-aligned box instead of
+    // a freehand stroke.
+    function toggleRectMode() {
+      if (!_lbDrawMode) return;
+      _lbRectMode = !_lbRectMode;
+      if (_lbRectMode && _lbEraserMode) toggleEraserMode();
+      if (_lbRectMode && _lbPostitMode) togglePostitMode();
+      const btn = document.getElementById("lbAnnoRectBtn");
+      if (btn) btn.classList.toggle("active", _lbRectMode);
+      lightboxEl.classList.toggle("rect-mode", _lbRectMode);
+    }
+
     function enterPostitMode() {
       if (_lbPostitMode) return;
       _lbPostitMode = true;
       if (_lbEraserMode) toggleEraserMode();
+      if (_lbRectMode) toggleRectMode();
       const btn = document.getElementById("lbAnnoPostitBtn");
       if (btn) btn.classList.add("active");
       lightboxEl.classList.add("postit-mode");
@@ -12465,6 +12549,8 @@
       _lbDrawMode = false;
       _lbEraserMode = false;
       _lbPostitMode = false;
+      _lbRectMode = false;
+      _lbRectStart = null;
       _lbHistory = [];
       _lbRedoStack = [];
       const drawBtn = document.getElementById("lbAnnoDrawBtn");
@@ -12473,9 +12559,12 @@
       if (eraseBtn) eraseBtn.classList.remove("active");
       const postitBtn = document.getElementById("lbAnnoPostitBtn");
       if (postitBtn) postitBtn.classList.remove("active");
+      const rectBtn = document.getElementById("lbAnnoRectBtn");
+      if (rectBtn) rectBtn.classList.remove("active");
       lightboxEl.classList.remove("draw-mode");
       lightboxEl.classList.remove("eraser-mode");
       lightboxEl.classList.remove("postit-mode");
+      lightboxEl.classList.remove("rect-mode");
       setDrawControlsVisible(false);
       lightboxEl.hidden = true;
       lightboxStageEl.innerHTML = "";
@@ -12608,6 +12697,11 @@
         // notes when panning or mis-clicking.
         return;
       }
+      if (_lbRectMode && event.button === 0) {
+        event.preventDefault();
+        startAnnotationRect(event);
+        return;
+      }
       if (_lbDrawMode && event.button === 0) {
         event.preventDefault();
         startAnnotationStroke(event);
@@ -12630,7 +12724,11 @@
 
     lightboxEl.addEventListener("pointermove", (event) => {
       if (_lbBoxSel) { updateLbBoxSelect(event); event.preventDefault(); return; }
-      if (_lbAnnoActive) { continueAnnotationStroke(event); return; }
+      if (_lbAnnoActive) {
+        if (_lbAnnoActive.tagName && _lbAnnoActive.tagName.toLowerCase() === "rect") continueAnnotationRect(event);
+        else continueAnnotationStroke(event);
+        return;
+      }
       if (_lbEraseDrag) {
         // Walk every element under the pointer (elementsFromPoint, not
         // elementFromPoint) so a stroke buried beneath a hovered overlay
@@ -12690,7 +12788,11 @@
     var _lastLbTap = 0;
     lightboxEl.addEventListener("pointerup", (event) => {
       if (_lbBoxSel) { endLbBoxSelect(event); event.preventDefault(); return; }
-      if (_lbAnnoActive) { endAnnotationStroke(event); return; }
+      if (_lbAnnoActive) {
+        if (_lbAnnoActive.tagName && _lbAnnoActive.tagName.toLowerCase() === "rect") endAnnotationRect(event);
+        else endAnnotationStroke(event);
+        return;
+      }
       if (_lbEraseDrag) {
         const erased = _lbEraseDrag.erased;
         _lbEraseDrag = null;
@@ -12758,6 +12860,7 @@
       else if (action === "announdo") undoAnnotation();
       else if (action === "annoredo") redoAnnotation();
       else if (action === "annoerase") toggleEraserMode();
+      else if (action === "annorect") toggleRectMode();
       else if (action === "annopostit") addNewPostit();
       else if (action === "annoclear") clearAnnotations();
       else if (action === "annosave") saveLightboxImage();
