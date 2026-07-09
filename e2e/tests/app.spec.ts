@@ -98,6 +98,11 @@ test.describe('mdviewer web app', () => {
       await page.mouse.move(cx + 60, cy - 10, { steps: 10 });
       await page.mouse.up();
       await expect(page.locator('#lightboxStage svg.lb-anno-overlay .lb-annotation')).toHaveCount(1);
+      // The overlay must be transparent so it never hides the image beneath
+      // (regression guard: it otherwise inherits .lightbox-stage's white bg).
+      const overlayBg = await page.locator('#lightboxStage svg.lb-anno-overlay')
+        .evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(['rgba(0, 0, 0, 0)', 'transparent']).toContain(overlayBg);
       // Saving the annotated image composites the strokes into a PNG download.
       const [download] = await Promise.all([
         page.waitForEvent('download'),

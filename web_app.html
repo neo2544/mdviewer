@@ -11722,6 +11722,12 @@
         overlay.style.left = "0";
         overlay.style.top = "0";
         overlay.style.overflow = "visible";
+        // Direct children of .lightbox-stage get a white card background +
+        // shadow; the overlay MUST stay transparent or it hides the image
+        // beneath it (would show a blank white canvas with only the strokes).
+        overlay.style.background = "transparent";
+        overlay.style.boxShadow = "none";
+        overlay.style.borderRadius = "0";
         // The overlay never intercepts pointer events (so pan keeps working);
         // individual strokes opt back in (pointer-events: stroke) when the
         // eraser is active, exactly like diagram annotations.
