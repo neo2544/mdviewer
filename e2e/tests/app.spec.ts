@@ -75,5 +75,13 @@ test.describe('mdviewer web app', () => {
     // The zoom popup we tuned (wheel-zoom step) should appear.
     await expect(page.locator('#lightbox')).toBeVisible();
     await expect(page.locator('#lightboxScale')).toBeVisible();
+    // Native image drag-and-drop must be suppressed so a drag pans only
+    // (no translucent "ghost" image). dispatchEvent returns false when a
+    // listener called preventDefault.
+    const dragPrevented = await page.locator('#lightboxStage > *').first().evaluate((el) => {
+      const ev = new Event('dragstart', { bubbles: true, cancelable: true });
+      return !el.dispatchEvent(ev);
+    });
+    expect(dragPrevented).toBe(true);
   });
 });

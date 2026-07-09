@@ -2070,6 +2070,10 @@
       max-width: none !important;
       max-height: none !important;
       border: 0;
+      /* Belt-and-suspenders with the JS dragstart guard: stop WebKit/Chromium
+         from starting a native image drag so a drag pans instead. */
+      -webkit-user-drag: none;
+      user-drag: none;
     }
     .lightbox-stage .mermaid {
       overflow: visible !important;
@@ -12406,6 +12410,16 @@
     // does a box selection (copyable) instead, so we never want the browser's
     // glyph highlighting to kick in here.
     lightboxEl.addEventListener("selectstart", (event) => {
+      if (event.target && event.target.closest && event.target.closest(".lightbox-toolbar")) return;
+      event.preventDefault();
+    });
+
+    // dragstart guard — an <img> (or SVG) inside the lightbox otherwise
+    // triggers the browser's native image drag-and-drop (a translucent
+    // "ghost" of the image that follows the cursor), which fights our
+    // pointer-based pan. Suppress it everywhere in the lightbox except the
+    // toolbar, so a drag pans the content and nothing else.
+    lightboxEl.addEventListener("dragstart", (event) => {
       if (event.target && event.target.closest && event.target.closest(".lightbox-toolbar")) return;
       event.preventDefault();
     });
