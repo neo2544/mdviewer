@@ -3750,6 +3750,7 @@
     </div>
     <div class="lightbox-toolbar lightbox-toolbar-bottom">
       <button type="button" data-action="annodraw" id="lbAnnoDrawBtn" title="Toggle draw mode (left-drag draws)">✎</button>
+      <button type="button" class="draw-only" data-action="annorect" id="lbAnnoRectBtn" title="Rectangle — left-drag to draw a box" hidden>▭</button>
       <button type="button" class="draw-only" data-action="announdo" id="lbAnnoUndoBtn" title="Undo last action (draw/erase/clear)" hidden>↶</button>
       <button type="button" class="draw-only" data-action="annoredo" id="lbAnnoRedoBtn" title="Redo last undone action" hidden>↷</button>
       <label class="draw-only lb-anno-color-label" id="lbAnnoColorLabel" title="Stroke color" hidden>
@@ -3759,7 +3760,6 @@
         <input type="range" id="lbAnnoOpacity" min="0.1" max="1" step="0.05" value="0.5" />
       </label>
       <button type="button" class="draw-only" data-action="annopostit" id="lbAnnoPostitBtn" title="Add a post-it note (each click drops one; drag to move, grip to resize, × to delete)" hidden>📝</button>
-      <button type="button" class="draw-only" data-action="annorect" id="lbAnnoRectBtn" title="Rectangle — left-drag to draw a box" hidden>▭</button>
       <button type="button" class="draw-only" data-action="annoerase" id="lbAnnoEraseBtn" title="Eraser — click a stroke / post-it to delete" hidden>🩹</button>
       <button type="button" class="draw-only" data-action="annoclear" title="Clear all annotations (undoable)" hidden>🧹</button>
     </div>
