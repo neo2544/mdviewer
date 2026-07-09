@@ -60,7 +60,7 @@ func runMenuBarApp(startDir, appRoot, addr string) error {
 	if err != nil {
 		return fmt.Errorf("cannot bind %s: %w (another mdviewer instance is probably running)", addr, err)
 	}
-	httpSrv := &http.Server{Handler: server.routes()}
+	httpSrv := &http.Server{Handler: server.handler()}
 
 	// Run the HTTP server in the background once we own the port.
 	go func() {

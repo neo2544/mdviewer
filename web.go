@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -103,6 +104,112 @@ func (s *webServer) routes() *http.ServeMux {
 	return mux
 }
 
+// ────────────────────────────────────────────────────────────────
+// Security: local-only hardening
+// ────────────────────────────────────────────────────────────────
+//
+// The viewer binds to 127.0.0.1, but a local HTTP endpoint is still
+// reachable by two vectors that don't need network exposure:
+//
+//   1. DNS rebinding — an attacker page whose domain re-resolves to
+//      127.0.0.1 arrives with a spoofed Host header (evil.example.com).
+//   2. CSRF — another origin open in the user's browser issuing requests
+//      to http://127.0.0.1:8421/... .
+//
+// handler() wraps the API mux with two guards that close both WITHOUT
+// restricting normal use:
+//   - Host must name a loopback host we recognise (blocks rebinding).
+//   - State-changing requests (POST/PUT/PATCH/DELETE) must not carry a
+//     positive cross-origin signal (blocks browser CSRF).
+//
+// It deliberately does NOT confine file paths to the root: browsing and
+// opening files anywhere on the filesystem (Finder "open .md", Jump to
+// path, favorites outside root) is a core feature of this tool, so the
+// same-origin browser session keeps working exactly as before.
+
+var allowedLoopbackHosts = map[string]struct{}{
+	"127.0.0.1": {},
+	"localhost": {},
+	"::1":       {},
+}
+
+// hostAllowed reports whether a Host (or URL) host names a loopback host
+// we recognise. The port is ignored; only the hostname is checked.
+func hostAllowed(hostHeader string) bool {
+	if hostHeader == "" {
+		return false
+	}
+	host := hostHeader
+	if h, _, err := net.SplitHostPort(hostHeader); err == nil {
+		host = h
+	}
+	// Strip any leftover IPv6 brackets (e.g. a bracketed host with no port).
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	_, ok := allowedLoopbackHosts[host]
+	return ok
+}
+
+// originHostAllowed parses an Origin/Referer URL and reports whether its
+// host is one of our loopback hosts.
+func originHostAllowed(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return hostAllowed(u.Host)
+}
+
+// crossOriginBlocked returns true only when there is positive evidence a
+// request came from a different origin. Requests carrying no origin signal
+// at all (native clients, the OS "open" flow, older tooling) are allowed so
+// nothing that works today breaks.
+func crossOriginBlocked(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
+		return false // modern browser, same origin (or user-initiated)
+	case "cross-site", "same-site":
+		return true // modern browser, different origin
+	}
+	// Older browsers without Sec-Fetch-Site: fall back to Origin/Referer.
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return !originHostAllowed(origin)
+	}
+	if referer := r.Header.Get("Referer"); referer != "" {
+		return !originHostAllowed(referer)
+	}
+	return false
+}
+
+func isStateChangingMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// withSecurity wraps next with the loopback Host check and the CSRF guard.
+func (s *webServer) withSecurity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host) {
+			http.Error(w, "forbidden: unexpected Host header", http.StatusForbidden)
+			return
+		}
+		if isStateChangingMethod(r.Method) && crossOriginBlocked(r) {
+			http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handler returns the fully-wrapped HTTP handler (security guards + routes).
+// Both the standalone web server and the menu-bar app serve through this.
+func (s *webServer) handler() http.Handler {
+	return s.withSecurity(s.routes())
+}
+
 // handleIcon serves the same M↓ template image embedded for the systray.
 // Browsers use it as the tab favicon (/favicon.ico → png ok in modern UAs)
 // and the apple-touch-icon. Black-with-alpha PNG; visibility in dark tabs
@@ -170,7 +277,7 @@ func runWebServer(startDir, appRoot, addr string) error {
 		appRoot:  appRoot,
 	}
 	fmt.Printf("mdviewer web preview running at http://%s\n", addr)
-	return http.ListenAndServe(addr, server.routes())
+	return http.ListenAndServe(addr, server.handler())
 }
 
 func (s *webServer) favoritesPath() string {
