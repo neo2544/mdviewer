@@ -11550,6 +11550,13 @@
       } else {
         el.style.width = w + "px";
         el.style.height = h + "px";
+        // Keep the image annotation overlay (if any) locked onto the image
+        // box so strokes pan/zoom together with the picture.
+        const overlay = lightboxStageEl.querySelector("svg.lb-anno-overlay");
+        if (overlay) {
+          overlay.style.width = w + "px";
+          overlay.style.height = h + "px";
+        }
       }
     }
 
@@ -11684,14 +11691,47 @@
       });
     }
 
-    // Annotations: polylines added DIRECTLY to the diagram's SVG so they
-    // share its user-space coord system (no padding/overlay alignment
-    // pitfalls). For raster images we skip drawing — no SVG to draw into.
+    // Annotations are SVG polylines. For a diagram we draw straight into
+    // its <svg> (shared user space). A raster image has no SVG, so we lazily
+    // add a transparent SVG overlay locked onto the image's box (see
+    // ensureImageAnnoOverlay) and draw into that instead.
     function getAnnotationSVG() {
       const child = lightboxStageEl.firstElementChild;
       const target = findScalableTarget(child);
-      if (!target || target.kind !== "svg") return null;
-      return target.el;
+      if (!target) return null;
+      if (target.kind === "svg") return target.el;
+      if (target.kind === "img") return ensureImageAnnoOverlay(target.el);
+      return null;
+    }
+
+    // ensureImageAnnoOverlay returns (creating on first use) a transparent
+    // SVG that exactly overlaps the lightbox image so raster images can be
+    // annotated too. Its viewBox is the image's natural size (strokes are
+    // stored in image-pixel coords) and its rendered size tracks the image's
+    // current zoomed box — applyLightboxScale keeps the two in sync on zoom.
+    function ensureImageAnnoOverlay(img) {
+      const natW = parseFloat(img.dataset.lbNaturalW) || img.naturalWidth || img.offsetWidth || 0;
+      const natH = parseFloat(img.dataset.lbNaturalH) || img.naturalHeight || img.offsetHeight || 0;
+      if (!natW || !natH) return null;
+      let overlay = lightboxStageEl.querySelector("svg.lb-anno-overlay");
+      if (!overlay) {
+        const ns = "http://www.w3.org/2000/svg";
+        overlay = document.createElementNS(ns, "svg");
+        overlay.setAttribute("class", "lb-anno-overlay");
+        overlay.style.position = "absolute";
+        overlay.style.left = "0";
+        overlay.style.top = "0";
+        overlay.style.overflow = "visible";
+        // The overlay never intercepts pointer events (so pan keeps working);
+        // individual strokes opt back in (pointer-events: stroke) when the
+        // eraser is active, exactly like diagram annotations.
+        overlay.style.pointerEvents = "none";
+        lightboxStageEl.appendChild(overlay);
+      }
+      overlay.setAttribute("viewBox", "0 0 " + natW + " " + natH);
+      overlay.style.width = (natW * lbState.scale) + "px";
+      overlay.style.height = (natH * lbState.scale) + "px";
+      return overlay;
     }
 
     // screenToSVGUserSpace converts a viewport click into the SVG's own
@@ -12116,13 +12156,55 @@
       }
     }
 
+    // compositeImageAnnotationsToBlob bakes a raster image plus its drawn
+    // annotation overlay into a single PNG blob (used by Save/Copy when an
+    // image has been annotated). The image is same-origin (/api/raw) so the
+    // canvas stays untainted.
+    function compositeImageAnnotationsToBlob(img, overlay, onBlob) {
+      const natW = parseFloat(img.dataset.lbNaturalW) || img.naturalWidth || img.width || 0;
+      const natH = parseFloat(img.dataset.lbNaturalH) || img.naturalHeight || img.height || 0;
+      if (!natW || !natH) { onBlob(null); return; }
+      const scale = Math.max(2, window.devicePixelRatio || 1);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(natW * scale);
+      canvas.height = Math.ceil(natH * scale);
+      const ctx = canvas.getContext("2d");
+      try {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      } catch (e) { onBlob(null); return; }
+      const clone = overlay.cloneNode(true);
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("width", String(natW));
+      clone.setAttribute("height", String(natH));
+      clone.setAttribute("viewBox", "0 0 " + natW + " " + natH);
+      let dataUrl;
+      try {
+        const xml = new XMLSerializer().serializeToString(clone);
+        dataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
+      } catch (e) { onBlob(null); return; }
+      const ov = new Image();
+      ov.onload = () => {
+        ctx.drawImage(ov, 0, 0, canvas.width, canvas.height);
+        try { canvas.toBlob((b) => onBlob(b, "image/png"), "image/png"); }
+        catch (e) { onBlob(null); }
+      };
+      ov.onerror = () => onBlob(null);
+      ov.src = dataUrl;
+    }
+
     function renderLightboxToBlob(onBlob) {
       // Shared SVG→PNG-blob pipeline used by both Save (download) and
       // Copy (clipboard). Callback receives (blob, mime).
       const child = lightboxStageEl.firstElementChild;
       if (!child) { onBlob(null); return; }
       if (child.tagName === "IMG") {
-        // Just hand back the raw image — fetch it from cache as a blob.
+        const overlay = lightboxStageEl.querySelector("svg.lb-anno-overlay");
+        if (overlay && overlay.querySelector(".lb-annotation")) {
+          // Annotated image → composite the picture + strokes onto a canvas.
+          compositeImageAnnotationsToBlob(child, overlay, onBlob);
+          return;
+        }
+        // Plain image → hand back the raw bytes from cache.
         fetch(child.src).then((r) => r.blob()).then((b) => onBlob(b, b.type || "image/png"))
           .catch(() => onBlob(null));
         return;
@@ -12231,17 +12313,31 @@
         return;
       }
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      // For raw <img> content download the source bytes directly — no
-      // canvas round-trip needed (and avoids the IMG → fetch → blob
-      // hop that was silently failing in the previous refactor).
+      // Plain <img>: download the source bytes directly. If it has been
+      // annotated, composite the strokes into the saved PNG instead.
       if (child.tagName === "IMG") {
-        const a = document.createElement("a");
-        a.href = child.src;
-        a.download = "image-" + stamp + ".png";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showToast(t("toastImgSaved"), { kind: "ok", icon: "💾" });
+        const overlay = lightboxStageEl.querySelector("svg.lb-anno-overlay");
+        if (!overlay || !overlay.querySelector(".lb-annotation")) {
+          const a = document.createElement("a");
+          a.href = child.src;
+          a.download = "image-" + stamp + ".png";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast(t("toastImgSaved"), { kind: "ok", icon: "💾" });
+          return;
+        }
+        renderLightboxToBlob((blob) => {
+          if (!blob) { showToast(t("toastNoSaveImg"), { kind: "err", icon: "⚠️" }); return; }
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "image-" + stamp + ".png";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          showToast(t("toastImgSaved"), { kind: "ok", icon: "💾" });
+        });
         return;
       }
       renderLightboxToBlob((blob) => {

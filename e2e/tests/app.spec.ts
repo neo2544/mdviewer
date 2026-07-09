@@ -83,5 +83,27 @@ test.describe('mdviewer web app', () => {
       return !el.dispatchEvent(ev);
     });
     expect(dragPrevented).toBe(true);
+
+    // Image annotation: entering draw mode and dragging must create a stroke
+    // in the image's SVG overlay (raster images previously no-op'd on draw).
+    if (await page.locator('#lightboxStage img').count() > 0) {
+      await page.locator('#lbAnnoDrawBtn').click();
+      const box = await page.locator('#lightboxStage').boundingBox();
+      expect(box).not.toBeNull();
+      const cx = box!.x + box!.width / 2;
+      const cy = box!.y + box!.height / 2;
+      await page.mouse.move(cx - 40, cy - 20);
+      await page.mouse.down();
+      await page.mouse.move(cx + 30, cy + 15, { steps: 10 });
+      await page.mouse.move(cx + 60, cy - 10, { steps: 10 });
+      await page.mouse.up();
+      await expect(page.locator('#lightboxStage svg.lb-anno-overlay .lb-annotation')).toHaveCount(1);
+      // Saving the annotated image composites the strokes into a PNG download.
+      const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        page.locator('#lbAnnoSaveBtn').click(),
+      ]);
+      expect(download.suggestedFilename()).toMatch(/image-.*\.png/);
+    }
   });
 });
