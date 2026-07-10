@@ -11334,6 +11334,18 @@
         if (state.paletteOpen) closePalette(); else openPalette();
         return;
       }
+      // Cmd/Ctrl+F → focus our in-app search (Search tab) instead of the
+      // browser's native find bar. We always preventDefault so the browser
+      // find never pops up; while a full-screen overlay is open we simply
+      // suppress it without stealing focus behind the overlay.
+      if ((event.metaKey || event.ctrlKey) && lowerKey === "f" && !event.shiftKey) {
+        event.preventDefault();
+        if (!lightboxEl.hidden || !mermaidLabModalEl.hidden || !folderBrowseModalEl.hidden) return;
+        setPanelTab("search");
+        const inp = document.getElementById("searchPanelInput");
+        if (inp) setTimeout(function () { try { inp.focus(); inp.select(); } catch (e) {} }, 0);
+        return;
+      }
       // Esc closes the Mermaid Playground modal.
       if (event.key === "Escape" && !mermaidLabModalEl.hidden) {
         closeMermaidLab();

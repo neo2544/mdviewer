@@ -62,6 +62,13 @@ test.describe('mdviewer web app', () => {
     await expect(page.locator('#fbResults')).toContainText('README', { timeout: 10_000 });
   });
 
+  test('Cmd/Ctrl+F focuses the in-app search input (not the browser find bar)', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#appShell')).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+f');
+    await expect(page.locator('#searchPanelInput')).toBeFocused();
+  });
+
   test('lightbox opens for a zoomable image/diagram (best-effort)', async ({ page }) => {
     await page.goto('/');
     await fileRow(page, 'README.md').click();
