@@ -150,6 +150,30 @@ cat > "$TMP_APP/Contents/Info.plist" <<PLIST
                 <string>net.daringfireball.markdown</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SQL Script</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.jk.mdviewer.sql</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>draw.io Diagram</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.jgraph.drawio.diagram</string>
+            </array>
+        </dict>
     </array>
     <key>UTExportedTypeDeclarations</key>
     <array>
@@ -176,6 +200,56 @@ cat > "$TMP_APP/Contents/Info.plist" <<PLIST
                 <array>
                     <string>text/markdown</string>
                     <string>text/x-markdown</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.jk.mdviewer.sql</string>
+            <key>UTTypeDescription</key>
+            <string>SQL Script</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.source-code</string>
+            </array>
+            <key>UTTypeIconFile</key>
+            <string>AppIcon</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>sql</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>application/sql</string>
+                    <string>text/x-sql</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.jgraph.drawio.diagram</string>
+            <key>UTTypeDescription</key>
+            <string>draw.io Diagram</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.xml</string>
+                <string>public.content</string>
+            </array>
+            <key>UTTypeIconFile</key>
+            <string>AppIcon</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>drawio</string>
+                    <string>dio</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>application/vnd.jgraph.mxfile</string>
                 </array>
             </dict>
         </dict>
@@ -223,6 +297,49 @@ if [[ -f "$README_PATH" ]]; then
         echo "   If 'Open With → MD Viewer' is missing, run this once, then re-install:"
         echo "     $LSREGISTER -kill -r -domain local -domain user"
     fi
+fi
+
+# probe_uti <extension> <expected-uti> <file-contents> — echoes the UTI macOS
+# reports for a freshly written probe file. Spotlight caches the old dyn.* type
+# per extension, so force a re-import (-r) and retry a few times before giving
+# up; without this the check reports a stale dyn.* even though the declaration
+# registered fine.
+probe_uti() {
+    local ext="$1" body="$3" dir uti
+    dir="$(mktemp -d)"
+    printf '%s\n' "$body" > "$dir/mdviewer-uti-probe.$ext"
+    for _ in 1 2 3; do
+        mdimport -r "$dir/mdviewer-uti-probe.$ext" >/dev/null 2>&1 || true
+        mdimport "$dir/mdviewer-uti-probe.$ext" >/dev/null 2>&1 || true
+        sleep 1
+        uti="$(mdls -name kMDItemContentType -raw "$dir/mdviewer-uti-probe.$ext" 2>/dev/null || echo '')"
+        [[ "$uti" == "$2" ]] && break
+    done
+    rm -rf "$dir"
+    printf '%s' "$uti"
+}
+
+# macOS ships no system UTI for .sql or .drawio (both show up as a dyn.* type),
+# so the bundle declares them itself; these checks confirm Launch Services
+# actually picked the declarations up.
+sql_uti="$(probe_uti sql com.jk.mdviewer.sql 'SELECT 1;')"
+if [[ "$sql_uti" == "com.jk.mdviewer.sql" ]]; then
+    echo ">> .sql UTI registered: $sql_uti  ✓"
+else
+    echo ">> .sql UTI is '$sql_uti' — Launch Services DB may be cached."
+    echo "   If double-clicking a .sql file does not open MD Viewer, run once, then re-install:"
+    echo "     $LSREGISTER -kill -r -domain local -domain user"
+fi
+
+# .drawio uses com.jgraph.drawio.diagram (draw.io's own identifier) at Alternate
+# rank, so installing draw.io Desktop later still wins the default binding.
+dio_uti="$(probe_uti drawio com.jgraph.drawio.diagram '<mxfile><diagram id="d1" name="P1"/></mxfile>')"
+if [[ "$dio_uti" == "com.jgraph.drawio.diagram" ]]; then
+    echo ">> .drawio UTI registered: $dio_uti  ✓"
+else
+    echo ">> .drawio UTI is '$dio_uti' — Launch Services DB may be cached."
+    echo "   If double-clicking a .drawio file does not open MD Viewer, run once, then re-install:"
+    echo "     $LSREGISTER -kill -r -domain local -domain user"
 fi
 
 # Finder caches the Open-With submenu per session; restart it so the new
